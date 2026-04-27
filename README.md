@@ -30,7 +30,6 @@
     <img src=".github/screenshot.png" alt="OpenTales — IDE Screenshot" width="100%" />
   </a>
 </p>
----
 
 ## Why OpenTales?
 
