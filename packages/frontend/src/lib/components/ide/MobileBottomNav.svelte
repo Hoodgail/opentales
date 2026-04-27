@@ -37,7 +37,7 @@
 </script>
 
 <nav
-  class="flex h-14 shrink-0 items-stretch gap-0.5 overflow-x-auto border-t border-border bg-sidebar px-1 [scrollbar-width:none] [-webkit-overflow-scrolling:touch]"
+  class="flex h-[var(--app-bottom-nav-height)] shrink-0 items-stretch gap-2 overflow-x-auto border-t border-border bg-sidebar px-2 [scrollbar-width:none] [-webkit-overflow-scrolling:touch]"
   aria-label="Sections"
 >
   {#each items as item (item.id)}
@@ -46,7 +46,7 @@
       type="button"
       onclick={() => activate(item.id)}
       class={cn(
-        'flex min-w-[64px] flex-col items-center justify-center gap-0.5 rounded-md px-2 text-[10px] font-medium transition-colors',
+        'flex min-w-16 flex-col items-center justify-center gap-0.5 rounded-xl px-2 text-[10px] font-medium transition-colors',
         active
           ? 'text-foreground bg-muted/50'
           : 'text-muted-foreground hover:text-foreground'

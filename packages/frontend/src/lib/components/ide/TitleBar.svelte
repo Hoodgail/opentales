@@ -82,7 +82,7 @@
 </script>
 
 <header
-  class="relative flex h-9 shrink-0 items-center justify-between border-b border-border bg-sidebar text-xs select-none"
+  class="relative flex h-[var(--app-titlebar-height)] shrink-0 items-center justify-between border-b border-border bg-sidebar text-xs select-none"
   style="-webkit-app-region: drag;"
 >
   <!-- Left: hamburger (mobile) + brand + project switcher -->
@@ -92,7 +92,7 @@
         type="button"
         onclick={() => ui.toggle('side')}
         aria-label={ui.drawer === 'side' ? 'Close menu' : 'Open menu'}
-        class="flex size-9 items-center justify-center rounded-md text-foreground/80 hover:bg-muted hover:text-foreground"
+        class="tap-target flex size-11 items-center justify-center rounded-md text-foreground/80 hover:bg-muted hover:text-foreground"
       >
         <Menu class="size-4" />
       </button>
@@ -106,7 +106,7 @@
       type="button"
       onclick={toggleMenu}
       disabled={!manuscript.authenticated}
-      class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-foreground/80 transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+      class={`inline-flex items-center gap-1.5 rounded px-2 py-1 text-foreground/80 transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 ${viewport.mobile ? 'min-h-11' : ''}`}
     >
       <span class="max-w-[8rem] truncate font-medium sm:max-w-[18rem]">
         {activeProject?.title ?? manuscript.structure.title ?? 'No project'}
@@ -134,7 +134,7 @@
         type="button"
         onclick={() => ui.toggle('inspector')}
         aria-label={ui.drawer === 'inspector' ? 'Close inspector' : 'Open inspector'}
-        class="flex size-9 items-center justify-center rounded-md hover:bg-muted hover:text-foreground"
+        class="tap-target flex size-11 items-center justify-center rounded-md hover:bg-muted hover:text-foreground"
       >
         <PanelRight class="size-4" />
       </button>
@@ -181,7 +181,7 @@
       style="-webkit-app-region: no-drag;"
     ></button>
     <div
-      class="absolute left-2 right-2 top-9 z-40 max-w-[18rem] overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-lg sm:left-32 sm:right-auto sm:w-72 sm:max-w-none"
+      class="absolute left-2 right-2 top-[var(--app-titlebar-height)] z-40 max-w-[18rem] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg sm:left-32 sm:right-auto sm:w-72 sm:max-w-none sm:rounded-md"
       style="-webkit-app-region: no-drag;"
     >
       <div class="max-h-72 overflow-y-auto py-1">
@@ -189,7 +189,7 @@
           <button
             type="button"
             onclick={() => selectProject(project.id)}
-            class="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-muted"
+            class="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-muted"
             class:bg-muted={project.id === manuscript.projectId}
           >
             <span class="truncate text-foreground">{project.title}</span>
@@ -214,13 +214,13 @@
             <input
               bind:value={newProjectTitle}
               placeholder="Project title"
-              class="flex-1 rounded border border-border bg-background px-2 py-1 text-xs text-foreground outline-none focus:border-accent/60"
-            />
-            <button
+            class="flex-1 rounded border border-border bg-background px-2 py-1 text-xs text-foreground outline-none focus:border-accent/60"
+          />
+          <button
               type="submit"
               disabled={!newProjectTitle.trim()}
-              class="rounded border border-border bg-background px-2 py-1 text-[11px] font-medium text-foreground hover:border-accent/60 disabled:opacity-50"
-            >
+            class="rounded border border-border bg-background px-2 py-1 text-[11px] font-medium text-foreground hover:border-accent/60 disabled:opacity-50"
+          >
               Create
             </button>
           </form>
@@ -228,7 +228,7 @@
           <button
             type="button"
             onclick={() => (creatingProject = true)}
-            class="inline-flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            class="inline-flex w-full items-center gap-2 rounded px-2 py-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <FolderPlus class="size-3.5" />
             New project…

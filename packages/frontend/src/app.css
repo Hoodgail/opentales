@@ -14,6 +14,10 @@
 */
 
 :root {
+  --app-titlebar-height: 36px;
+  --app-bottom-nav-height: 56px;
+  --app-edge: 16px;
+
   --background: oklch(0.18 0 0);
   --foreground: oklch(0.93 0 0);
 
@@ -163,26 +167,50 @@
   html,
   body {
     height: 100%;
+    min-height: 100%;
+    overflow: hidden;
   }
   body {
     @apply bg-background text-foreground;
-    /* Respect iOS / Android device safe areas in standalone mode. */
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
-    padding-left: env(safe-area-inset-left);
-    padding-right: env(safe-area-inset-right);
-    /* Disable iOS double-tap zoom inside the IDE — text input zooming on
-       focus is mitigated by using base font-size: 16px on inputs. */
+    overscroll-behavior: none;
+    touch-action: manipulation;
     -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
   }
-  /* Prevent iOS Safari from auto-zooming when focusing form inputs by
-     ensuring base inputs are at least 16px on mobile. Specific small
-     text inputs (e.g. inline filters) can override this locally. */
+  button,
+  [role='button'],
+  a,
+  input,
+  select,
+  textarea {
+    touch-action: manipulation;
+  }
+  .pwa-shell {
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    padding-top: env(safe-area-inset-top);
+    padding-right: env(safe-area-inset-right);
+    padding-left: env(safe-area-inset-left);
+    background: var(--background);
+  }
+  .tap-target {
+    min-width: 44px;
+    min-height: 44px;
+  }
   @media (max-width: 767px) {
+    :root {
+      --app-titlebar-height: 44px;
+      --app-bottom-nav-height: 64px;
+    }
+    .pwa-shell {
+      padding-bottom: env(safe-area-inset-bottom);
+    }
     input:not([type='checkbox']):not([type='radio']):not([type='range']),
     select,
     textarea {
       font-size: 16px;
+      min-height: 44px;
     }
   }
   /* Hide scrollbars by default in webkit, but keep functionality */

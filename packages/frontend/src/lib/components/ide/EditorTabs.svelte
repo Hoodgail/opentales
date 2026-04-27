@@ -1,6 +1,7 @@
 <script lang="ts">
   import { BookOpen, Compass, FileText, GitPullRequest, MapPin, Users, X } from 'lucide-svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
+  import { viewport } from '$lib/stores/viewport.svelte';
   import type { OpenTab } from '$lib/data/manuscript-types';
   import { cn } from '$lib/utils';
 
@@ -21,7 +22,10 @@
 
 {#if manuscript.tabs.length > 0}
   <div
-    class="flex h-9 shrink-0 items-stretch overflow-x-auto border-b border-border bg-sidebar"
+    class={cn(
+      'flex shrink-0 items-stretch overflow-x-auto border-b border-border bg-sidebar',
+      viewport.mobile ? 'h-11' : 'h-9'
+    )}
   >
     {#each manuscript.tabs as t (t.id)}
       {@const Icon = tabIcon[t.type]}

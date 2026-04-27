@@ -1,10 +1,13 @@
 {
+  "id": "/",
   "name": "OpenTales — Novel Writing IDE",
   "short_name": "OpenTales",
   "description": "A desktop-class novel writing IDE for managing characters, settings, plot, and chapters.",
+  "lang": "en",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "any",
   "background_color": "#1a1a1a",
   "theme_color": "#1a1a1a",

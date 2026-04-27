@@ -81,7 +81,7 @@
 <CommandPalette />
 <ShortcutsOverlay />
 
-<div class="flex h-screen w-screen flex-col overflow-hidden bg-background">
+<div class="pwa-shell flex flex-col overflow-hidden bg-background">
   {#if manuscript.initializing}
     <div class="flex h-full items-center justify-center">
       <div class="rounded-md border border-border bg-card px-5 py-4 text-sm text-muted-foreground">
@@ -239,12 +239,14 @@
             onclick={() => ui.close()}
             aria-label="Close panel"
             tabindex="-1"
-            class="fixed inset-0 top-9 z-30 cursor-default bg-black/40 backdrop-blur-[1px]"
+            class="fixed inset-x-0 z-30 cursor-default bg-black/40 backdrop-blur-[1px]"
+            style="top: calc(env(safe-area-inset-top) + var(--app-titlebar-height)); bottom: calc(env(safe-area-inset-bottom) + var(--app-bottom-nav-height));"
           ></button>
         {/if}
 
         <aside
-          class="fixed bottom-14 left-0 top-9 z-40 flex w-[88vw] max-w-[20rem] flex-col border-r border-border bg-sidebar shadow-2xl transition-transform duration-200 ease-out"
+          class="fixed left-0 z-40 flex w-[88vw] max-w-[20rem] flex-col border-r border-border bg-sidebar shadow-2xl transition-transform duration-200 ease-out"
+          style="top: calc(env(safe-area-inset-top) + var(--app-titlebar-height)); bottom: calc(env(safe-area-inset-bottom) + var(--app-bottom-nav-height)); padding-left: env(safe-area-inset-left);"
           class:-translate-x-full={ui.drawer !== 'side'}
           aria-hidden={ui.drawer !== 'side'}
         >
@@ -252,7 +254,8 @@
         </aside>
 
         <aside
-          class="fixed bottom-14 right-0 top-9 z-40 flex w-[88vw] max-w-[22rem] flex-col border-l border-border bg-sidebar shadow-2xl transition-transform duration-200 ease-out"
+          class="fixed right-0 z-40 flex w-[88vw] max-w-[22rem] flex-col border-l border-border bg-sidebar shadow-2xl transition-transform duration-200 ease-out"
+          style="top: calc(env(safe-area-inset-top) + var(--app-titlebar-height)); bottom: calc(env(safe-area-inset-bottom) + var(--app-bottom-nav-height)); padding-right: env(safe-area-inset-right);"
           class:translate-x-full={ui.drawer !== 'inspector'}
           aria-hidden={ui.drawer !== 'inspector'}
         >

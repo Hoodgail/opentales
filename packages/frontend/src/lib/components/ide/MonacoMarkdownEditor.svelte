@@ -3,6 +3,7 @@
   import { browser } from '$app/environment';
   import { preferences } from '$lib/stores/preferences.svelte';
   import { editorTheme, editorThemes, type EditorThemeId } from '$lib/stores/editorTheme.svelte';
+  import { viewport } from '$lib/stores/viewport.svelte';
 
   type Monaco = typeof import('monaco-editor');
   type Editor = import('monaco-editor').editor.IStandaloneCodeEditor;
@@ -173,18 +174,26 @@
         language,
         theme: monacoThemeFor(editorTheme.current),
         fontFamily: 'var(--font-mono), ui-monospace, SFMono-Regular, monospace',
-        fontSize: 14,
+        fontSize: viewport.mobile ? 16 : 14,
         lineHeight: 1.7,
-        letterSpacing: 0.2,
+        letterSpacing: 0,
         wordWrap: 'on',
         wrappingStrategy: 'advanced',
         wrappingIndent: 'same',
-        minimap: { enabled: preferences.showMinimap, renderCharacters: false, maxColumn: 80, scale: 1 },
+        minimap: {
+          enabled: preferences.showMinimap && !viewport.mobile,
+          renderCharacters: false,
+          maxColumn: 80,
+          scale: 1
+        },
         scrollBeyondLastLine: true,
-        scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
+        scrollbar: {
+          verticalScrollbarSize: viewport.mobile ? 6 : 10,
+          horizontalScrollbarSize: viewport.mobile ? 6 : 10
+        },
         renderLineHighlight: 'line',
         renderWhitespace: 'none',
-        padding: { top: 24, bottom: 80 },
+        padding: { top: viewport.mobile ? 20 : 24, bottom: viewport.mobile ? 120 : 80 },
         smoothScrolling: true,
         cursorBlinking: 'smooth',
         cursorSmoothCaretAnimation: 'on',
@@ -192,9 +201,9 @@
         guides: { indentation: false, bracketPairs: false },
         folding: true,
         glyphMargin: false,
-        lineNumbers: 'on',
-        lineNumbersMinChars: 3,
-        lineDecorationsWidth: 8,
+        lineNumbers: viewport.mobile ? 'off' : 'on',
+        lineNumbersMinChars: viewport.mobile ? 0 : 3,
+        lineDecorationsWidth: viewport.mobile ? 0 : 8,
         contextmenu: true,
         quickSuggestions: false,
         suggestOnTriggerCharacters: false,
@@ -239,12 +248,21 @@
   $effect(() => {
     if (!editor) return;
     editor.updateOptions({
+      fontSize: viewport.mobile ? 16 : 14,
+      lineNumbers: viewport.mobile ? 'off' : 'on',
+      lineNumbersMinChars: viewport.mobile ? 0 : 3,
+      lineDecorationsWidth: viewport.mobile ? 0 : 8,
       minimap: {
-        enabled: preferences.showMinimap,
+        enabled: preferences.showMinimap && !viewport.mobile,
         renderCharacters: false,
         maxColumn: 80,
         scale: 1
       },
+      scrollbar: {
+        verticalScrollbarSize: viewport.mobile ? 6 : 10,
+        horizontalScrollbarSize: viewport.mobile ? 6 : 10
+      },
+      padding: { top: viewport.mobile ? 20 : 24, bottom: viewport.mobile ? 120 : 80 },
       cursorSurroundingLines: preferences.typewriterMode ? 999 : 0
     });
     updateFocusDecorations();

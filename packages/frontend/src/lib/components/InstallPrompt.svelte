@@ -69,7 +69,8 @@
 
 {#if visible}
   <div
-    class="fixed inset-x-3 bottom-3 z-50 flex items-center gap-3 rounded-md border border-border bg-card/95 px-3 py-2.5 text-sm shadow-lg backdrop-blur sm:left-auto sm:right-3 sm:max-w-sm"
+    class="fixed inset-x-4 z-50 flex items-center gap-3 rounded-xl border border-border bg-card/95 px-3 py-3 text-sm shadow-lg backdrop-blur sm:left-auto sm:right-3 sm:max-w-sm sm:rounded-md"
+    style="bottom: calc(env(safe-area-inset-bottom) + 12px);"
     role="dialog"
     aria-label="Install OpenTales"
   >
@@ -82,7 +83,7 @@
       type="button"
       onclick={install}
       disabled={installing}
-      class="shrink-0 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-accent-foreground disabled:opacity-60"
+      class="tap-target shrink-0 rounded-md bg-accent px-3 py-1 text-xs font-medium text-accent-foreground disabled:opacity-60"
     >
       {installing ? 'Installing…' : 'Install'}
     </button>
@@ -90,7 +91,7 @@
       type="button"
       onclick={dismiss}
       aria-label="Dismiss"
-      class="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted"
+      class="tap-target shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted"
     >
       <X class="size-3.5" />
     </button>
