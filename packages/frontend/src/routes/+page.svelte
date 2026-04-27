@@ -1,28 +1,28 @@
 <script lang="ts">
-  import { page } from '$app/stores';
-  import CTA from '$lib/components/landing/CTA.svelte';
-  import EditorPreview from '$lib/components/landing/EditorPreview.svelte';
-  import Features from '$lib/components/landing/Features.svelte';
-  import Footer from '$lib/components/landing/Footer.svelte';
-  import Hero from '$lib/components/landing/Hero.svelte';
-  import Nav from '$lib/components/landing/Nav.svelte';
-  import Stats from '$lib/components/landing/Stats.svelte';
-  import Workflow from '$lib/components/landing/Workflow.svelte';
+  import { page } from "$app/stores";
+  import CTA from "$lib/components/landing/CTA.svelte";
+  import EditorPreview from "$lib/components/landing/EditorPreview.svelte";
+  import Features from "$lib/components/landing/Features.svelte";
+  import Footer from "$lib/components/landing/Footer.svelte";
+  import Hero from "$lib/components/landing/Hero.svelte";
+  import Nav from "$lib/components/landing/Nav.svelte";
+  import Stats from "$lib/components/landing/Stats.svelte";
+  import Workflow from "$lib/components/landing/Workflow.svelte";
 
-  const title = 'OpenTales — The IDE for novelists';
+  const title = "OpenTales — The IDE for novelists";
   const description =
-    'Write chapters, build characters, and map plot structure in one distraction-free workspace. Open-source novel-writing IDE powered by Monaco.';
-  const ogImagePath = '/og-banner.png';
+    "Write chapters, build characters, and map plot structure in one distraction-free workspace. Open-source novel-writing IDE powered by Monaco.";
+  const ogImagePath = "/og-banner.png";
   // Public canonical site URL used as a fallback during prerender (when
   // there's no real request). Gets overridden client-side from $page.url.
-  const SITE_URL = 'https://opentales.app';
+  const SITE_URL = "https://opentales.lumina.pw";
 
   let origin = $derived(
-    $page.url.origin && !$page.url.origin.includes('sveltekit-prerender')
+    $page.url.origin && !$page.url.origin.includes("sveltekit-prerender")
       ? $page.url.origin
-      : SITE_URL
+      : SITE_URL,
   );
-  let canonical = $derived(`${origin}${$page.url.pathname || '/'}`);
+  let canonical = $derived(`${origin}${$page.url.pathname || "/"}`);
   let ogImageUrl = $derived(`${origin}${ogImagePath}`);
 </script>
 
@@ -50,13 +50,13 @@
 
   <!-- Structured data -->
   {@html `<script type="application/ld+json">${JSON.stringify({
-    '@context': 'https://schema.org',
-    '@type': 'SoftwareApplication',
-    name: 'OpenTales',
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: "OpenTales",
     description,
-    applicationCategory: 'WritingApplication',
-    operatingSystem: 'Web, macOS, Linux, Windows',
-    offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' }
+    applicationCategory: "WritingApplication",
+    operatingSystem: "Web, macOS, Linux, Windows",
+    offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
   })}</` + `script>`}
 </svelte:head>
 

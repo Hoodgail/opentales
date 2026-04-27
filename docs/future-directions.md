@@ -261,7 +261,7 @@ Wrap the SvelteKit build in Capacitor for iOS/Android. The PWA already works in 
 A single `docker-compose.yml` that runs Postgres + the backend + a static frontend. One-command self-hosting for users who don't trust the cloud.
 
 ### 6.5 Hosted version
-A first-party hosted instance at opentales.app. Free tier with reasonable limits; paid tier with cloud sync, larger asset quotas, AI features.
+A first-party hosted instance at opentales.lumina.pw. Free tier with reasonable limits; paid tier with cloud sync, larger asset quotas, AI features.
 
 ### 6.6 Monorepo CI
 There's no CI today. Add GitHub Actions:
