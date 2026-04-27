@@ -192,7 +192,7 @@
     padding-top: env(safe-area-inset-top);
     padding-right: env(safe-area-inset-right);
     padding-left: env(safe-area-inset-left);
-    background: var(--background);
+    background: var(--sidebar);
   }
   .tap-target {
     min-width: 44px;
@@ -202,9 +202,6 @@
     :root {
       --app-titlebar-height: 44px;
       --app-bottom-nav-height: 64px;
-    }
-    .pwa-shell {
-      padding-bottom: env(safe-area-inset-bottom);
     }
     input:not([type='checkbox']):not([type='radio']):not([type='range']),
     select,

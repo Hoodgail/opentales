@@ -81,7 +81,7 @@
 <CommandPalette />
 <ShortcutsOverlay />
 
-<div class="pwa-shell flex flex-col overflow-hidden bg-background">
+<div class="pwa-shell flex flex-col overflow-hidden bg-sidebar">
   {#if manuscript.initializing}
     <div class="flex h-full items-center justify-center">
       <div class="rounded-md border border-border bg-card px-5 py-4 text-sm text-muted-foreground">

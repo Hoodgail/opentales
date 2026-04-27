@@ -37,7 +37,8 @@
 </script>
 
 <nav
-  class="flex h-[var(--app-bottom-nav-height)] shrink-0 items-stretch gap-2 overflow-x-auto border-t border-border bg-sidebar px-2 [scrollbar-width:none] [-webkit-overflow-scrolling:touch]"
+  class="flex h-[calc(var(--app-bottom-nav-height)_+_env(safe-area-inset-bottom))] shrink-0 items-stretch gap-2 overflow-x-auto border-t border-border bg-sidebar px-2 [scrollbar-width:none] [-webkit-overflow-scrolling:touch]"
+  style="padding-bottom: env(safe-area-inset-bottom);"
   aria-label="Sections"
 >
   {#each items as item (item.id)}
