@@ -25,6 +25,11 @@
   <img src="https://img.shields.io/badge/PWA-ready-d4882a?style=flat-square" alt="PWA" />
 </p>
 
+<p align="center">
+  <a href="https://opentales.lumina.pw">
+    <img src=".github/screenshot.png" alt="OpenTales — IDE Screenshot" width="100%" />
+  </a>
+</p>
 ---
 
 ## Why OpenTales?
