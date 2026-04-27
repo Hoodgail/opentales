@@ -1,0 +1,69 @@
+{
+  "name": "opentales",
+  "version": "0.1.0",
+  "description": "Manuscript — a desktop-class novel writing IDE built with SvelteKit + Electron",
+  "private": true,
+  "type": "module",
+  "main": "packages/electron/main.cjs",
+  "scripts": {
+    "dev:web": "pnpm --dir packages/frontend dev",
+    "dev:deps": "docker compose -f docker-compose.deps.yml up -d",
+    "dev:backend": "pnpm --dir packages/backend dev",
+    "dev:electron": "wait-on tcp:5173 && cross-env ELECTRON_DEV_URL=http://localhost:5173 electron .",
+    "dev": "concurrently -k -n web,electron -c blue,green \"pnpm dev:web\" \"pnpm dev:electron\"",
+    "build:web": "pnpm --dir packages/frontend build",
+    "build:backend": "pnpm --dir packages/backend build",
+    "build:sdk": "pnpm --dir packages/sdk build",
+    "build": "pnpm build:web && pnpm build:sdk && pnpm build:backend",
+    "preview": "pnpm --dir packages/frontend preview",
+    "start": "electron packages/electron",
+    "check": "pnpm --dir packages/frontend check",
+    "check:backend": "pnpm --dir packages/backend check",
+    "check:sdk": "pnpm --dir packages/sdk check",
+    "lint": "echo 'no lint configured'",
+    "package": "pnpm build && electron-builder"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-static": "^3.0.8",
+    "@sveltejs/kit": "^2.20.0",
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@tailwindcss/vite": "^4.0.0",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "svelte": "^5.19.0",
+    "svelte-check": "^4.1.1",
+    "tailwindcss": "^4.0.0",
+    "tw-animate-css": "^1.3.3",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7",
+    "wait-on": "^8.0.1"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "@types/multer": "^2.1.0",
+    "bcryptjs": "^2.4.3",
+    "clsx": "^2.1.1",
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.1",
+    "jsonwebtoken": "^9.0.3",
+    "lucide-svelte": "^1.0.1",
+    "monaco-editor": "^0.52.2",
+    "multer": "^2.1.1",
+    "tailwind-merge": "^3.3.1"
+  },
+  "build": {
+    "appId": "com.hoodgail.opentales",
+    "productName": "Manuscript",
+    "files": [
+      "packages/electron/**",
+      "packages/frontend/build/**",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    }
+  }
+}

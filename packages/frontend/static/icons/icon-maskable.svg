@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- Maskable icon: full bleed background + safe-zone artwork (centered, ~40% of canvas) -->
+  <rect width="512" height="512" fill="#1a1a1a"/>
+  <g transform="translate(106 106) scale(2.5)">
+    <circle cx="60" cy="105" r="7" fill="#d4882a"/>
+    <line x1="60" y1="105" x2="60" y2="70" stroke="#d4882a" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M60 70Q60 43 28 33" stroke="#d4882a" stroke-width="2" stroke-linecap="round" fill="none"/>
+    <path d="M60 70Q60 43 92 33" stroke="#d4882a" stroke-width="2" stroke-linecap="round" fill="none"/>
+    <line x1="60" y1="70" x2="60" y2="35" stroke="#d4882a" stroke-width="2" stroke-linecap="round"/>
+    <path d="M28 33Q20 17 10 11" stroke="#7a4e18" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+    <path d="M28 33Q30 15 40 9" stroke="#7a4e18" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+    <path d="M60 35Q52 19 48 11" stroke="#7a4e18" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+    <path d="M60 35Q68 19 72 11" stroke="#7a4e18" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+    <path d="M92 33Q88 17 80 11" stroke="#7a4e18" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+    <path d="M92 33Q98 17 108 11" stroke="#7a4e18" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+    <circle cx="10" cy="9" r="3.5" fill="#d4882a"/>
+    <circle cx="40" cy="7" r="3.5" fill="#d4882a"/>
+    <circle cx="48" cy="9" r="3.5" fill="#d4882a"/>
+    <circle cx="72" cy="9" r="3.5" fill="#d4882a"/>
+    <circle cx="80" cy="9" r="3.5" fill="#d4882a"/>
+    <circle cx="108" cy="7" r="3.5" fill="#d4882a"/>
+  </g>
+</svg>

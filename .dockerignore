@@ -1,0 +1,11 @@
+node_modules
+.pnpm-store
+.git
+.svelte-kit
+build
+dist
+out
+*.log
+.env
+.env.*
+!.env.example

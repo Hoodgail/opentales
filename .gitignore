@@ -1,0 +1,23 @@
+node_modules
+.pnpm-store
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# SvelteKit
+.svelte-kit
+build
+
+# Electron
+dist
+out
+
+# Vite
+.vite
+
+# Editor / OS
+*.log
+.idea
+.vscode/*
+!.vscode/extensions.json

@@ -1,0 +1,45 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: packages/backend/Dockerfile
+    container_name: opentales-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: ${DATABASE_URL:-postgresql://opentales:opentales@postgres:5432/opentales?schema=public}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      CORS_ORIGIN: ${CORS_ORIGIN:-https://opentales.lumina.pw}
+    expose:
+      - "4000"
+    networks:
+      - default
+      - dokploy-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.opentales-api.rule=Host(`opentales-api.lumina.pw`)"
+      - "traefik.http.routers.opentales-api.entrypoints=web"
+      - "traefik.http.services.opentales-api.loadbalancer.server.port=4000"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: packages/frontend/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-https://opentales-api.lumina.pw}
+    container_name: opentales-frontend
+    restart: unless-stopped
+    expose:
+      - "80"
+    networks:
+      - dokploy-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.opentales.rule=Host(`opentales.lumina.pw`)"
+      - "traefik.http.routers.opentales.entrypoints=web"
+      - "traefik.http.services.opentales.loadbalancer.server.port=80"
+
+networks:
+  dokploy-network:
+    external: true

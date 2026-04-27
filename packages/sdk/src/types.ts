@@ -1,0 +1,491 @@
+export type ChapterStatus = 'draft' | 'in-progress' | 'review' | 'final';
+export type ObstacleType = 'internal' | 'external' | 'interpersonal';
+export type AssetKind = 'image' | 'audio' | 'video' | 'document';
+export type Role = 'OWNER' | 'ADMIN' | 'EDITOR' | 'VIEWER';
+export type CoverOrientation = 'landscape' | 'portrait';
+export type ProjectVisibility = 'private' | 'public';
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  email: string;
+  name: string | null;
+  createdAt: string;
+}
+
+export interface AuthSession {
+  token: string;
+  user: AuthUser;
+}
+
+export interface RegisterInput {
+  username: string;
+  email: string;
+  password: string;
+  name?: string;
+}
+
+export interface LoginInput {
+  emailOrUsername: string;
+  password: string;
+}
+
+export interface CharacterRelationship {
+  id: string;
+  characterId: string;
+  type: string;
+  note: string;
+}
+
+export interface Character {
+  id: string;
+  name: string;
+  role: string;
+  age: string;
+  occupation: string;
+  avatar?: string;
+  avatarAssetId?: string;
+  description: string;
+  appearance: string;
+  motivation: string;
+  arc: string;
+  traits: string[];
+  relationships: CharacterRelationship[];
+}
+
+export interface Location {
+  id: string;
+  name: string;
+  type: string;
+  image?: string;
+  imageAssetId?: string;
+  description: string;
+  atmosphere: string;
+  significance: string;
+  sensoryDetails: string;
+}
+
+export interface Asset {
+  id: string;
+  projectId: string | null;
+  kind: AssetKind;
+  mimeType: string;
+  sizeBytes: number;
+  url: string;
+  createdAt: string;
+}
+
+export interface Chapter {
+  id: string;
+  number: number;
+  title: string;
+  status: ChapterStatus;
+  povCharacterId?: string;
+  locationId?: string;
+  summary: string;
+  wordCount: number;
+  content: string;
+  publishedAt: string | null;
+}
+
+export interface Act {
+  id: string;
+  title: string;
+  chapterIds: string[];
+}
+
+export interface Obstacle {
+  id: string;
+  title: string;
+  type: ObstacleType;
+  description: string;
+  resolution: string;
+}
+
+export interface StoryStructure {
+  title: string;
+  genre: string;
+  perspective: string;
+  pov: string;
+  voice: string;
+  tone: string;
+  themes: string[];
+  logline: string;
+  outline: string;
+  climax: string;
+  obstacles: Obstacle[];
+}
+
+export interface ProjectSummary {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  genre: string;
+  updatedAt: string;
+  visibility: ProjectVisibility;
+  coverUrl: string | null;
+  coverOrientation: CoverOrientation;
+}
+
+export interface ManuscriptProject {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  visibility: ProjectVisibility;
+  coverUrl: string | null;
+  coverAssetId: string | null;
+  coverOrientation: CoverOrientation;
+  orgSlug: string;
+  characters: Character[];
+  locations: Location[];
+  chapters: Chapter[];
+  acts: Act[];
+  structure: StoryStructure;
+}
+
+export interface PublicChapter {
+  id: string;
+  number: number;
+  title: string;
+  summary: string;
+  wordCount: number;
+  content: string;
+  publishedAt: string;
+}
+
+export interface PublicProject {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  genre: string;
+  orgSlug: string;
+  orgName: string;
+  coverUrl: string | null;
+  coverOrientation: CoverOrientation;
+  publishedAt: string | null;
+  chapters: PublicChapter[];
+}
+
+export interface TrashItem {
+  kind: 'chapter';
+  id: string;
+  title: string;
+  number: number;
+  wordCount: number;
+  /** ISO timestamp when the item was moved to trash. */
+  deletedAt: string;
+  /** ISO timestamp when the item is scheduled to be permanently purged. */
+  purgesAt: string;
+}
+
+export interface ProjectStatsDay {
+  /** ISO date (YYYY-MM-DD) in UTC. */
+  date: string;
+  /** Words added that day, summed across all writings in the project. */
+  wordsAdded: number;
+  /** Number of writing-version snapshots created that day. */
+  versions: number;
+}
+
+export interface ProjectStats {
+  projectId: string;
+  /** Sum of head-version word counts across non-trashed chapters. */
+  totalWords: number;
+  totalWordsAddedInWindow: number;
+  totalVersionsInWindow: number;
+  /** Consecutive days (ending today) with at least one word added. */
+  currentStreakDays: number;
+  windowDays: number;
+  days: ProjectStatsDay[];
+}
+
+export interface OrgMember {
+  userId: string;
+  username: string;
+  email: string;
+  name: string | null;
+  role: Role;
+  joinedAt: string;
+}
+
+export interface ProjectInvite {
+  id: string;
+  username: string | null;
+  email: string | null;
+  role: Role;
+  token: string;
+  expiresAt: string;
+  invitedById: string;
+  invitedByUsername: string;
+  createdAt: string;
+}
+
+export interface MembersAndInvites {
+  members: OrgMember[];
+  invites: ProjectInvite[];
+  currentUserRole: Role;
+}
+
+export interface CreateInviteInput {
+  username?: string;
+  email?: string;
+  role: Role;
+}
+
+export interface AcceptInviteResult {
+  orgId: string;
+  orgSlug: string;
+  orgName: string;
+  role: Role;
+  projectId: string | null;
+  projectSlug: string | null;
+  projectTitle: string | null;
+}
+
+export interface CreateProjectInput {
+  title: string;
+  slug?: string;
+  description?: string;
+  genre?: string;
+  perspective?: string;
+  pov?: string;
+  voice?: string;
+  tone?: string;
+  themes?: string[];
+}
+
+export interface UpdateProjectInput {
+  title?: string;
+  slug?: string;
+  description?: string | null;
+  genre?: string | null;
+  perspective?: string | null;
+  pov?: string | null;
+  voice?: string | null;
+  tone?: string | null;
+  themes?: string[];
+  visibility?: ProjectVisibility;
+  coverAssetId?: string | null;
+  coverOrientation?: CoverOrientation;
+}
+
+export type UpdateChapterInput = Partial<
+  Pick<Chapter, 'title' | 'status' | 'povCharacterId' | 'locationId' | 'summary' | 'content'>
+> & {
+  publishedAt?: string | null;
+};
+export type UpdateCharacterInput = Partial<Omit<Character, 'id' | 'relationships'>> & {
+  avatarAssetId?: string | null;
+};
+export type UpdateLocationInput = Partial<Omit<Location, 'id'>> & {
+  imageAssetId?: string | null;
+};
+export type UpdateStructureInput = Partial<StoryStructure>;
+
+export interface CreateActInput {
+  title: string;
+}
+
+export interface UpdateActInput {
+  title?: string;
+  chapterIds?: string[];
+}
+
+export interface CreateCharacterInput {
+  name: string;
+  role?: string;
+  age?: string;
+  occupation?: string;
+  traits?: string[];
+  description?: string;
+  appearance?: string;
+  motivation?: string;
+  arc?: string;
+}
+
+export interface CreateLocationInput {
+  name: string;
+  type?: string;
+  description?: string;
+  atmosphere?: string;
+  significance?: string;
+  sensoryDetails?: string;
+}
+
+export interface CreateChapterInput {
+  title: string;
+  actId?: string;
+  status?: ChapterStatus;
+  povCharacterId?: string;
+  locationId?: string;
+  summary?: string;
+  content?: string;
+}
+
+export interface CreateObstacleInput {
+  title: string;
+  type: ObstacleType;
+  description?: string;
+  resolution?: string;
+}
+
+export interface UpdateObstacleInput {
+  title?: string;
+  type?: ObstacleType;
+  description?: string;
+  resolution?: string;
+  order?: number;
+}
+
+export interface CreateCharacterRelationshipInput {
+  toCharacterId: string;
+  type: string;
+  note?: string;
+}
+
+export type SubmissionKind = 'chapter-edit' | 'new-chapter';
+export type SubmissionStatus = 'open' | 'merged' | 'declined';
+export type ActivityType =
+  | 'submission-opened'
+  | 'submission-merged'
+  | 'submission-declined'
+  | 'comment-added'
+  | 'ai-review-posted';
+
+export interface SubmissionAuthor {
+  id: string;
+  username: string;
+  name: string | null;
+}
+
+export interface SubmissionSummary {
+  id: string;
+  projectId: string;
+  kind: SubmissionKind;
+  status: SubmissionStatus;
+  title: string;
+  message: string | null;
+  chapterId: string | null;
+  chapterTitle: string | null;
+  proposedTitle: string | null;
+  proposedNumber: number | null;
+  proposedActId: string | null;
+  author: SubmissionAuthor;
+  createdAt: string;
+  decidedAt: string | null;
+  decidedBy: SubmissionAuthor | null;
+}
+
+export interface SubmissionActivity {
+  id: string;
+  type: ActivityType;
+  content: unknown;
+  author: SubmissionAuthor | null;
+  createdAt: string;
+}
+
+export interface SubmissionDetail extends SubmissionSummary {
+  // Snapshot of chapter body at the moment the submission was created.
+  baseBody: string;
+  // Latest body in the submission's branch (the proposed change).
+  headBody: string;
+  activities: SubmissionActivity[];
+}
+
+export interface CreateSubmissionInput {
+  kind: SubmissionKind;
+  title: string;
+  message?: string;
+  // For chapter-edit: required.
+  chapterId?: string;
+  // The proposed full body (will be saved as a version on a fresh branch).
+  body: string;
+  // For new-chapter: required.
+  proposedTitle?: string;
+  proposedNumber?: number;
+  proposedActId?: string | null;
+}
+
+export interface SubmissionCommentAnchor {
+  // Inclusive 1-indexed line numbers within the rendered diff.
+  lineStart: number;
+  lineEnd: number;
+  // Which side of the diff the anchor refers to.
+  side: 'base' | 'head';
+}
+
+export interface AddSubmissionCommentInput {
+  body: string;
+  // Optional anchor to a specific line range within the diff. When set, the
+  // comment renders as a thread next to those lines instead of in the timeline.
+  anchor?: SubmissionCommentAnchor;
+}
+
+export interface BetaShareLink {
+  id: string;
+  projectId: string;
+  token: string;
+  // Empty array means the entire manuscript is shared.
+  chapterIds: string[];
+  allowComments: boolean;
+  label: string | null;
+  createdById: string;
+  createdAt: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface CreateBetaShareLinkInput {
+  label?: string;
+  // ISO date string. Omit / null for no expiration.
+  expiresAt?: string | null;
+  allowComments?: boolean;
+  chapterIds?: string[];
+}
+
+export interface UpdateBetaShareLinkInput {
+  label?: string | null;
+  expiresAt?: string | null;
+  allowComments?: boolean;
+  chapterIds?: string[];
+}
+
+export interface BetaShareChapter {
+  id: string;
+  number: number;
+  title: string;
+  summary: string;
+  wordCount: number;
+  content: string;
+}
+
+export interface BetaShareComment {
+  id: string;
+  visitorName: string;
+  body: string;
+  chapterId: string | null;
+  lineStart: number | null;
+  lineEnd: number | null;
+  createdAt: string;
+}
+
+export interface BetaShareView {
+  projectTitle: string;
+  projectDescription: string;
+  shareLabel: string | null;
+  allowComments: boolean;
+  expiresAt: string | null;
+  chapters: BetaShareChapter[];
+  comments: BetaShareComment[];
+}
+
+export interface CreateBetaShareCommentInput {
+  visitorName: string;
+  body: string;
+  chapterId?: string | null;
+  lineStart?: number | null;
+  lineEnd?: number | null;
+}

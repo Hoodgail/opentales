@@ -1,0 +1,610 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum CoverOrientation {
+  LANDSCAPE
+  PORTRAIT
+}
+
+enum ProjectVisibility {
+  PRIVATE
+  PUBLIC
+}
+
+enum ChapterStatus {
+  DRAFT
+  IN_PROGRESS
+  REVIEW
+  FINAL
+}
+
+enum ObstacleType {
+  INTERNAL
+  EXTERNAL
+  INTERPERSONAL
+}
+
+enum WritingKind {
+  CHAPTER_BODY
+  SCENE_BODY
+  LOGLINE
+  OUTLINE
+  CLIMAX
+  CHARACTER_DESCRIPTION
+  CHARACTER_APPEARANCE
+  CHARACTER_MOTIVATION
+  CHARACTER_ARC
+  LOCATION_DESCRIPTION
+  LOCATION_ATMOSPHERE
+  LOCATION_SIGNIFICANCE
+  LOCATION_SENSORY
+  OBSTACLE_DESCRIPTION
+  OBSTACLE_RESOLUTION
+  NOTE
+}
+
+enum AssetKind {
+  IMAGE
+  AUDIO
+  VIDEO
+  DOCUMENT
+  TEXT_BLOB
+}
+
+enum AttachmentEntity {
+  CHARACTER
+  LOCATION
+  CHAPTER
+  SCENE
+  PROJECT
+  WRITING_VERSION
+  USER
+}
+
+enum TabKind {
+  CHAPTER
+  SCENE
+  CHARACTER
+  LOCATION
+  STRUCTURE
+  OUTLINE
+}
+
+enum SubmissionKind {
+  CHAPTER_EDIT
+  NEW_CHAPTER
+}
+
+enum SubmissionStatus {
+  OPEN
+  MERGED
+  DECLINED
+}
+
+enum ActivityType {
+  SUBMISSION_OPENED
+  SUBMISSION_MERGED
+  SUBMISSION_DECLINED
+  COMMENT_ADDED
+  AI_REVIEW_POSTED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  name         String?
+  avatarAssetId String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  avatarAsset Asset? @relation("UserAvatar", fields: [avatarAssetId], references: [id], onDelete: SetNull)
+  memberships Membership[]
+  writingVersions WritingVersion[]
+  uploadedAssets Asset[] @relation("UploadedAssets")
+  projectStates UserProjectState[]
+  sentInvites     Invite[] @relation("InviteInviter")
+  acceptedInvites Invite[] @relation("InviteAcceptedBy")
+  submissions     Submission[] @relation("SubmissionAuthor")
+  decidedSubmissions Submission[] @relation("SubmissionDecidedBy")
+  activities      Activity[]
+  betaShareLinks  BetaShareLink[] @relation("BetaShareCreatedBy")
+}
+
+model Org {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships Membership[]
+  projects Project[]
+  invites  Invite[]
+}
+
+model Invite {
+  id           String   @id @default(cuid())
+  orgId        String
+  invitedById  String
+  email        String?
+  username     String?
+  role         Role
+  token        String   @unique
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  acceptedAt   DateTime?
+  acceptedById String?
+  revokedAt    DateTime?
+
+  org        Org   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  invitedBy  User  @relation("InviteInviter", fields: [invitedById], references: [id], onDelete: Cascade)
+  acceptedBy User? @relation("InviteAcceptedBy", fields: [acceptedById], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([acceptedById])
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  orgId     String
+  userId    String
+  role      Role
+  createdAt DateTime @default(now())
+
+  org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId])
+  @@index([userId])
+}
+
+model Project {
+  id               String            @id @default(cuid())
+  orgId            String
+  slug             String
+  title            String
+  description      String?
+  genre            String?
+  perspective      String?
+  pov              String?
+  voice            String?
+  tone             String?
+  themes           String[]          @default([])
+  coverAssetId     String?
+  coverOrientation CoverOrientation  @default(LANDSCAPE)
+  visibility       ProjectVisibility @default(PRIVATE)
+  publishedAt      DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  archivedAt       DateTime?
+  deletedAt        DateTime?
+
+  org           Org             @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  coverAsset    Asset?          @relation("ProjectCover", fields: [coverAssetId], references: [id], onDelete: SetNull)
+  storyStructure StoryStructure?
+  characters    Character[]
+  characterRelationships CharacterRelationship[]
+  locations     Location[]
+  acts          Act[]
+  chapters      Chapter[]
+  writings      Writing[]
+  assets        Asset[]
+  obstacles     Obstacle[]
+  projectStates UserProjectState[]
+  submissions   Submission[]
+  betaShareLinks BetaShareLink[]
+
+  @@unique([orgId, slug])
+  @@index([orgId])
+}
+
+model BetaShareLink {
+  id             String    @id @default(cuid())
+  projectId      String
+  token          String    @unique
+  // null = entire manuscript; otherwise restricted to these chapter ids.
+  chapterIds     String[]  @default([])
+  // Whether unauthenticated visitors may post comments on this share.
+  allowComments  Boolean   @default(true)
+  // Optional human label shown to the owner (e.g. "agent — Sarah").
+  label          String?
+  createdById    String
+  createdAt      DateTime  @default(now())
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User    @relation("BetaShareCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  comments  BetaShareComment[]
+
+  @@index([projectId])
+}
+
+model BetaShareComment {
+  id          String   @id @default(cuid())
+  shareLinkId String
+  // Visitor-provided display name (no auth on the public side).
+  visitorName String
+  body        String
+  // Optional anchor to a chapter and line range in that chapter.
+  chapterId   String?
+  lineStart   Int?
+  lineEnd     Int?
+  createdAt   DateTime @default(now())
+
+  shareLink BetaShareLink @relation(fields: [shareLinkId], references: [id], onDelete: Cascade)
+
+  @@index([shareLinkId, createdAt])
+}
+
+model StoryStructure {
+  id               String @id @default(cuid())
+  projectId        String @unique
+  loglineWritingId String
+  outlineWritingId String
+  climaxWritingId  String
+
+  project        Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  loglineWriting Writing @relation("StoryLoglineWriting", fields: [loglineWritingId], references: [id], onDelete: Restrict)
+  outlineWriting Writing @relation("StoryOutlineWriting", fields: [outlineWritingId], references: [id], onDelete: Restrict)
+  climaxWriting  Writing @relation("StoryClimaxWriting", fields: [climaxWritingId], references: [id], onDelete: Restrict)
+}
+
+model Character {
+  id                    String   @id @default(cuid())
+  projectId             String
+  name                  String
+  role                  String?
+  age                   String?
+  occupation            String?
+  traits                String[] @default([])
+  avatarAssetId          String?
+  descriptionWritingId   String
+  appearanceWritingId    String
+  motivationWritingId    String
+  arcWritingId           String
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  project             Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  avatarAsset          Asset?  @relation("CharacterAvatar", fields: [avatarAssetId], references: [id], onDelete: SetNull)
+  descriptionWriting   Writing @relation("CharacterDescriptionWriting", fields: [descriptionWritingId], references: [id], onDelete: Restrict)
+  appearanceWriting    Writing @relation("CharacterAppearanceWriting", fields: [appearanceWritingId], references: [id], onDelete: Restrict)
+  motivationWriting    Writing @relation("CharacterMotivationWriting", fields: [motivationWritingId], references: [id], onDelete: Restrict)
+  arcWriting           Writing @relation("CharacterArcWriting", fields: [arcWritingId], references: [id], onDelete: Restrict)
+  outgoingRelationships CharacterRelationship[] @relation("RelationshipFrom")
+  incomingRelationships CharacterRelationship[] @relation("RelationshipTo")
+  povChapters          Chapter[] @relation("ChapterPovCharacter")
+  povScenes            Scene[] @relation("ScenePovCharacter")
+
+  @@index([projectId])
+}
+
+model CharacterRelationship {
+  id              String @id @default(cuid())
+  projectId       String
+  fromCharacterId String
+  toCharacterId   String
+  type            String
+  note            String?
+
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fromCharacter Character @relation("RelationshipFrom", fields: [fromCharacterId], references: [id], onDelete: Cascade)
+  toCharacter   Character @relation("RelationshipTo", fields: [toCharacterId], references: [id], onDelete: Cascade)
+
+  @@unique([fromCharacterId, toCharacterId, type])
+  @@index([projectId])
+  @@index([toCharacterId])
+}
+
+model Location {
+  id                    String   @id @default(cuid())
+  projectId             String
+  name                  String
+  type                  String?
+  imageAssetId           String?
+  descriptionWritingId   String
+  atmosphereWritingId    String
+  significanceWritingId  String
+  sensoryWritingId       String
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  project             Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  imageAsset           Asset?  @relation("LocationImage", fields: [imageAssetId], references: [id], onDelete: SetNull)
+  descriptionWriting   Writing @relation("LocationDescriptionWriting", fields: [descriptionWritingId], references: [id], onDelete: Restrict)
+  atmosphereWriting    Writing @relation("LocationAtmosphereWriting", fields: [atmosphereWritingId], references: [id], onDelete: Restrict)
+  significanceWriting  Writing @relation("LocationSignificanceWriting", fields: [significanceWritingId], references: [id], onDelete: Restrict)
+  sensoryWriting       Writing @relation("LocationSensoryWriting", fields: [sensoryWritingId], references: [id], onDelete: Restrict)
+  chapters             Chapter[]
+  scenes               Scene[]
+
+  @@index([projectId])
+}
+
+model Act {
+  id        String @id @default(cuid())
+  projectId String
+  title     String
+  order     Int
+
+  project  Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  chapters Chapter[]
+
+  @@unique([projectId, order])
+  @@index([projectId])
+}
+
+model Chapter {
+  id             String        @id @default(cuid())
+  projectId      String
+  actId          String?
+  number         Int
+  title          String
+  status         ChapterStatus @default(DRAFT)
+  povCharacterId String?
+  locationId     String?
+  summary        String?
+  bodyWritingId  String
+  order          Int
+  publishedAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+
+  project      Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  act          Act?       @relation(fields: [actId], references: [id], onDelete: SetNull)
+  povCharacter Character? @relation("ChapterPovCharacter", fields: [povCharacterId], references: [id], onDelete: SetNull)
+  location     Location?  @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  bodyWriting  Writing   @relation("ChapterBodyWriting", fields: [bodyWritingId], references: [id], onDelete: Restrict)
+  scenes       Scene[]
+  submissions  Submission[]
+
+  @@unique([projectId, number])
+  @@index([projectId])
+  @@index([projectId, deletedAt])
+  @@index([actId, order])
+}
+
+model Scene {
+  id             String @id @default(cuid())
+  chapterId      String
+  order          Int
+  title          String?
+  povCharacterId String?
+  locationId     String?
+  bodyWritingId  String
+
+  chapter      Chapter    @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  povCharacter Character? @relation("ScenePovCharacter", fields: [povCharacterId], references: [id], onDelete: SetNull)
+  location     Location?  @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  bodyWriting  Writing    @relation("SceneBodyWriting", fields: [bodyWritingId], references: [id], onDelete: Restrict)
+
+  @@unique([chapterId, order])
+  @@index([chapterId])
+}
+
+model Obstacle {
+  id                   String       @id @default(cuid())
+  projectId            String
+  title                String
+  type                 ObstacleType
+  descriptionWritingId String
+  resolutionWritingId  String
+  order                Int
+
+  project            Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  descriptionWriting Writing @relation("ObstacleDescriptionWriting", fields: [descriptionWritingId], references: [id], onDelete: Restrict)
+  resolutionWriting  Writing @relation("ObstacleResolutionWriting", fields: [resolutionWritingId], references: [id], onDelete: Restrict)
+
+  @@index([projectId])
+}
+
+model Writing {
+  id              String      @id @default(cuid())
+  projectId       String
+  kind            WritingKind
+  defaultBranchId String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  project       Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  defaultBranch WritingBranch? @relation("DefaultWritingBranch", fields: [defaultBranchId], references: [id], onDelete: SetNull)
+  branches      WritingBranch[] @relation("WritingBranches")
+
+  storyLoglineStructure StoryStructure[] @relation("StoryLoglineWriting")
+  storyOutlineStructure StoryStructure[] @relation("StoryOutlineWriting")
+  storyClimaxStructure  StoryStructure[] @relation("StoryClimaxWriting")
+  chapterBodies Chapter[] @relation("ChapterBodyWriting")
+  sceneBodies Scene[] @relation("SceneBodyWriting")
+  characterDescriptions Character[] @relation("CharacterDescriptionWriting")
+  characterAppearances Character[] @relation("CharacterAppearanceWriting")
+  characterMotivations Character[] @relation("CharacterMotivationWriting")
+  characterArcs Character[] @relation("CharacterArcWriting")
+  locationDescriptions Location[] @relation("LocationDescriptionWriting")
+  locationAtmospheres Location[] @relation("LocationAtmosphereWriting")
+  locationSignificances Location[] @relation("LocationSignificanceWriting")
+  locationSensoryDetails Location[] @relation("LocationSensoryWriting")
+  obstacleDescriptions Obstacle[] @relation("ObstacleDescriptionWriting")
+  obstacleResolutions Obstacle[] @relation("ObstacleResolutionWriting")
+
+  @@index([projectId, kind])
+}
+
+model WritingBranch {
+  id             String @id @default(cuid())
+  writingId      String
+  name           String
+  parentBranchId String?
+  headVersionId  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  writing       Writing @relation("WritingBranches", fields: [writingId], references: [id], onDelete: Cascade)
+  defaultFor    Writing[] @relation("DefaultWritingBranch")
+  parentBranch  WritingBranch? @relation("BranchLineage", fields: [parentBranchId], references: [id], onDelete: SetNull)
+  childBranches WritingBranch[] @relation("BranchLineage")
+  headVersion   WritingVersion? @relation("BranchHeadVersion", fields: [headVersionId], references: [id], onDelete: SetNull)
+  versions      WritingVersion[] @relation("BranchVersions")
+  submission    Submission?
+
+  @@unique([writingId, name])
+  @@index([parentBranchId])
+}
+
+model WritingVersion {
+  id              String @id @default(cuid())
+  branchId        String
+  parentVersionId String?
+  body            String?
+  bodyAssetId     String?
+  wordCount       Int    @default(0)
+  authorId        String?
+  message         String?
+  createdAt       DateTime @default(now())
+
+  branch         WritingBranch @relation("BranchVersions", fields: [branchId], references: [id], onDelete: Cascade)
+  headForBranch  WritingBranch[] @relation("BranchHeadVersion")
+  parentVersion  WritingVersion? @relation("VersionLineage", fields: [parentVersionId], references: [id], onDelete: SetNull)
+  childVersions  WritingVersion[] @relation("VersionLineage")
+  bodyAsset      Asset? @relation("WritingVersionBodyAsset", fields: [bodyAssetId], references: [id], onDelete: SetNull)
+  author         User? @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  submissionBases Submission[] @relation("SubmissionBaseVersion")
+
+  @@index([branchId])
+  @@index([parentVersionId])
+}
+
+model Asset {
+  id           String    @id @default(cuid())
+  projectId    String?
+  kind         AssetKind
+  s3Bucket     String
+  s3Key        String    @unique
+  mimeType     String
+  sizeBytes    BigInt
+  checksum     String?
+  width        Int?
+  height       Int?
+  durationMs   Int?
+  uploadedById String?
+  createdAt    DateTime  @default(now())
+
+  project       Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  uploadedBy    User?    @relation("UploadedAssets", fields: [uploadedById], references: [id], onDelete: SetNull)
+  attachments   AssetAttachment[]
+  projectCovers Project[] @relation("ProjectCover")
+  userAvatars   User[] @relation("UserAvatar")
+  characterAvatars Character[] @relation("CharacterAvatar")
+  locationImages Location[] @relation("LocationImage")
+  writingVersionBodies WritingVersion[] @relation("WritingVersionBodyAsset")
+
+  @@index([projectId, kind])
+}
+
+model AssetAttachment {
+  id         String @id @default(cuid())
+  assetId    String
+  entityType AttachmentEntity
+  entityId   String
+  role       String
+  order      Int?
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([entityType, entityId])
+  @@unique([entityType, entityId, role, assetId])
+}
+
+model UserProjectState {
+  id              String @id @default(cuid())
+  userId          String
+  projectId       String
+  activeView      String?
+  activeTabId     String?
+  selectedRefType String?
+  selectedRefId   String?
+
+  user    User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tabs    OpenTab[]
+
+  @@unique([userId, projectId])
+}
+
+model OpenTab {
+  id                 String @id @default(cuid())
+  userProjectStateId String
+  kind               TabKind
+  refId              String
+  title              String
+  dirty              Boolean @default(false)
+  order              Int
+
+  userProjectState UserProjectState @relation(fields: [userProjectStateId], references: [id], onDelete: Cascade)
+}
+
+model Submission {
+  id              String           @id @default(cuid())
+  projectId       String
+  authorId        String
+  kind            SubmissionKind
+  status          SubmissionStatus @default(OPEN)
+  title           String
+  message         String?
+  // For CHAPTER_EDIT: the existing chapter being edited.
+  // For NEW_CHAPTER: null (a chapter is created on merge).
+  chapterId       String?
+  // Snapshot WritingBranch holding the proposed body. Always set.
+  branchId        String           @unique
+  // Snapshot of the base WritingVersion at submission time (for diff).
+  baseVersionId   String?
+  // Optional fields used when kind = NEW_CHAPTER so the merge can materialize one.
+  proposedTitle   String?
+  proposedNumber  Int?
+  proposedActId   String?
+  createdAt       DateTime         @default(now())
+  decidedAt       DateTime?
+  decidedById     String?
+
+  project    Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  author     User           @relation("SubmissionAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  decidedBy  User?          @relation("SubmissionDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  branch     WritingBranch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  baseVersion WritingVersion? @relation("SubmissionBaseVersion", fields: [baseVersionId], references: [id], onDelete: SetNull)
+  chapter    Chapter?       @relation(fields: [chapterId], references: [id], onDelete: SetNull)
+  activities Activity[]
+
+  @@index([projectId, status])
+  @@index([authorId])
+}
+
+model Activity {
+  id           String       @id @default(cuid())
+  submissionId String
+  type         ActivityType
+  // Free-form payload (markdown text for COMMENT_ADDED, structured JSON for AI_REVIEW_POSTED, empty for status events).
+  content      Json?
+  authorId     String?
+  createdAt    DateTime     @default(now())
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  author     User?      @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([submissionId, createdAt])
+}

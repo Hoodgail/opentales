@@ -1,0 +1,31 @@
+{
+  "name": "@opentales/frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev --port 1234",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "@opentales/sdk": "workspace:*",
+    "clsx": "^2.1.1",
+    "lucide-svelte": "^1.0.1",
+    "monaco-editor": "^0.52.2",
+    "tailwind-merge": "^3.3.1"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-static": "^3.0.8",
+    "@sveltejs/kit": "^2.20.0",
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@tailwindcss/vite": "^4.0.0",
+    "svelte": "^5.19.0",
+    "svelte-check": "^4.1.1",
+    "tailwindcss": "^4.0.0",
+    "tw-animate-css": "^1.3.3",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7"
+  }
+}
