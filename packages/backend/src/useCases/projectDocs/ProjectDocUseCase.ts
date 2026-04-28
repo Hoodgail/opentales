@@ -177,5 +177,5 @@ function validateKind(kind: ProjectDocKind): ProjectDocKind {
 
 function clampInt(value: number | undefined, min: number, max: number, fallback: number): number {
   if (!Number.isInteger(value)) return fallback;
-  return Math.min(Math.max(value, min), max);
+  return Math.min(Math.max(value ?? fallback, min), max);
 }

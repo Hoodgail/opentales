@@ -179,6 +179,27 @@
       : undefined;
   }
 
+  function contentEditInput(input: JsonRecord): { oldString: string; newString: string; replaceAll?: boolean } | undefined {
+    const value = input.contentEdit;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    const edit = value as JsonRecord;
+    const oldString = textInput(edit, 'oldString');
+    const newString = textInput(edit, 'newString');
+    if (oldString === undefined || newString === undefined) return undefined;
+    return {
+      oldString,
+      newString,
+      replaceAll: typeof edit.replaceAll === 'boolean' ? edit.replaceAll : undefined
+    };
+  }
+
+  function applyContentEdit(content: string, edit: ReturnType<typeof contentEditInput>): string {
+    if (!edit?.oldString) return content;
+    return edit.replaceAll
+      ? content.split(edit.oldString).join(edit.newString)
+      : content.replace(edit.oldString, edit.newString);
+  }
+
   function displayValue(value: unknown): string {
     if (Array.isArray(value)) return value.length ? value.join(', ') : 'None';
     if (typeof value === 'string') return value.trim() || 'Empty';
@@ -233,13 +254,14 @@
     if (tc.toolName === 'updateChapter') {
       const chapter = manuscript.chapters.find((c) => c.id === textInput(input, 'chapterId'));
       if (!chapter) return null;
+      const contentEdit = contentEditInput(input);
       const modified = {
         title: textInput(input, 'title') ?? chapter.title,
         status: textInput(input, 'status') ?? chapter.status,
         povCharacterId: textInput(input, 'povCharacterId') ?? chapter.povCharacterId,
         locationId: textInput(input, 'locationId') ?? chapter.locationId,
         summary: textInput(input, 'summary') ?? chapter.summary,
-        content: textInput(input, 'content') ?? chapter.content
+        content: applyContentEdit(chapter.content, contentEdit)
       };
       return {
         targetLabel: chapter.title,
@@ -423,10 +445,11 @@
     if (tc.toolName === 'updateProjectDoc') {
       const doc = ai.docs.find((d) => d.id === textInput(input, 'docId'));
       if (!doc) return null;
+      const contentEdit = contentEditInput(input);
       const modified = {
         title: textInput(input, 'title') ?? doc.title,
         kind: textInput(input, 'kind') ?? doc.kind,
-        content: textInput(input, 'content') ?? doc.content
+        content: applyContentEdit(doc.content, contentEdit)
       };
       return {
         targetLabel: doc.title,
