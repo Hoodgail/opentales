@@ -5,6 +5,7 @@
   import { editorTheme, type EditorThemeId } from '$lib/stores/editorTheme.svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import { preferences } from '$lib/stores/preferences.svelte';
+  import AiSettingsSection from './AiSettingsSection.svelte';
   import PanelHeader from './PanelHeader.svelte';
 
   let coverInput: HTMLInputElement | null = $state(null);

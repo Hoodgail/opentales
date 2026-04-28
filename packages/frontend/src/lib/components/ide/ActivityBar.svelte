@@ -7,8 +7,10 @@
     FileText,
     Inbox,
     MapPin,
+    NotebookPen,
     Search,
     Settings,
+    Sparkles,
     Trash2,
     UserCog,
     Users
@@ -27,12 +29,14 @@
     { id: 'locations', label: 'Settings', icon: MapPin },
     { id: 'plot', label: 'Plot', icon: Compass },
     { id: 'outline', label: 'Outline', icon: BookOpen },
+    { id: 'docs', label: 'Project docs', icon: NotebookPen },
     { id: 'search', label: 'Search', icon: Search },
     { id: 'problems', label: 'Problems', icon: AlertTriangle },
     { id: 'inbox', label: 'Drafts inbox', icon: Inbox },
     { id: 'stats', label: 'Writing stats', icon: BarChart3 },
     { id: 'trash', label: 'Trash', icon: Trash2 },
-    { id: 'members', label: 'Members', icon: UserCog }
+    { id: 'members', label: 'Members', icon: UserCog },
+    { id: 'ai', label: 'AI agent', icon: Sparkles }
   ];
 </script>
 

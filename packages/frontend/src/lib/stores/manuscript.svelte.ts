@@ -1,5 +1,4 @@
 import {
-  OpenTalesClient,
   type AcceptInviteResult,
   type Asset,
   type AssetKind,
@@ -9,10 +8,13 @@ import {
   type CreateInviteInput,
   type CreateLocationInput,
   type CreateObstacleInput,
+  type CreateProjectDocInput,
   type CreateProjectInput,
   type ManuscriptProject,
   type MembersAndInvites,
   type OrgMember,
+  type ProjectDoc,
+  type ProjectDocKind,
   type ProjectInvite,
   type ProjectSummary,
   type BetaShareLink,
@@ -25,6 +27,7 @@ import {
   type ProjectStats,
   type UpdateChapterInput,
   type UpdateObstacleInput,
+  type UpdateProjectDocInput,
   type UpdateProjectInput
 } from '@opentales/sdk';
 import type {
@@ -36,25 +39,9 @@ import type {
   OpenTab,
   StoryStructure
 } from '$lib/data/manuscript-types';
+import { api, getApiToken, setApiToken } from '$lib/api';
 
-const api = new OpenTalesClient({
-  baseUrl: import.meta.env.VITE_API_URL ?? 'http://localhost:4000',
-  token: browserLocalStorage().getItem('opentales.token') ?? undefined
-});
-
-const initialToken = browserLocalStorage().getItem('opentales.token');
-
-function browserLocalStorage(): Storage {
-  if (typeof localStorage !== 'undefined') return localStorage;
-  return {
-    length: 0,
-    clear: () => undefined,
-    getItem: () => null,
-    key: () => null,
-    removeItem: () => undefined,
-    setItem: () => undefined
-  };
-}
+const initialToken = getApiToken();
 
 function emptyStructure(): StoryStructure {
   return {
@@ -80,6 +67,7 @@ function applyProject(
     locations: Location[];
     chapters: Chapter[];
     acts: Act[];
+    docs: ProjectDoc[];
     structure: StoryStructure;
     projectMeta: {
       title: string;
@@ -96,6 +84,7 @@ function applyProject(
   state.locations.splice(0, state.locations.length, ...project.locations);
   state.chapters.splice(0, state.chapters.length, ...project.chapters);
   state.acts.splice(0, state.acts.length, ...project.acts);
+  state.docs.splice(0, state.docs.length, ...(project.docs ?? []));
   Object.assign(state.structure, project.structure);
   state.projectMeta.title = project.title;
   state.projectMeta.description = project.description;
@@ -115,6 +104,7 @@ function createStore() {
   const locations = $state<Location[]>([]);
   const chapters = $state<Chapter[]>([]);
   const acts = $state<Act[]>([]);
+  const docs = $state<ProjectDoc[]>([]);
   const structure = $state<StoryStructure>(emptyStructure());
   const projects = $state<ProjectSummary[]>([]);
   const members = $state<OrgMember[]>([]);
@@ -172,13 +162,12 @@ function createStore() {
 
     try {
       const session = await api.login({ emailOrUsername, password });
-      browserLocalStorage().setItem('opentales.token', session.token);
+      setApiToken(session.token);
       authenticated = true;
       await loadProject();
     } catch (caught) {
       authenticated = false;
-      api.setToken(undefined);
-      browserLocalStorage().removeItem('opentales.token');
+      setApiToken(undefined);
       error = caught instanceof Error ? caught.message : 'Login failed';
     } finally {
       authenticating = false;
@@ -196,13 +185,12 @@ function createStore() {
 
     try {
       const session = await api.register(input);
-      browserLocalStorage().setItem('opentales.token', session.token);
+      setApiToken(session.token);
       authenticated = true;
       await loadProject();
     } catch (caught) {
       authenticated = false;
-      api.setToken(undefined);
-      browserLocalStorage().removeItem('opentales.token');
+      setApiToken(undefined);
       error = caught instanceof Error ? caught.message : 'Registration failed';
     } finally {
       authenticating = false;
@@ -210,8 +198,7 @@ function createStore() {
   }
 
   async function logout() {
-    api.setToken(undefined);
-    browserLocalStorage().removeItem('opentales.token');
+    setApiToken(undefined);
     authenticated = false;
     error = null;
     clearProject();
@@ -234,7 +221,7 @@ function createStore() {
         : summaries[0];
 
       const project = await api.getProject(target.id);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
 
       tabs.splice(0, tabs.length);
       activeTabId = null;
@@ -271,6 +258,7 @@ function createStore() {
     locations.splice(0, locations.length);
     chapters.splice(0, chapters.length);
     acts.splice(0, acts.length);
+    docs.splice(0, docs.length);
     projects.splice(0, projects.length);
     members.splice(0, members.length);
     invites.splice(0, invites.length);
@@ -362,7 +350,7 @@ function createStore() {
     if (!projectId.value) return;
     await persist(async () => {
       const project = await api.restoreTrashChapter(projectId.value!, chapterId);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
     const idx = trash.findIndex((item) => item.id === chapterId);
     if (idx >= 0) trash.splice(idx, 1);
@@ -372,7 +360,7 @@ function createStore() {
     if (!projectId.value) return;
     await persist(async () => {
       const project = await api.purgeTrashChapter(projectId.value!, chapterId);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
     const idx = trash.findIndex((item) => item.id === chapterId);
     if (idx >= 0) trash.splice(idx, 1);
@@ -442,7 +430,7 @@ function createStore() {
       // The canonical text changed — reload manuscript.
       if (projectId.value) {
         const project = await api.getProject(projectId.value);
-        applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+        applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
       }
       return detail;
     } catch (caught) {
@@ -570,6 +558,7 @@ function createStore() {
         locations,
         chapters,
         acts,
+        docs,
         structure,
         projectMeta
       });
@@ -639,7 +628,7 @@ function createStore() {
     chapter.wordCount = countWords(content);
     await persist(async () => {
       const project = await api.updateChapter(projectId.value!, id, { content });
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
   }
 
@@ -650,7 +639,7 @@ function createStore() {
     Object.assign(chapter, updates);
     await persist(async () => {
       const project = await api.updateChapter(projectId.value!, id, updates);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
   }
 
@@ -661,7 +650,7 @@ function createStore() {
     Object.assign(character, updates);
     await persist(async () => {
       const project = await api.updateCharacter(projectId.value!, id, updates);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
   }
 
@@ -672,7 +661,7 @@ function createStore() {
     Object.assign(location, updates);
     await persist(async () => {
       const project = await api.updateLocation(projectId.value!, id, updates);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
   }
 
@@ -684,7 +673,7 @@ function createStore() {
       const project = await api.updateCharacter(projectId.value!, id, {
         avatarAssetId: asset.id
       });
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
   }
 
@@ -703,7 +692,7 @@ function createStore() {
       const project = await api.updateLocation(projectId.value!, id, {
         imageAssetId: asset.id
       });
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
   }
 
@@ -713,7 +702,7 @@ function createStore() {
     Object.assign(structure, updates);
     await persist(async () => {
       const project = await api.updateStructure(projectId.value!, updates);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
   }
 
@@ -730,7 +719,7 @@ function createStore() {
     await persist(async () => {
       const project = await api.createAct(projectId.value!, { title });
       created = findCreated(known, project.acts);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
 
     return created;
@@ -744,7 +733,7 @@ function createStore() {
 
     await persist(async () => {
       const project = await api.updateAct(projectId.value!, actId, { title });
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
   }
 
@@ -753,7 +742,7 @@ function createStore() {
 
     await persist(async () => {
       const project = await api.deleteAct(projectId.value!, actId);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
   }
 
@@ -766,7 +755,7 @@ function createStore() {
     await persist(async () => {
       const project = await api.createCharacter(projectId.value!, input);
       created = findCreated(known, project.characters);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
 
     if (created) {
@@ -787,7 +776,7 @@ function createStore() {
 
     await persist(async () => {
       const project = await api.deleteCharacter(projectId.value!, characterId);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
 
     await closeTab(`tab-${characterId}`);
@@ -802,7 +791,7 @@ function createStore() {
     await persist(async () => {
       const project = await api.createLocation(projectId.value!, input);
       created = findCreated(known, project.locations);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
 
     if (created) {
@@ -823,7 +812,7 @@ function createStore() {
 
     await persist(async () => {
       const project = await api.deleteLocation(projectId.value!, locationId);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
 
     await closeTab(`tab-${locationId}`);
@@ -838,7 +827,7 @@ function createStore() {
     await persist(async () => {
       const project = await api.createChapter(projectId.value!, input);
       created = findCreated(known, project.chapters);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
 
     if (created) {
@@ -859,7 +848,7 @@ function createStore() {
 
     await persist(async () => {
       const project = await api.deleteChapter(projectId.value!, chapterId);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
 
     // The chapter is now in trash on the server; force a reload next time.
@@ -872,7 +861,7 @@ function createStore() {
 
     await persist(async () => {
       const project = await api.createObstacle(projectId.value!, input);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
   }
 
@@ -884,7 +873,7 @@ function createStore() {
 
     await persist(async () => {
       const project = await api.updateObstacle(projectId.value!, obstacleId, updates);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
   }
 
@@ -893,7 +882,7 @@ function createStore() {
 
     await persist(async () => {
       const project = await api.deleteObstacle(projectId.value!, obstacleId);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
   }
 
@@ -909,7 +898,7 @@ function createStore() {
         fromCharacterId,
         input
       );
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
   }
 
@@ -922,8 +911,76 @@ function createStore() {
         fromCharacterId,
         relationshipId
       );
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, { projectId, characters, locations, chapters, acts, docs, structure, projectMeta });
     });
+  }
+
+  async function reloadDocs(): Promise<void> {
+    if (!projectId.value) return;
+    const result = await api.listProjectDocs(projectId.value, { limit: 200 });
+    docs.splice(0, docs.length, ...result.items);
+  }
+
+  async function createDoc(input: CreateProjectDocInput): Promise<ProjectDoc | null> {
+    if (!projectId.value) return null;
+    const ref: { value: ProjectDoc | null } = { value: null };
+    await persist(async () => {
+      ref.value = await api.createProjectDoc(projectId.value!, input);
+      if (ref.value) docs.push(ref.value);
+    });
+    if (ref.value) {
+      const created: ProjectDoc = ref.value;
+      await openTab({
+        id: `tab-doc-${created.id}`,
+        type: 'doc',
+        refId: created.id,
+        title: created.title
+      });
+    }
+    return ref.value;
+  }
+
+  async function updateDoc(
+    docId: string,
+    input: UpdateProjectDocInput
+  ): Promise<ProjectDoc | null> {
+    if (!projectId.value) return null;
+    const ref: { value: ProjectDoc | null } = { value: null };
+    await persist(async () => {
+      ref.value = await api.updateProjectDoc(projectId.value!, docId, input);
+      if (ref.value) {
+        const idx = docs.findIndex((d) => d.id === docId);
+        if (idx >= 0) docs[idx] = ref.value;
+        // Keep open tab title in sync if the doc title changed.
+        if (ref.value.title) {
+          const tab = tabs.find((t) => t.id === `tab-doc-${docId}`);
+          if (tab) tab.title = ref.value.title;
+        }
+      }
+    });
+    return ref.value;
+  }
+
+  async function updateDocContent(docId: string, content: string): Promise<void> {
+    // Optimistic local update so the editor reflects the buffer immediately;
+    // word counts will be reconciled when the server response comes back.
+    const local = docs.find((d) => d.id === docId);
+    if (local) local.content = content;
+    await updateDoc(docId, { content });
+  }
+
+  async function deleteDoc(docId: string): Promise<void> {
+    if (!projectId.value) return;
+    await persist(async () => {
+      await api.deleteProjectDoc(projectId.value!, docId);
+      const idx = docs.findIndex((d) => d.id === docId);
+      if (idx >= 0) docs.splice(idx, 1);
+    });
+    await closeTab(`tab-doc-${docId}`);
+  }
+
+  function getDoc(docId: string): ProjectDoc | null {
+    return docs.find((d) => d.id === docId) ?? null;
   }
 
   async function persist(operation: () => Promise<void>) {
@@ -954,9 +1011,18 @@ function createStore() {
     get acts() {
       return acts;
     },
+    get docs() {
+      return docs;
+    },
     get structure() {
       return structure;
     },
+    reloadDocs,
+    createDoc,
+    updateDoc,
+    updateDocContent,
+    deleteDoc,
+    getDoc,
     get initializing() {
       return initializing;
     },

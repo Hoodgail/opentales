@@ -1,6 +1,8 @@
 <script lang="ts">
   import { manuscript } from '$lib/stores/manuscript.svelte';
+  import AiAgentPanel from './AiAgentPanel.svelte';
   import CharactersPanel from './CharactersPanel.svelte';
+  import DocsPanel from './DocsPanel.svelte';
   import ExplorerPanel from './ExplorerPanel.svelte';
   import InboxPanel from './InboxPanel.svelte';
   import LocationsPanel from './LocationsPanel.svelte';
@@ -25,21 +27,25 @@
     <LocationsPanel />
   {:else if manuscript.activeView === 'plot'}
     <PlotPanel />
-  {:else if manuscript.activeView === 'outline'}
-    <OutlinePanel />
-  {:else if manuscript.activeView === 'search'}
-    <SearchPanel />
-  {:else if manuscript.activeView === 'inbox'}
-    <InboxPanel />
-  {:else if manuscript.activeView === 'problems'}
-    <ProblemsPanel />
-  {:else if manuscript.activeView === 'members'}
-    <MembersPanel />
-  {:else if manuscript.activeView === 'stats'}
-    <StatsPanel />
-  {:else if manuscript.activeView === 'trash'}
-    <TrashPanel />
-  {:else if manuscript.activeView === 'settings'}
-    <SettingsPanel />
-  {/if}
+    {:else if manuscript.activeView === 'outline'}
+      <OutlinePanel />
+    {:else if manuscript.activeView === 'docs'}
+      <DocsPanel />
+    {:else if manuscript.activeView === 'search'}
+      <SearchPanel />
+    {:else if manuscript.activeView === 'inbox'}
+      <InboxPanel />
+    {:else if manuscript.activeView === 'problems'}
+      <ProblemsPanel />
+    {:else if manuscript.activeView === 'members'}
+      <MembersPanel />
+    {:else if manuscript.activeView === 'stats'}
+      <StatsPanel />
+    {:else if manuscript.activeView === 'trash'}
+      <TrashPanel />
+    {:else if manuscript.activeView === 'ai'}
+      <AiAgentPanel />
+    {:else if manuscript.activeView === 'settings'}
+      <SettingsPanel />
+    {/if}
 </aside>
