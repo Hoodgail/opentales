@@ -27,6 +27,7 @@
   let splitView = $state(false);
   let localContent = $state('');
   let lastChapterId = $state<string | null>(null);
+  let lastPersistedContent = $state('');
   let selectedText = $state('');
   let showRewrite = $state(false);
   let showDialogue = $state(false);
@@ -38,7 +39,10 @@
     if (chapter.id !== lastChapterId) {
       lastChapterId = chapter.id;
       localContent = chapter.content;
+    } else if (localContent === lastPersistedContent && chapter.content !== localContent) {
+      localContent = chapter.content;
     }
+    lastPersistedContent = chapter.content;
   });
 
   const pov = $derived(manuscript.characters.find((c) => c.id === chapter.povCharacterId));

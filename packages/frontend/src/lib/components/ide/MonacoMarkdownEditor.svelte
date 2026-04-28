@@ -137,8 +137,8 @@
   }
 
   let container: HTMLDivElement | undefined = $state();
-  let editor: Editor | null = null;
-  let monaco: Monaco | null = null;
+  let editor = $state<Editor | null>(null);
+  let monaco = $state<Monaco | null>(null);
   let disposing = false;
   let suppressNext = false;
   let focusDecorations: import('monaco-editor').editor.IEditorDecorationsCollection | null = null;

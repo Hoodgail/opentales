@@ -24,6 +24,7 @@ import { CreateCharacterUseCase } from '../projects/CreateCharacterUseCase.js';
 import { UpdateChapterUseCase } from '../projects/UpdateChapterUseCase.js';
 import { UpdateCharacterUseCase } from '../projects/UpdateCharacterUseCase.js';
 import { loadAiModelForProject } from './aiModel.js';
+import { renderSystemPrompt, renderUserContext } from './prompts/promptEngine.js';
 
 interface RuntimeSession {
   clients: Set<Response>;
@@ -292,14 +293,18 @@ export class AiAgentSessionUseCase {
       let assistantText = '';
       try {
         const model = await loadAiModelForProject(this.prisma, projectId);
+        const { systemPrompt, userPrompt } = await this.buildPrompts(
+          projectId,
+          session.id,
+          queued.prompt
+        );
         const result = streamText({
           model,
           abortSignal: runtime.abortController.signal,
           tools: this.buildAgentTools(projectId),
           stopWhen: stepCountIs(8),
-          system:
-            'You are the OpenTales project assistant. Use grep/list/read tools to inspect project data before giving specific advice. Prefer summaries, grep, and bounded reads. Read full chapter text only when the user explicitly asks or when a bounded read is insufficient. Ask for approval before mutating project data.',
-          prompt: await this.buildPrompt(projectId, session.id, queued.prompt)
+          system: systemPrompt,
+          prompt: userPrompt
         });
 
         for await (const part of result.fullStream) {
@@ -432,10 +437,22 @@ export class AiAgentSessionUseCase {
     for (const client of getRuntime(event.session.id).clients) writeEvent(client, event);
   }
 
-  private async buildPrompt(projectId: string, sessionId: string, prompt: string): Promise<string> {
+  private async buildPrompts(
+    projectId: string,
+    sessionId: string,
+    prompt: string
+  ): Promise<{ systemPrompt: string; userPrompt: string }> {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { title: true, genre: true, tone: true, voice: true, themes: true }
+      select: {
+        title: true,
+        genre: true,
+        tone: true,
+        voice: true,
+        perspective: true,
+        pov: true,
+        themes: true
+      }
     });
     const instructionDocs = await this.prisma.projectDoc.findMany({
       where: { projectId, kind: 'INSTRUCTIONS' },
@@ -448,35 +465,32 @@ export class AiAgentSessionUseCase {
     const messages = await this.prisma.aiAgentMessage.findMany({
       where: { sessionId },
       orderBy: { createdAt: 'desc' },
-      take: 12
+      take: 20
     });
     const transcript = messages
       .reverse()
       .map((message) => `${toMessageRole(message.role)}: ${message.content}`)
       .join('\n');
-    return [
-      `Project: ${project?.title ?? projectId}`,
-      `Genre: ${project?.genre ?? ''}`,
-      `Tone: ${project?.tone ?? ''}`,
-      `Voice: ${project?.voice ?? ''}`,
-      `Themes: ${project?.themes.join(', ') ?? ''}`,
-      '',
-      'Project instruction docs:',
-      instructionDocs.length
-        ? instructionDocs.map((doc) => `## ${doc.title}\n${bodyOf(doc.bodyWriting)}`).join('\n\n')
-        : '(none)',
-      '',
-      'Tool guidance:',
-      '- Use list/grep tools before reading long content.',
-      '- Use readChapter with bounded ranges unless the user explicitly asks for the full chapter.',
-      '- Mutating tools are proposals. They require backend approval before execution.',
-      '',
-      'Recent session transcript:',
-      transcript || '(none)',
-      '',
-      'Current user prompt:',
-      prompt
-    ].join('\n');
+
+    const systemPrompt = renderSystemPrompt({
+      project: {
+        title: project?.title ?? '',
+        genre: project?.genre ?? '',
+        tone: project?.tone ?? '',
+        voice: project?.voice ?? '',
+        perspective: project?.perspective ?? '',
+        pov: project?.pov ?? ''
+      },
+      themes: project?.themes?.join(', ') ?? '',
+      instructionDocs: instructionDocs.map((doc) => ({
+        title: doc.title,
+        content: bodyOf(doc.bodyWriting)
+      }))
+    });
+
+    const userPrompt = renderUserContext({ transcript, prompt });
+
+    return { systemPrompt, userPrompt };
   }
 
   private buildAgentTools(projectId: string) {
@@ -888,7 +902,7 @@ export class AiAgentSessionUseCase {
       return new UpdateChapterUseCase(this.prisma).execute(userId, projectId, chapterId, {
         title: stringOrUndefined(data.title),
         summary: stringOrUndefined(data.summary),
-        content: stringOrUndefined(data.content),
+        content: manuscriptContentOrUndefined(data.content),
         status: chapterStatusOrUndefined(data.status),
         povCharacterId: stringOrUndefined(data.povCharacterId),
         locationId: stringOrUndefined(data.locationId)
@@ -904,7 +918,7 @@ export class AiAgentSessionUseCase {
         povCharacterId: stringOrUndefined(data.povCharacterId),
         locationId: stringOrUndefined(data.locationId),
         summary: stringOrUndefined(data.summary),
-        content: stringOrUndefined(data.content)
+        content: manuscriptContentOrUndefined(data.content)
       };
       return new CreateChapterUseCase(this.prisma).execute(userId, projectId, input);
     }
@@ -1217,6 +1231,11 @@ function stringOrUndefined(value: unknown): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+function manuscriptContentOrUndefined(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  return value.trim() ? value : undefined;
+}
+
 function stringArrayOrUndefined(value: unknown): string[] | undefined {
   return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : undefined;
 }
@@ -1236,85 +1255,88 @@ function chapterStatusOrUndefined(value: unknown): UpdateChapterInput['status'] 
 const approvalTools = {
   updateCharacter: tool({
     description:
-      'Propose changes to an existing character profile. Requires explicit backend approval before execution.',
+      'Update an existing character. Only `characterId` is required — include only the fields you want to change. All other fields are optional. Call this tool immediately when the user asks to edit a character. The user will approve/reject the proposal in the UI.',
     inputSchema: z.object({
-      characterId: z.string(),
-      name: z.string().optional(),
-      role: z.string().optional(),
-      age: z.string().optional(),
-      occupation: z.string().optional(),
-      traits: z.array(z.string()).optional(),
-      description: z.string().optional(),
-      appearance: z.string().optional(),
-      motivation: z.string().optional(),
-      arc: z.string().optional()
+      characterId: z.string().describe('ID of the character to update'),
+      name: z.string().optional().describe('New name for the character'),
+      role: z.string().optional().describe('Character role (e.g. Protagonist, Antagonist, Supporting)'),
+      age: z.string().optional().describe('Character age'),
+      occupation: z.string().optional().describe('Character occupation'),
+      traits: z.array(z.string()).optional().describe('List of personality traits'),
+      description: z.string().optional().describe('Character description/backstory'),
+      appearance: z.string().optional().describe('Physical appearance'),
+      motivation: z.string().optional().describe('What drives this character'),
+      arc: z.string().optional().describe('Character arc across the story')
     }),
     needsApproval: true,
     execute: async () => ({ status: 'pending-approval' })
   }),
   createCharacter: tool({
-    description: 'Propose a new character. Requires explicit backend approval before execution.',
+    description:
+      'Create a new character. Only `name` is required — all other fields are optional. Call this tool immediately when the user asks to create a character. Do NOT create characters when the user asked for a chapter or something else. The user will approve/reject the proposal in the UI.',
     inputSchema: z.object({
-      name: z.string(),
-      role: z.string().optional(),
-      age: z.string().optional(),
-      occupation: z.string().optional(),
-      traits: z.array(z.string()).optional(),
-      description: z.string().optional(),
-      appearance: z.string().optional(),
-      motivation: z.string().optional(),
-      arc: z.string().optional()
+      name: z.string().describe('Character name (required)'),
+      role: z.string().optional().describe('Character role (e.g. Protagonist, Antagonist, Supporting)'),
+      age: z.string().optional().describe('Character age'),
+      occupation: z.string().optional().describe('Character occupation'),
+      traits: z.array(z.string()).optional().describe('List of personality traits'),
+      description: z.string().optional().describe('Character description/backstory'),
+      appearance: z.string().optional().describe('Physical appearance'),
+      motivation: z.string().optional().describe('What drives this character'),
+      arc: z.string().optional().describe('Character arc across the story')
     }),
     needsApproval: true,
     execute: async () => ({ status: 'pending-approval' })
   }),
   updateChapter: tool({
-    description: 'Propose chapter metadata changes. Requires explicit backend approval before execution.',
+    description:
+      'Update an existing chapter. Only `chapterId` is required — include only the fields you want to change. All other fields (title, summary, content, status, povCharacterId, locationId) are optional. The user will approve/reject the proposal in the UI.',
     inputSchema: z.object({
-      chapterId: z.string(),
-      title: z.string().optional(),
-      summary: z.string().optional(),
-      content: z.string().optional(),
-      status: z.enum(['draft', 'in-progress', 'review', 'final']).optional(),
-      povCharacterId: z.string().optional(),
-      locationId: z.string().optional()
+      chapterId: z.string().describe('ID of the chapter to update'),
+      title: z.string().optional().describe('New chapter title'),
+      summary: z.string().optional().describe('Chapter summary'),
+      content: z.string().optional().describe('Full chapter manuscript content in markdown'),
+      status: z.enum(['draft', 'in-progress', 'review', 'final']).optional().describe('Chapter status'),
+      povCharacterId: z.string().optional().describe('ID of the POV character (optional, can be omitted)'),
+      locationId: z.string().optional().describe('ID of the primary location (optional, can be omitted)')
     }),
     needsApproval: true,
     execute: async () => ({ status: 'pending-approval' })
   }),
   createChapter: tool({
-    description: 'Propose a new chapter. Requires explicit backend approval before execution.',
+    description:
+      'Create a new chapter. Only `title` is required — everything else is optional. You do NOT need a povCharacterId or locationId to create a chapter. Call this tool immediately when the user asks to create a chapter. Do NOT create characters or locations first unless the user explicitly asked for them. The user will approve/reject the proposal in the UI.',
     inputSchema: z.object({
-      title: z.string(),
-      actId: z.string().optional(),
-      summary: z.string().optional(),
-      content: z.string().optional(),
-      status: z.enum(['draft', 'in-progress', 'review', 'final']).optional(),
-      povCharacterId: z.string().optional(),
-      locationId: z.string().optional()
+      title: z.string().describe('Chapter title (required)'),
+      actId: z.string().optional().describe('ID of the act this chapter belongs to (optional)'),
+      summary: z.string().optional().describe('Chapter summary (optional)'),
+      content: z.string().optional().describe('Chapter manuscript content in markdown (optional)'),
+      status: z.enum(['draft', 'in-progress', 'review', 'final']).optional().describe('Chapter status (optional, defaults to draft)'),
+      povCharacterId: z.string().optional().describe('ID of the POV character (optional, can be omitted entirely)'),
+      locationId: z.string().optional().describe('ID of the primary location (optional, can be omitted entirely)')
     }),
     needsApproval: true,
     execute: async () => ({ status: 'pending-approval' })
   }),
   createProjectDoc: tool({
     description:
-      'Propose a new project note, brainstorm, instruction, or reference doc. Requires explicit backend approval before execution.',
+      'Create a new project document (note, brainstorm, instruction, or reference). Only `title` is required. The user will approve/reject the proposal in the UI.',
     inputSchema: z.object({
-      title: z.string(),
-      kind: z.enum(['note', 'brainstorm', 'instructions', 'reference', 'other']).optional(),
-      content: z.string().optional()
+      title: z.string().describe('Document title (required)'),
+      kind: z.enum(['note', 'brainstorm', 'instructions', 'reference', 'other']).optional().describe('Document kind (optional, defaults to note)'),
+      content: z.string().optional().describe('Document body in markdown (optional)')
     }),
     needsApproval: true,
     execute: async () => ({ status: 'pending-approval' })
   }),
   updateProjectDoc: tool({
     description:
-      'Propose changes to an existing project note, brainstorm, instruction, or reference doc. Requires explicit backend approval before execution.',
+      'Update an existing project document. Only `docId` is required — include only the fields you want to change. The user will approve/reject the proposal in the UI.',
     inputSchema: z.object({
-      docId: z.string(),
-      title: z.string().optional(),
-      kind: z.enum(['note', 'brainstorm', 'instructions', 'reference', 'other']).optional(),
-      content: z.string().optional()
+      docId: z.string().describe('ID of the document to update'),
+      title: z.string().optional().describe('New document title'),
+      kind: z.enum(['note', 'brainstorm', 'instructions', 'reference', 'other']).optional().describe('Document kind'),
+      content: z.string().optional().describe('New document body in markdown')
     }),
     needsApproval: true,
     execute: async () => ({ status: 'pending-approval' })
