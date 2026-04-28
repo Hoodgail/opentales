@@ -11,7 +11,8 @@
     location: MapPin,
     structure: Compass,
     outline: BookOpen,
-    submission: GitPullRequest
+    submission: GitPullRequest,
+    doc: FileText
   } as const;
 
   function close(e: MouseEvent, t: OpenTab) {

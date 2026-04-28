@@ -11,10 +11,11 @@
   interface Props {
     value: string;
     onChange: (next: string) => void;
+    onSelectionChange?: (selectedText: string) => void;
     language?: string;
   }
 
-  let { value, onChange, language = 'markdown' }: Props = $props();
+  let { value, onChange, onSelectionChange, language = 'markdown' }: Props = $props();
 
   function monacoThemeFor(id: EditorThemeId): string {
     return editorThemes.find((t) => t.id === id)?.monacoTheme ?? 'manuscript-dark';
@@ -227,6 +228,20 @@
       });
 
       editor.onDidChangeCursorPosition(() => updateFocusDecorations());
+
+      // Track text selection changes and report to parent
+      editor.onDidChangeCursorSelection(() => {
+        if (!editor || !onSelectionChange) return;
+        const selection = editor.getSelection();
+        if (!selection || selection.isEmpty()) {
+          onSelectionChange('');
+          return;
+        }
+        const model = editor.getModel();
+        if (!model) return;
+        onSelectionChange(model.getValueInRange(selection));
+      });
+
       updateFocusDecorations();
     })();
 

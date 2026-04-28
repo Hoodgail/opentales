@@ -54,6 +54,11 @@
       <InspectorLocation location={activeLocation} />
     {:else if activeTab.type === 'structure' || activeTab.type === 'outline'}
       <InspectorProject />
+    {:else if activeTab.type === 'doc'}
+      <!-- Project doc tabs show the project inspector for now -->
+      <InspectorProject />
+    {:else}
+      <InspectorProject />
     {/if}
   </div>
 </aside>

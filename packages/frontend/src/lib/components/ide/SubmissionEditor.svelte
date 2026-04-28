@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { Check, MapPin, MessageSquarePlus, X } from 'lucide-svelte';
+  import { Check, Loader2, MapPin, MessageSquarePlus, Sparkles, X } from 'lucide-svelte';
   import type { SubmissionCommentAnchor, SubmissionDetail } from '@opentales/sdk';
+  import { ai } from '$lib/stores/ai.svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import { cn } from '$lib/utils';
   import MonacoDiffViewer from './MonacoDiffViewer.svelte';
@@ -18,6 +19,7 @@
   let commentBusy = $state(false);
   let pendingAnchor = $state<SubmissionCommentAnchor | null>(null);
   let pinAnchor = $state(false);
+  let reviewRunning = $state(false);
 
   $effect(() => {
     void load(submissionId);
@@ -51,6 +53,16 @@
     const next = await manuscript.declineSubmission(detail.id);
     if (next) detail = next;
     actioning = false;
+  }
+
+  async function runContinuityReview() {
+    if (!detail || !manuscript.projectId || reviewRunning) return;
+    reviewRunning = true;
+    await ai.runContinuityReview(manuscript.projectId, detail.id);
+    // Refresh submission to pick up the new AI_REVIEW_POSTED activity
+    const fresh = await manuscript.loadSubmission(detail.id);
+    if (fresh) detail = fresh;
+    reviewRunning = false;
   }
 
   async function postComment(e: Event) {
@@ -177,8 +189,23 @@
             by {detail.author.name ?? detail.author.username} · {new Date(detail.createdAt).toLocaleString()}
           </p>
         </div>
-        {#if detail.status === 'open' && canDecide()}
-          <div class="flex shrink-0 gap-1.5">
+        <div class="flex shrink-0 gap-1.5">
+          {#if ai.settings?.enabled && detail.status === 'open'}
+            <button
+              type="button"
+              disabled={reviewRunning}
+              onclick={runContinuityReview}
+              class="inline-flex items-center gap-1 rounded-md border border-accent/40 px-2.5 py-1 text-xs text-accent hover:bg-accent/10 disabled:opacity-50"
+            >
+              {#if reviewRunning}
+                <Loader2 class="size-3.5 animate-spin" />
+              {:else}
+                <Sparkles class="size-3.5" />
+              {/if}
+              Continuity Review
+            </button>
+          {/if}
+          {#if detail.status === 'open' && canDecide()}
             <button
               type="button"
               disabled={actioning}
@@ -195,11 +222,54 @@
             >
               <Check class="size-3.5" /> Merge
             </button>
-          </div>
-        {/if}
+          {/if}
+        </div>
       </div>
       {#if detail.message}
         <p class="text-xs text-muted-foreground">{detail.message}</p>
+      {/if}
+
+      <!-- Continuity review results -->
+      {#if ai.continuityResult}
+        <div class="rounded-md border border-accent/20 bg-accent/5 p-3">
+          <p class="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-accent">
+            Continuity Review
+          </p>
+          <p class="text-xs text-foreground/90">{ai.continuityResult.summary}</p>
+          {#if ai.continuityResult.issues.length > 0}
+            <ul class="mt-2 space-y-1.5">
+              {#each ai.continuityResult.issues as issue}
+                <li class="rounded border border-border bg-background/40 p-2 text-[11px]">
+                  <div class="flex items-center gap-1.5">
+                    <span
+                      class={cn(
+                        'rounded px-1 py-0.5 text-[9px] uppercase font-medium',
+                        issue.severity === 'error'
+                          ? 'bg-destructive/20 text-destructive'
+                          : issue.severity === 'warning'
+                            ? 'bg-amber-500/20 text-amber-400'
+                            : 'bg-muted text-muted-foreground'
+                      )}
+                    >
+                      {issue.severity}
+                    </span>
+                    <span class="font-medium text-foreground">{issue.title}</span>
+                  </div>
+                  {#if issue.evidence}
+                    <p class="mt-1 text-muted-foreground">Evidence: {issue.evidence}</p>
+                  {/if}
+                  {#if issue.suggestion}
+                    <p class="mt-0.5 text-accent/80">Suggestion: {issue.suggestion}</p>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
+      {/if}
+
+      {#if ai.featureError}
+        <p class="text-[11px] text-destructive">{ai.featureError}</p>
       {/if}
     </header>
 

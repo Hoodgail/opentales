@@ -1,8 +1,14 @@
 <script lang="ts">
+  import { Sparkles } from 'lucide-svelte';
+  import { ai } from '$lib/stores/ai.svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import { pacingSeries, readingTime } from '$lib/data/pacing';
   import { cn } from '$lib/utils';
+  import AiOutlineDialog from './AiOutlineDialog.svelte';
+  import HeaderButton from './HeaderButton.svelte';
   import PanelHeader from './PanelHeader.svelte';
+
+  let showOutlineExpand = $state(false);
 
   const summary = $derived(
     manuscript.structure.outline.split('\n').find((l) => l.trim() && !l.startsWith('#')) ??
@@ -13,10 +19,29 @@
   const totalWords = $derived(series.reduce((s, d) => s + d.wordCount, 0));
   const totalReading = $derived(readingTime(totalWords));
   const peak = $derived(series.reduce((m, d) => Math.max(m, d.wordCount), 0));
+
+  function openOutlineExpand() {
+    ai.clearFeatureResults();
+    showOutlineExpand = true;
+  }
+
+  function acceptOutline(draft: string) {
+    // Append the expanded outline to the existing outline
+    const current = manuscript.structure.outline;
+    const next = current ? `${current}\n\n---\n\n${draft}` : draft;
+    void manuscript.updateStructure({ outline: next });
+    showOutlineExpand = false;
+  }
 </script>
 
 <div class="flex h-full flex-col">
-  <PanelHeader title="Outline" />
+  <PanelHeader title="Outline">
+    {#snippet actions()}
+      {#if ai.settings?.enabled}
+        <HeaderButton icon={Sparkles} label="AI Expand" onclick={openOutlineExpand} />
+      {/if}
+    {/snippet}
+  </PanelHeader>
 
   <div class="flex-1 overflow-y-auto p-3">
     {#if series.length > 0}
@@ -134,3 +159,10 @@
     </div>
   </div>
 </div>
+
+{#if showOutlineExpand}
+  <AiOutlineDialog
+    onAccept={acceptOutline}
+    onClose={() => (showOutlineExpand = false)}
+  />
+{/if}

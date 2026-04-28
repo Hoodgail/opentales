@@ -1,12 +1,16 @@
 <script lang="ts">
   import {
     BookOpen,
+    Bot,
     FileText,
     Keyboard,
     MapPin,
+    MessageSquare,
     Palette,
     Search,
     Settings,
+    Sparkles,
+    StickyNote,
     Users
   } from 'lucide-svelte';
   import { tick } from 'svelte';
@@ -146,6 +150,8 @@
     out.push(viewCommand('locations', 'Go to Locations', MapPin));
     out.push(viewCommand('outline', 'Go to Outline', BookOpen));
     out.push(viewCommand('search', 'Go to Search', Search));
+    out.push(viewCommand('docs', 'Go to Docs & Notes', StickyNote));
+    out.push(viewCommand('ai', 'Go to AI Agent', Bot));
     out.push(viewCommand('members', 'Go to Members', Users));
     out.push(viewCommand('settings', 'Go to Settings', Settings));
 
@@ -163,6 +169,32 @@
       run: () => {
         close();
         commandPalette.showShortcuts();
+      }
+    });
+
+    // AI-related commands
+    out.push({
+      id: 'action:ai-dialogue',
+      kind: 'action',
+      title: 'AI: Generate character dialogue',
+      subtitle: 'Create dialogue lines for a character',
+      icon: MessageSquare,
+      keywords: 'ai dialogue character speech',
+      run: () => {
+        manuscript.setActiveView('ai');
+        close();
+      }
+    });
+    out.push({
+      id: 'action:ai-outline',
+      kind: 'action',
+      title: 'AI: Expand outline',
+      subtitle: 'Expand a synopsis into a detailed outline',
+      icon: Sparkles,
+      keywords: 'ai outline expand synopsis',
+      run: () => {
+        manuscript.setActiveView('outline');
+        close();
       }
     });
 

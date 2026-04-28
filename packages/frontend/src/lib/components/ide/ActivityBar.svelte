@@ -3,12 +3,14 @@
     AlertTriangle,
     BarChart3,
     BookOpen,
+    Bot,
     Compass,
     FileText,
     Inbox,
     MapPin,
     Search,
     Settings,
+    StickyNote,
     Trash2,
     UserCog,
     Users
@@ -32,6 +34,8 @@
     { id: 'inbox', label: 'Drafts inbox', icon: Inbox },
     { id: 'stats', label: 'Writing stats', icon: BarChart3 },
     { id: 'trash', label: 'Trash', icon: Trash2 },
+    { id: 'docs', label: 'Docs & Notes', icon: StickyNote },
+    { id: 'ai', label: 'AI Agent', icon: Bot },
     { id: 'members', label: 'Members', icon: UserCog }
   ];
 </script>

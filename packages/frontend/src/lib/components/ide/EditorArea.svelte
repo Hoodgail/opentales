@@ -3,6 +3,7 @@
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import ChapterEditor from './ChapterEditor.svelte';
   import CharacterEditor from './CharacterEditor.svelte';
+  import DocEditor from './DocEditor.svelte';
   import EditorTabs from './EditorTabs.svelte';
   import LocationEditor from './LocationEditor.svelte';
   import OutlineEditor from './OutlineEditor.svelte';
@@ -75,6 +76,8 @@
       <OutlineEditor />
     {:else if activeTab.type === 'submission'}
       <SubmissionEditor submissionId={activeTab.refId} />
+    {:else if activeTab.type === 'doc'}
+      <DocEditor docId={activeTab.refId} />
     {/if}
   </div>
 </div>

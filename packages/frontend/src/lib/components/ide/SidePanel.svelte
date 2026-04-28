@@ -1,6 +1,8 @@
 <script lang="ts">
   import { manuscript } from '$lib/stores/manuscript.svelte';
+  import AiAgentPanel from './AiAgentPanel.svelte';
   import CharactersPanel from './CharactersPanel.svelte';
+  import DocsPanel from './DocsPanel.svelte';
   import ExplorerPanel from './ExplorerPanel.svelte';
   import InboxPanel from './InboxPanel.svelte';
   import LocationsPanel from './LocationsPanel.svelte';
@@ -39,6 +41,10 @@
     <StatsPanel />
   {:else if manuscript.activeView === 'trash'}
     <TrashPanel />
+  {:else if manuscript.activeView === 'docs'}
+    <DocsPanel />
+  {:else if manuscript.activeView === 'ai'}
+    <AiAgentPanel />
   {:else if manuscript.activeView === 'settings'}
     <SettingsPanel />
   {/if}

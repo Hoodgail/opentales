@@ -5,6 +5,7 @@
   import { editorTheme, type EditorThemeId } from '$lib/stores/editorTheme.svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import { preferences } from '$lib/stores/preferences.svelte';
+  import AiSettingsSection from './AiSettingsSection.svelte';
   import PanelHeader from './PanelHeader.svelte';
 
   let coverInput: HTMLInputElement | null = $state(null);
@@ -134,6 +135,7 @@
     {#if !manuscript.projectId}
       <div class="p-4 text-xs text-muted-foreground">No project loaded.</div>
     {:else}
+      <AiSettingsSection />
       <section class="border-b border-border p-3 text-xs">
         <h3 class="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
           Cover

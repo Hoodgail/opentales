@@ -20,11 +20,13 @@ export type ActivityView =
   | 'problems'
   | 'stats'
   | 'trash'
+  | 'docs'
+  | 'ai'
   | 'settings';
 
 export interface OpenTab {
   id: string;
-  type: 'chapter' | 'character' | 'location' | 'structure' | 'outline' | 'submission';
+  type: 'chapter' | 'character' | 'location' | 'structure' | 'outline' | 'submission' | 'doc';
   refId: string;
   title: string;
   dirty?: boolean;

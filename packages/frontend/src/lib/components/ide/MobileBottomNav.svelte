@@ -1,12 +1,14 @@
 <script lang="ts">
   import {
     BookOpen,
+    Bot,
     Compass,
     FileText,
     Inbox,
     MapPin,
     Search,
     Settings,
+    StickyNote,
     UserCog,
     Users,
   } from "lucide-svelte";
@@ -26,6 +28,8 @@
     { id: "outline", label: "Outline", icon: BookOpen },
     { id: "search", label: "Search", icon: Search },
     { id: "inbox", label: "Drafts", icon: Inbox },
+    { id: "docs", label: "Docs", icon: StickyNote },
+    { id: "ai", label: "AI", icon: Bot },
     { id: "members", label: "Members", icon: UserCog },
     { id: "settings", label: "Settings", icon: Settings },
   ];

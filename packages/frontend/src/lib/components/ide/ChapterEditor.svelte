@@ -1,10 +1,13 @@
 <script lang="ts">
-  import { Eye, Focus, Hash, MapPin, Type, User } from 'lucide-svelte';
+  import { Eye, Focus, Hash, MapPin, MessageSquare, Sparkles, Type, User } from 'lucide-svelte';
+  import { ai } from '$lib/stores/ai.svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import { preferences } from '$lib/stores/preferences.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
   import type { Chapter, ChapterStatus } from '$lib/data/manuscript-types';
   import { cn } from '$lib/utils';
+  import AiDialogueDialog from './AiDialogueDialog.svelte';
+  import AiRewriteDialog from './AiRewriteDialog.svelte';
   import MarkdownPreview from './MarkdownPreview.svelte';
   import MonacoMarkdownEditor from './MonacoMarkdownEditor.svelte';
 
@@ -24,6 +27,9 @@
   let splitView = $state(false);
   let localContent = $state('');
   let lastChapterId = $state<string | null>(null);
+  let selectedText = $state('');
+  let showRewrite = $state(false);
+  let showDialogue = $state(false);
 
   // When the active chapter switches, re-prime the local buffer with the
   // chapter's persisted content. This effect runs both on mount and on prop
@@ -41,6 +47,34 @@
   function handleChange(next: string) {
     localContent = next;
     void manuscript.updateChapterContent(chapter.id, next);
+  }
+
+  function handleSelection(text: string) {
+    selectedText = text;
+  }
+
+  function openRewrite() {
+    if (!selectedText.trim()) return;
+    ai.clearFeatureResults();
+    showRewrite = true;
+  }
+
+  function acceptRewrite(text: string) {
+    localContent = localContent.replace(selectedText, text);
+    void manuscript.updateChapterContent(chapter.id, localContent);
+    showRewrite = false;
+    selectedText = '';
+  }
+
+  function openDialogue() {
+    ai.clearFeatureResults();
+    showDialogue = true;
+  }
+
+  function insertDialogueLine(line: string) {
+    const insertion = `\n"${line}"\n`;
+    localContent += insertion;
+    void manuscript.updateChapterContent(chapter.id, localContent);
   }
 </script>
 
@@ -125,13 +159,44 @@
         <Eye class="size-3" />
         Preview
       </button>
+      {#if ai.settings?.enabled}
+        <button
+          type="button"
+          onclick={openRewrite}
+          disabled={!selectedText.trim()}
+          title={selectedText.trim() ? 'AI Rewrite selection' : 'Select text to rewrite'}
+          class={cn(
+            'flex items-center gap-1.5 rounded px-2 py-1 text-xs transition-colors',
+            viewport.mobile ? 'tap-target' : '',
+            selectedText.trim()
+              ? 'text-accent hover:bg-accent/10'
+              : 'text-muted-foreground/40 cursor-not-allowed'
+          )}
+        >
+          <Sparkles class="size-3" />
+          Rewrite
+        </button>
+        <button
+          type="button"
+          onclick={openDialogue}
+          title="Generate character dialogue"
+          class={cn(
+            'flex items-center gap-1.5 rounded px-2 py-1 text-xs transition-colors',
+            viewport.mobile ? 'tap-target' : '',
+            'text-muted-foreground hover:bg-muted hover:text-foreground'
+          )}
+        >
+          <MessageSquare class="size-3" />
+          Dialogue
+        </button>
+      {/if}
     </div>
   </div>
 
   <!-- Editor + preview -->
   <div class="flex min-h-0 flex-1">
     <div class={cn('min-h-0', splitView ? 'w-1/2 border-r border-border' : 'w-full')}>
-      <MonacoMarkdownEditor value={localContent} onChange={handleChange} />
+      <MonacoMarkdownEditor value={localContent} onChange={handleChange} onSelectionChange={handleSelection} />
     </div>
     {#if splitView}
       <div class="w-1/2 overflow-y-auto bg-background px-10 py-8">
@@ -140,3 +205,18 @@
     {/if}
   </div>
 </div>
+
+{#if showRewrite}
+  <AiRewriteDialog
+    text={selectedText}
+    onAccept={acceptRewrite}
+    onClose={() => (showRewrite = false)}
+  />
+{/if}
+
+{#if showDialogue}
+  <AiDialogueDialog
+    onInsert={insertDialogueLine}
+    onClose={() => (showDialogue = false)}
+  />
+{/if}

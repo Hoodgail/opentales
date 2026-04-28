@@ -27,6 +27,7 @@ import {
   type UpdateObstacleInput,
   type UpdateProjectInput
 } from '@opentales/sdk';
+import { syncAiToken } from '$lib/stores/ai.svelte';
 import type {
   Act,
   ActivityView,
@@ -173,6 +174,7 @@ function createStore() {
     try {
       const session = await api.login({ emailOrUsername, password });
       browserLocalStorage().setItem('opentales.token', session.token);
+      syncAiToken(session.token);
       authenticated = true;
       await loadProject();
     } catch (caught) {
@@ -197,6 +199,7 @@ function createStore() {
     try {
       const session = await api.register(input);
       browserLocalStorage().setItem('opentales.token', session.token);
+      syncAiToken(session.token);
       authenticated = true;
       await loadProject();
     } catch (caught) {
@@ -211,6 +214,7 @@ function createStore() {
 
   async function logout() {
     api.setToken(undefined);
+    syncAiToken(undefined);
     browserLocalStorage().removeItem('opentales.token');
     authenticated = false;
     error = null;
