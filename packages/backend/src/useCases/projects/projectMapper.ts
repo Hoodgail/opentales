@@ -8,6 +8,7 @@ import type {
   Location,
   ManuscriptProject,
   ObstacleType,
+  ProjectDoc,
   ProjectSummary,
   ProjectVisibility,
   StoryStructure
@@ -94,6 +95,12 @@ const projectInclude = {
     include: {
       bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } }
     }
+  },
+  docs: {
+    orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+    include: {
+      bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } }
+    }
   }
 } satisfies Prisma.ProjectInclude;
 
@@ -142,6 +149,7 @@ export function toManuscriptProject(project: ProjectWithManuscript): ManuscriptP
     characters: project.characters.map(toCharacter),
     locations: project.locations.map(toLocation),
     chapters: project.chapters.map(toChapter),
+    docs: project.docs.map(toProjectDoc),
     acts: project.acts.map(toAct),
     structure: toStoryStructure(project)
   };
@@ -197,6 +205,27 @@ function toChapter(chapter: ProjectWithManuscript['chapters'][number]): Chapter 
     content: head?.body ?? '',
     wordCount: head?.wordCount ?? 0,
     publishedAt: chapter.publishedAt ? chapter.publishedAt.toISOString() : null
+  };
+}
+
+function toProjectDoc(doc: ProjectWithManuscript['docs'][number]): ProjectDoc {
+  const head = doc.bodyWriting.defaultBranch?.headVersion;
+  const kindMap = {
+    NOTE: 'note',
+    BRAINSTORM: 'brainstorm',
+    INSTRUCTIONS: 'instructions',
+    REFERENCE: 'reference',
+    OTHER: 'other'
+  } as const;
+  return {
+    id: doc.id,
+    projectId: doc.projectId,
+    title: doc.title,
+    kind: kindMap[doc.kind],
+    content: head?.body ?? '',
+    wordCount: head?.wordCount ?? 0,
+    createdAt: doc.createdAt.toISOString(),
+    updatedAt: doc.updatedAt.toISOString()
   };
 }
 

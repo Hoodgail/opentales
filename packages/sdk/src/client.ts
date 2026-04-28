@@ -15,13 +15,30 @@ import type {
   CreateInviteInput,
   CreateLocationInput,
   CreateObstacleInput,
+  CreateProjectDocInput,
   CreateProjectInput,
   LoginInput,
   ManuscriptProject,
   MembersAndInvites,
   AddSubmissionCommentInput,
+  ApproveAiToolCallInput,
+  AiAgentSessionEvent,
+  AiAgentSession,
+  AiCharacterDialogueSuggestion,
+  AiContinuityReview,
+  AiOutlineExpansion,
+  AiRewriteSuggestion,
+  AiToolManifest,
   CreateSubmissionInput,
+  CreateAiCharacterDialogueInput,
+  CreateAiOutlineExpansionInput,
+  CreateAiRewriteSuggestionInput,
+  ListProjectDocsInput,
+  PaginatedProjectDocs,
+  QueueAiAgentPromptInput,
   ProjectInvite,
+  ProjectAiSettings,
+  ProjectDoc,
   ProjectStats,
   ProjectSummary,
   PublicProject,
@@ -37,6 +54,8 @@ import type {
   UpdateCharacterInput,
   UpdateLocationInput,
   UpdateObstacleInput,
+  UpdateProjectDocInput,
+  UpdateProjectAiSettingsInput,
   UpdateProjectInput,
   UpdateStructureInput
 } from './types.js';
@@ -340,6 +359,46 @@ export class OpenTalesClient {
     });
   }
 
+  listProjectDocs(
+    projectId: string,
+    input: ListProjectDocsInput = {}
+  ): Promise<PaginatedProjectDocs> {
+    const params = new URLSearchParams();
+    if (input.limit !== undefined) params.set('limit', String(input.limit));
+    if (input.offset !== undefined) params.set('offset', String(input.offset));
+    if (input.kind !== undefined) params.set('kind', input.kind);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return this.request<PaginatedProjectDocs>(`/projects/${projectId}/docs${qs}`);
+  }
+
+  createProjectDoc(projectId: string, input: CreateProjectDocInput): Promise<ProjectDoc> {
+    return this.request<ProjectDoc>(`/projects/${projectId}/docs`, {
+      method: 'POST',
+      body: input
+    });
+  }
+
+  getProjectDoc(projectId: string, docId: string): Promise<ProjectDoc> {
+    return this.request<ProjectDoc>(`/projects/${projectId}/docs/${docId}`);
+  }
+
+  updateProjectDoc(
+    projectId: string,
+    docId: string,
+    input: UpdateProjectDocInput
+  ): Promise<ProjectDoc> {
+    return this.request<ProjectDoc>(`/projects/${projectId}/docs/${docId}`, {
+      method: 'PATCH',
+      body: input
+    });
+  }
+
+  deleteProjectDoc(projectId: string, docId: string): Promise<{ id: string; deleted: true }> {
+    return this.request<{ id: string; deleted: true }>(`/projects/${projectId}/docs/${docId}`, {
+      method: 'DELETE'
+    });
+  }
+
   createObstacle(projectId: string, input: CreateObstacleInput): Promise<ManuscriptProject> {
     return this.request<ManuscriptProject>(`/projects/${projectId}/obstacles`, {
       method: 'POST',
@@ -436,6 +495,147 @@ export class OpenTalesClient {
   getProjectStats(projectId: string, days?: number): Promise<ProjectStats> {
     const qs = days ? `?days=${days}` : '';
     return this.request<ProjectStats>(`/projects/${projectId}/stats${qs}`);
+  }
+
+  getProjectAiSettings(projectId: string): Promise<ProjectAiSettings> {
+    return this.request<ProjectAiSettings>(`/projects/${projectId}/ai-settings`);
+  }
+
+  updateProjectAiSettings(
+    projectId: string,
+    input: UpdateProjectAiSettingsInput
+  ): Promise<ProjectAiSettings> {
+    return this.request<ProjectAiSettings>(`/projects/${projectId}/ai-settings`, {
+      method: 'PATCH',
+      body: input
+    });
+  }
+
+  runContinuityReview(projectId: string, submissionId: string): Promise<AiContinuityReview> {
+    return this.request<AiContinuityReview>(
+      `/projects/${projectId}/ai/continuity-reviews`,
+      {
+        method: 'POST',
+        body: { submissionId }
+      }
+    );
+  }
+
+  createRewriteSuggestion(
+    projectId: string,
+    input: CreateAiRewriteSuggestionInput
+  ): Promise<AiRewriteSuggestion> {
+    return this.request<AiRewriteSuggestion>(`/projects/${projectId}/ai/rewrite-suggestions`, {
+      method: 'POST',
+      body: input
+    });
+  }
+
+  createCharacterDialogueSuggestion(
+    projectId: string,
+    input: CreateAiCharacterDialogueInput
+  ): Promise<AiCharacterDialogueSuggestion> {
+    return this.request<AiCharacterDialogueSuggestion>(
+      `/projects/${projectId}/ai/character-dialogue`,
+      {
+        method: 'POST',
+        body: input
+      }
+    );
+  }
+
+  createOutlineExpansion(
+    projectId: string,
+    input: CreateAiOutlineExpansionInput
+  ): Promise<AiOutlineExpansion> {
+    return this.request<AiOutlineExpansion>(`/projects/${projectId}/ai/outline-expansions`, {
+      method: 'POST',
+      body: input
+    });
+  }
+
+  listAiTools(projectId: string): Promise<AiToolManifest> {
+    return this.request<AiToolManifest>(`/projects/${projectId}/ai/tools`);
+  }
+
+  getAiAgentSession(projectId: string): Promise<AiAgentSession> {
+    return this.request<AiAgentSession>(`/projects/${projectId}/ai/agent-session`);
+  }
+
+  queueAiAgentPrompt(
+    projectId: string,
+    input: QueueAiAgentPromptInput
+  ): Promise<AiAgentSession> {
+    return this.request<AiAgentSession>(`/projects/${projectId}/ai/agent-session/prompts`, {
+      method: 'POST',
+      body: input
+    });
+  }
+
+  cancelAiAgentSession(projectId: string): Promise<AiAgentSession> {
+    return this.request<AiAgentSession>(`/projects/${projectId}/ai/agent-session/cancel`, {
+      method: 'POST'
+    });
+  }
+
+  approveAiToolCall(
+    projectId: string,
+    toolCallId: string,
+    input: ApproveAiToolCallInput
+  ): Promise<AiAgentSession> {
+    return this.request<AiAgentSession>(
+      `/projects/${projectId}/ai/agent-session/tool-calls/${toolCallId}/approval`,
+      {
+        method: 'POST',
+        body: input
+      }
+    );
+  }
+
+  async streamAiAgentSession(
+    projectId: string,
+    onEvent: (event: AiAgentSessionEvent) => void,
+    options: { signal?: AbortSignal } = {}
+  ): Promise<void> {
+    const headers = new Headers();
+    headers.set('accept', 'text/event-stream');
+    if (this.token) headers.set('authorization', `Bearer ${this.token}`);
+
+    const response = await this.fetcher(
+      `${this.baseUrl}/projects/${projectId}/ai/agent-session/events`,
+      {
+        method: 'GET',
+        headers,
+        signal: options.signal
+      }
+    );
+
+    if (!response.ok) {
+      const text = await response.text();
+      const payload = text ? JSON.parse(text) : null;
+      throw new ApiError(payload?.message ?? 'Request failed', response.status, payload);
+    }
+    if (!response.body) return;
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split('\n\n');
+      buffer = chunks.pop() ?? '';
+      for (const chunk of chunks) {
+        const data = chunk
+          .split('\n')
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).trimStart())
+          .join('\n');
+        if (data) onEvent(JSON.parse(data) as AiAgentSessionEvent);
+      }
+    }
   }
 
   private async request<T>(

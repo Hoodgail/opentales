@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { AiController } from '../controllers/AiController.js';
+import { ProjectDocController } from '../controllers/ProjectDocController.js';
 import { ProjectController } from '../controllers/ProjectController.js';
 import { StatsController } from '../controllers/StatsController.js';
 import { TrashController } from '../controllers/TrashController.js';
@@ -6,6 +8,8 @@ import { asyncHandler } from '../http/asyncHandler.js';
 import { requireAuth } from '../middleware/authMiddleware.js';
 
 const controller = new ProjectController();
+const ai = new AiController();
+const docs = new ProjectDocController();
 const trash = new TrashController();
 const stats = new StatsController();
 export const projectRoutes = Router();
@@ -15,6 +19,28 @@ projectRoutes.get('/', asyncHandler(controller.list));
 projectRoutes.post('/', asyncHandler(controller.create));
 projectRoutes.get('/:projectId', asyncHandler(controller.get));
 projectRoutes.patch('/:projectId', asyncHandler(controller.update));
+
+projectRoutes.get('/:projectId/ai-settings', asyncHandler(ai.getSettings));
+projectRoutes.patch('/:projectId/ai-settings', asyncHandler(ai.updateSettings));
+projectRoutes.get('/:projectId/ai/tools', asyncHandler(ai.tools));
+projectRoutes.get('/:projectId/ai/agent-session', asyncHandler(ai.agentSession));
+projectRoutes.get('/:projectId/ai/agent-session/events', asyncHandler(ai.agentSessionEvents));
+projectRoutes.post('/:projectId/ai/agent-session/prompts', asyncHandler(ai.queueAgentPrompt));
+projectRoutes.post('/:projectId/ai/agent-session/cancel', asyncHandler(ai.cancelAgentSession));
+projectRoutes.post(
+  '/:projectId/ai/agent-session/tool-calls/:toolCallId/approval',
+  asyncHandler(ai.approveToolCall)
+);
+projectRoutes.post('/:projectId/ai/continuity-reviews', asyncHandler(ai.continuityReview));
+projectRoutes.post('/:projectId/ai/rewrite-suggestions', asyncHandler(ai.rewriteSuggestion));
+projectRoutes.post('/:projectId/ai/character-dialogue', asyncHandler(ai.characterDialogue));
+projectRoutes.post('/:projectId/ai/outline-expansions', asyncHandler(ai.outlineExpansion));
+
+projectRoutes.get('/:projectId/docs', asyncHandler(docs.list));
+projectRoutes.post('/:projectId/docs', asyncHandler(docs.create));
+projectRoutes.get('/:projectId/docs/:docId', asyncHandler(docs.get));
+projectRoutes.patch('/:projectId/docs/:docId', asyncHandler(docs.update));
+projectRoutes.delete('/:projectId/docs/:docId', asyncHandler(docs.delete));
 
 projectRoutes.post('/:projectId/acts', asyncHandler(controller.createAct));
 projectRoutes.patch('/:projectId/acts/:actId', asyncHandler(controller.updateAct));

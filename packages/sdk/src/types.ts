@@ -4,6 +4,9 @@ export type AssetKind = 'image' | 'audio' | 'video' | 'document';
 export type Role = 'OWNER' | 'ADMIN' | 'EDITOR' | 'VIEWER';
 export type CoverOrientation = 'landscape' | 'portrait';
 export type ProjectVisibility = 'private' | 'public';
+export type AiProviderKind = 'gateway' | 'openai-compatible';
+export type AiRewriteMode = 'tighter' | 'softer' | 'more-visceral' | 'more-lyrical';
+export type ProjectDocKind = 'note' | 'brainstorm' | 'instructions' | 'reference' | 'other';
 
 export interface AuthUser {
   id: string;
@@ -88,6 +91,43 @@ export interface Chapter {
   publishedAt: string | null;
 }
 
+export interface ProjectDoc {
+  id: string;
+  projectId: string;
+  title: string;
+  kind: ProjectDocKind;
+  content: string;
+  wordCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PaginatedProjectDocs {
+  items: ProjectDoc[];
+  total: number;
+  limit: number;
+  offset: number;
+  nextOffset: number | null;
+}
+
+export interface ListProjectDocsInput {
+  limit?: number;
+  offset?: number;
+  kind?: ProjectDocKind;
+}
+
+export interface CreateProjectDocInput {
+  title: string;
+  kind?: ProjectDocKind;
+  content?: string;
+}
+
+export interface UpdateProjectDocInput {
+  title?: string;
+  kind?: ProjectDocKind;
+  content?: string;
+}
+
 export interface Act {
   id: string;
   title: string;
@@ -141,6 +181,7 @@ export interface ManuscriptProject {
   characters: Character[];
   locations: Location[];
   chapters: Chapter[];
+  docs: ProjectDoc[];
   acts: Act[];
   structure: StoryStructure;
 }
@@ -200,6 +241,159 @@ export interface ProjectStats {
   currentStreakDays: number;
   windowDays: number;
   days: ProjectStatsDay[];
+}
+
+export interface ProjectAiSettings {
+  projectId: string;
+  enabled: boolean;
+  providerKind: AiProviderKind;
+  model: string;
+  baseUrl: string | null;
+  hasApiKey: boolean;
+  updatedAt: string | null;
+}
+
+export interface UpdateProjectAiSettingsInput {
+  enabled?: boolean;
+  providerKind?: AiProviderKind;
+  model?: string;
+  baseUrl?: string | null;
+  /**
+   * Write-only. Omit to keep the existing key, pass null to clear it.
+   */
+  apiKey?: string | null;
+}
+
+export interface AiContinuityIssue {
+  severity: 'info' | 'warning' | 'error';
+  title: string;
+  evidence: string;
+  earlierContext: string;
+  suggestion: string;
+}
+
+export interface AiContinuityReview {
+  summary: string;
+  issues: AiContinuityIssue[];
+  postedActivityId?: string;
+}
+
+export interface AiRewriteSuggestion {
+  original: string;
+  suggested: string;
+  mode: AiRewriteMode;
+  rationale: string;
+}
+
+export interface CreateAiRewriteSuggestionInput {
+  text: string;
+  mode: AiRewriteMode;
+  context?: string;
+}
+
+export interface CreateAiCharacterDialogueInput {
+  characterId: string;
+  situation: string;
+  count?: number;
+}
+
+export interface AiCharacterDialogueSuggestion {
+  characterId: string;
+  characterName: string;
+  lines: string[];
+  notes: string;
+}
+
+export interface CreateAiOutlineExpansionInput {
+  synopsis: string;
+  targetLength?: 'short' | 'medium' | 'long';
+  povCharacterId?: string;
+  locationId?: string;
+}
+
+export interface AiOutlineExpansion {
+  draft: string;
+  label: 'AI draft';
+  acceptRequiresEdits: true;
+  notes: string;
+}
+
+export interface AiToolDescriptor {
+  name: string;
+  description: string;
+  requiresApproval: boolean;
+  inputSchema: Record<string, unknown>;
+}
+
+export interface AiToolManifest {
+  tools: AiToolDescriptor[];
+}
+
+export type AiAgentSessionStatus = 'idle' | 'running' | 'cancelled' | 'error';
+export type AiToolCallStatus = 'pending-approval' | 'approved' | 'rejected' | 'executed' | 'error';
+export type AiAgentSessionEventType =
+  | 'session'
+  | 'prompt-queued'
+  | 'prompt-started'
+  | 'text-delta'
+  | 'tool-call'
+  | 'tool-result'
+  | 'tool-approval'
+  | 'prompt-finished'
+  | 'error';
+
+export interface AiAgentMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string;
+  createdAt: string;
+}
+
+export interface AiAgentQueuedPrompt {
+  id: string;
+  prompt: string;
+  status: 'queued' | 'running' | 'completed' | 'cancelled' | 'error';
+  createdAt: string;
+}
+
+export interface AiAgentToolCall {
+  id: string;
+  toolCallId: string | null;
+  toolName: string;
+  input: unknown;
+  status: AiToolCallStatus;
+  output: unknown;
+  error: string | null;
+  createdAt: string;
+  decidedAt: string | null;
+}
+
+export interface AiAgentSession {
+  projectId: string;
+  status: AiAgentSessionStatus;
+  activePromptId: string | null;
+  queue: AiAgentQueuedPrompt[];
+  messages: AiAgentMessage[];
+  pendingToolCalls: AiAgentToolCall[];
+  updatedAt: string;
+}
+
+export interface QueueAiAgentPromptInput {
+  prompt: string;
+  /**
+   * If true, cancels the active generation and runs this prompt next.
+   */
+  interrupt?: boolean;
+}
+
+export interface AiAgentSessionEvent {
+  type: AiAgentSessionEventType;
+  session: AiAgentSession;
+  data?: unknown;
+}
+
+export interface ApproveAiToolCallInput {
+  approved: boolean;
 }
 
 export interface OrgMember {

@@ -102,6 +102,49 @@ enum ActivityType {
   AI_REVIEW_POSTED
 }
 
+enum AiProviderKind {
+  GATEWAY
+  OPENAI_COMPATIBLE
+}
+
+enum ProjectDocKind {
+  NOTE
+  BRAINSTORM
+  INSTRUCTIONS
+  REFERENCE
+  OTHER
+}
+
+enum AiAgentSessionStatus {
+  IDLE
+  RUNNING
+  CANCELLED
+  ERROR
+}
+
+enum AiAgentMessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+  TOOL
+}
+
+enum AiAgentPromptStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  CANCELLED
+  ERROR
+}
+
+enum AiToolCallStatus {
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  EXECUTED
+  ERROR
+}
+
 model User {
   id           String   @id @default(cuid())
   username     String   @unique
@@ -208,9 +251,104 @@ model Project {
   projectStates UserProjectState[]
   submissions   Submission[]
   betaShareLinks BetaShareLink[]
+  aiSettings    ProjectAiSettings?
+  docs          ProjectDoc[]
+  aiAgentSession ProjectAiAgentSession?
 
   @@unique([orgId, slug])
   @@index([orgId])
+}
+
+model ProjectAiAgentSession {
+  id             String               @id @default(cuid())
+  projectId      String               @unique
+  status         AiAgentSessionStatus @default(IDLE)
+  activePromptId String?
+  lastError      String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  project   Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  messages  AiAgentMessage[]
+  prompts   AiAgentPrompt[]
+  toolCalls AiAgentToolCall[]
+}
+
+model AiAgentMessage {
+  id        String             @id @default(cuid())
+  sessionId String
+  role      AiAgentMessageRole
+  content   String
+  createdAt DateTime           @default(now())
+
+  session ProjectAiAgentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+}
+
+model AiAgentPrompt {
+  id        String              @id @default(cuid())
+  sessionId String
+  prompt    String
+  status    AiAgentPromptStatus @default(QUEUED)
+  order     Int
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  session ProjectAiAgentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, status, order])
+}
+
+model AiAgentToolCall {
+  id         String           @id @default(cuid())
+  sessionId  String
+  promptId   String?
+  toolCallId String?
+  toolName   String
+  input      Json
+  status     AiToolCallStatus @default(PENDING_APPROVAL)
+  output     Json?
+  error      String?
+  createdAt  DateTime         @default(now())
+  decidedAt  DateTime?
+  decidedById String?
+
+  session ProjectAiAgentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, status, createdAt])
+  @@index([toolCallId])
+}
+
+model ProjectDoc {
+  id            String         @id @default(cuid())
+  projectId     String
+  title         String
+  kind          ProjectDocKind @default(NOTE)
+  bodyWritingId String
+  order         Int
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  bodyWriting Writing @relation("ProjectDocBodyWriting", fields: [bodyWritingId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, order])
+  @@index([projectId, kind])
+}
+
+model ProjectAiSettings {
+  id           String         @id @default(cuid())
+  projectId    String         @unique
+  enabled      Boolean        @default(false)
+  providerKind AiProviderKind @default(GATEWAY)
+  model        String         @default("openai/gpt-5.4")
+  baseUrl      String?
+  apiKey       String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 model BetaShareLink {
@@ -442,6 +580,7 @@ model Writing {
   locationSensoryDetails Location[] @relation("LocationSensoryWriting")
   obstacleDescriptions Obstacle[] @relation("ObstacleDescriptionWriting")
   obstacleResolutions Obstacle[] @relation("ObstacleResolutionWriting")
+  projectDocs ProjectDoc[] @relation("ProjectDocBodyWriting")
 
   @@index([projectId, kind])
 }
