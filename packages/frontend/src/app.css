@@ -1,5 +1,5 @@
-@import 'tailwindcss';
-@import 'tw-animate-css';
+@import "tailwindcss";
+@import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -116,9 +116,10 @@
 }
 
 @theme inline {
-  --font-sans: 'Geist', 'Inter', system-ui, -apple-system, sans-serif;
-  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, monospace;
-  --font-serif: 'Iowan Old Style', 'Apple Garamond', 'Baskerville', 'Times New Roman', serif;
+  --font-sans: "Geist", "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-serif: "Iowan Old Style", "Apple Garamond", "Baskerville",
+    "Times New Roman", serif;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -178,7 +179,7 @@
     -webkit-tap-highlight-color: transparent;
   }
   button,
-  [role='button'],
+  [role="button"],
   a,
   input,
   select,
@@ -202,8 +203,9 @@
     :root {
       --app-titlebar-height: 44px;
       --app-bottom-nav-height: 64px;
+      --spacing: 0.3rem;
     }
-    input:not([type='checkbox']):not([type='radio']):not([type='range']),
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
     select,
     textarea {
       font-size: 16px;
