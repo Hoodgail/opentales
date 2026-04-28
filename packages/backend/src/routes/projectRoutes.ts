@@ -23,6 +23,16 @@ projectRoutes.patch('/:projectId', asyncHandler(controller.update));
 projectRoutes.get('/:projectId/ai-settings', asyncHandler(ai.getSettings));
 projectRoutes.patch('/:projectId/ai-settings', asyncHandler(ai.updateSettings));
 projectRoutes.get('/:projectId/ai/tools', asyncHandler(ai.tools));
+projectRoutes.get('/:projectId/ai/agent-sessions', asyncHandler(ai.agentSessions));
+projectRoutes.post('/:projectId/ai/agent-sessions', asyncHandler(ai.createAgentSession));
+projectRoutes.get('/:projectId/ai/agent-sessions/:sessionId', asyncHandler(ai.agentSession));
+projectRoutes.get('/:projectId/ai/agent-sessions/:sessionId/events', asyncHandler(ai.agentSessionEvents));
+projectRoutes.post('/:projectId/ai/agent-sessions/:sessionId/prompts', asyncHandler(ai.queueAgentPrompt));
+projectRoutes.post('/:projectId/ai/agent-sessions/:sessionId/cancel', asyncHandler(ai.cancelAgentSession));
+projectRoutes.post(
+  '/:projectId/ai/agent-sessions/:sessionId/tool-calls/:toolCallId/approval',
+  asyncHandler(ai.approveToolCall)
+);
 projectRoutes.get('/:projectId/ai/agent-session', asyncHandler(ai.agentSession));
 projectRoutes.get('/:projectId/ai/agent-session/events', asyncHandler(ai.agentSessionEvents));
 projectRoutes.post('/:projectId/ai/agent-session/prompts', asyncHandler(ai.queueAgentPrompt));

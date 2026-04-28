@@ -5,8 +5,11 @@ import type {
   AiAgentQueuedPrompt,
   AiAgentSession,
   AiAgentSessionEvent,
+  AiAgentSessionSummary,
   AiAgentToolCall,
   ApproveAiToolCallInput,
+  CreateAiAgentSessionInput,
+  CreateChapterInput,
   CreateCharacterInput,
   QueueAiAgentPromptInput,
   UpdateChapterInput,
@@ -16,6 +19,7 @@ import { stepCountIs, streamText, tool } from 'ai';
 import { z } from 'zod';
 import { HttpError } from '../../http/HttpError.js';
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
+import { CreateChapterUseCase } from '../projects/CreateChapterUseCase.js';
 import { CreateCharacterUseCase } from '../projects/CreateCharacterUseCase.js';
 import { UpdateChapterUseCase } from '../projects/UpdateChapterUseCase.js';
 import { UpdateCharacterUseCase } from '../projects/UpdateCharacterUseCase.js';
@@ -31,6 +35,7 @@ const MUTATING_TOOLS = new Set([
   'updateCharacter',
   'createCharacter',
   'updateChapter',
+  'createChapter',
   'createProjectDoc',
   'updateProjectDoc'
 ]);
@@ -42,16 +47,51 @@ export class AiAgentSessionUseCase {
     this.access = new ProjectAccessRepository(prisma);
   }
 
-  async get(userId: string, projectId: string): Promise<AiAgentSession> {
+  async list(userId: string, projectId: string): Promise<AiAgentSessionSummary[]> {
     await this.access.assertProjectAccess(userId, projectId);
-    const session = await this.ensureSession(projectId);
+    await this.ensureDefaultSession(projectId);
+    const sessions = await this.prisma.projectAiAgentSession.findMany({
+      where: { projectId },
+      orderBy: { updatedAt: 'desc' },
+      include: { _count: { select: { messages: true } } }
+    });
+    return sessions.map((session) => ({
+      id: session.id,
+      projectId,
+      title: session.title ?? defaultSessionTitle(session.createdAt),
+      status: toSessionStatus(session.status),
+      messageCount: session._count.messages,
+      createdAt: session.createdAt.toISOString(),
+      updatedAt: session.updatedAt.toISOString()
+    }));
+  }
+
+  async create(
+    userId: string,
+    projectId: string,
+    input: CreateAiAgentSessionInput
+  ): Promise<AiAgentSession> {
+    await this.access.assertPermission(userId, projectId, 'project:write');
+    const title = input.title?.trim() || 'New chat';
+    const session = await this.prisma.projectAiAgentSession.create({
+      data: { projectId, title }
+    });
+    return this.snapshot(session.id, projectId);
+  }
+
+  async get(userId: string, projectId: string, sessionId?: string): Promise<AiAgentSession> {
+    await this.access.assertProjectAccess(userId, projectId);
+    const session = sessionId
+      ? await this.getSession(projectId, sessionId)
+      : await this.ensureDefaultSession(projectId);
     return this.snapshot(session.id, projectId);
   }
 
   async queuePrompt(
     userId: string,
     projectId: string,
-    input: QueueAiAgentPromptInput
+    input: QueueAiAgentPromptInput,
+    sessionId?: string
   ): Promise<AiAgentSession> {
     await this.access.assertPermission(userId, projectId, 'project:write');
     await loadAiModelForProject(this.prisma, projectId);
@@ -59,8 +99,10 @@ export class AiAgentSessionUseCase {
     const prompt = input.prompt?.trim();
     if (!prompt) throw new HttpError(400, 'Prompt is required');
 
-    const session = await this.ensureSession(projectId);
-    const runtime = getRuntime(projectId);
+    const session = sessionId
+      ? await this.getSession(projectId, sessionId)
+      : await this.ensureDefaultSession(projectId);
+    const runtime = getRuntime(session.id);
     if (input.interrupt && runtime.abortController) {
       runtime.abortController.abort();
       await this.prisma.aiAgentPrompt.updateMany({
@@ -91,14 +133,16 @@ export class AiAgentSessionUseCase {
       session: await this.snapshot(session.id, projectId),
       data: toQueuedPrompt(queued)
     });
-    void this.drain(projectId);
+    void this.drain(projectId, session.id);
     return this.snapshot(session.id, projectId);
   }
 
-  async cancel(userId: string, projectId: string): Promise<AiAgentSession> {
+  async cancel(userId: string, projectId: string, sessionId?: string): Promise<AiAgentSession> {
     await this.access.assertPermission(userId, projectId, 'project:write');
-    const session = await this.ensureSession(projectId);
-    const runtime = getRuntime(projectId);
+    const session = sessionId
+      ? await this.getSession(projectId, sessionId)
+      : await this.ensureDefaultSession(projectId);
+    const runtime = getRuntime(session.id);
     if (runtime.abortController) runtime.abortController.abort();
     await this.prisma.aiAgentPrompt.updateMany({
       where: { sessionId: session.id, status: { in: ['QUEUED', 'RUNNING'] } },
@@ -117,10 +161,13 @@ export class AiAgentSessionUseCase {
     userId: string,
     projectId: string,
     toolCallId: string,
-    input: ApproveAiToolCallInput
+    input: ApproveAiToolCallInput,
+    sessionId?: string
   ): Promise<AiAgentSession> {
     await this.access.assertPermission(userId, projectId, 'project:write');
-    const session = await this.ensureSession(projectId);
+    const session = sessionId
+      ? await this.getSession(projectId, sessionId)
+      : await this.ensureDefaultSession(projectId);
     const toolCall = await this.prisma.aiAgentToolCall.findFirst({
       where: {
         sessionId: session.id,
@@ -161,13 +208,22 @@ export class AiAgentSessionUseCase {
           }
         });
       } catch (error) {
+        const message = error instanceof Error ? error.message : 'Tool execution failed';
         await this.prisma.aiAgentToolCall.update({
           where: { id: toolCall.id },
           data: {
             status: 'ERROR',
-            error: error instanceof Error ? error.message : 'Tool execution failed'
+            error: message
           }
         });
+        await this.prisma.aiAgentMessage.create({
+          data: {
+            sessionId: session.id,
+            role: 'TOOL',
+            content: `${toolCall.toolName} approval failed: ${message}`
+          }
+        });
+        throw new HttpError(400, `${toolCall.toolName} approval failed: ${message}`);
       }
     }
 
@@ -180,21 +236,23 @@ export class AiAgentSessionUseCase {
     return snapshot;
   }
 
-  async subscribe(userId: string, projectId: string, res: Response): Promise<void> {
+  async subscribe(userId: string, projectId: string, res: Response, sessionId?: string): Promise<void> {
     await this.access.assertProjectAccess(userId, projectId);
-    const session = await this.ensureSession(projectId);
+    const session = sessionId
+      ? await this.getSession(projectId, sessionId)
+      : await this.ensureDefaultSession(projectId);
     res.setHeader('content-type', 'text/event-stream');
     res.setHeader('cache-control', 'no-cache, no-transform');
     res.setHeader('connection', 'keep-alive');
     res.flushHeaders?.();
-    const runtime = getRuntime(projectId);
+    const runtime = getRuntime(session.id);
     runtime.clients.add(res);
     writeEvent(res, { type: 'session', session: await this.snapshot(session.id, projectId) });
     res.on('close', () => runtime.clients.delete(res));
   }
 
-  private async drain(projectId: string): Promise<void> {
-    const session = await this.ensureSession(projectId);
+  private async drain(projectId: string, sessionId: string): Promise<void> {
+    const session = await this.getSession(projectId, sessionId);
     const current = await this.prisma.projectAiAgentSession.findUniqueOrThrow({
       where: { id: session.id },
       select: { status: true }
@@ -208,7 +266,7 @@ export class AiAgentSessionUseCase {
       });
       if (!queued) return;
 
-      const runtime = getRuntime(projectId);
+      const runtime = getRuntime(session.id);
       runtime.abortController = new AbortController();
       await this.prisma.aiAgentPrompt.update({
         where: { id: queued.id },
@@ -321,12 +379,23 @@ export class AiAgentSessionUseCase {
     }
   }
 
-  private async ensureSession(projectId: string) {
-    return this.prisma.projectAiAgentSession.upsert({
+  private async ensureDefaultSession(projectId: string) {
+    const existing = await this.prisma.projectAiAgentSession.findFirst({
       where: { projectId },
-      create: { projectId },
-      update: {}
+      orderBy: { createdAt: 'asc' }
     });
+    if (existing) return existing;
+    return this.prisma.projectAiAgentSession.create({
+      data: { projectId, title: 'General' }
+    });
+  }
+
+  private async getSession(projectId: string, sessionId: string) {
+    const session = await this.prisma.projectAiAgentSession.findFirst({
+      where: { id: sessionId, projectId }
+    });
+    if (!session) throw new HttpError(404, 'AI session not found');
+    return session;
   }
 
   private async snapshot(sessionId: string, projectId: string): Promise<AiAgentSession> {
@@ -347,7 +416,9 @@ export class AiAgentSessionUseCase {
       })
     ]);
     return {
+      id: session.id,
       projectId,
+      title: session.title ?? defaultSessionTitle(session.createdAt),
       status: toSessionStatus(session.status),
       activePromptId: session.activePromptId,
       queue: prompts.map(toQueuedPrompt),
@@ -357,8 +428,8 @@ export class AiAgentSessionUseCase {
     };
   }
 
-  private async broadcast(projectId: string, event: AiAgentSessionEvent): Promise<void> {
-    for (const client of getRuntime(projectId).clients) writeEvent(client, event);
+  private async broadcast(_projectId: string, event: AiAgentSessionEvent): Promise<void> {
+    for (const client of getRuntime(event.session.id).clients) writeEvent(client, event);
   }
 
   private async buildPrompt(projectId: string, sessionId: string, prompt: string): Promise<string> {
@@ -823,6 +894,20 @@ export class AiAgentSessionUseCase {
         locationId: stringOrUndefined(data.locationId)
       });
     }
+    if (toolName === 'createChapter') {
+      const title = String(data.title ?? '').trim();
+      if (!title) throw new HttpError(400, 'Chapter title is required');
+      const input: CreateChapterInput = {
+        title,
+        actId: stringOrUndefined(data.actId),
+        status: chapterStatusOrUndefined(data.status),
+        povCharacterId: stringOrUndefined(data.povCharacterId),
+        locationId: stringOrUndefined(data.locationId),
+        summary: stringOrUndefined(data.summary),
+        content: stringOrUndefined(data.content)
+      };
+      return new CreateChapterUseCase(this.prisma).execute(userId, projectId, input);
+    }
     if (toolName === 'createCharacter') {
       const name = String(data.name ?? '').trim();
       if (!name) throw new HttpError(400, 'Character name is required');
@@ -945,12 +1030,16 @@ export class AiAgentSessionUseCase {
   }
 }
 
-function getRuntime(projectId: string): RuntimeSession {
-  const existing = runtimes.get(projectId);
+function getRuntime(sessionId: string): RuntimeSession {
+  const existing = runtimes.get(sessionId);
   if (existing) return existing;
   const runtime: RuntimeSession = { clients: new Set(), abortController: null };
-  runtimes.set(projectId, runtime);
+  runtimes.set(sessionId, runtime);
   return runtime;
+}
+
+function defaultSessionTitle(createdAt: Date): string {
+  return `Chat ${createdAt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
 }
 
 function writeEvent(res: Response, event: AiAgentSessionEvent): void {
@@ -1123,7 +1212,9 @@ function countWords(value: string): number {
 }
 
 function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 function stringArrayOrUndefined(value: unknown): string[] | undefined {
@@ -1182,6 +1273,20 @@ const approvalTools = {
     inputSchema: z.object({
       chapterId: z.string(),
       title: z.string().optional(),
+      summary: z.string().optional(),
+      content: z.string().optional(),
+      status: z.enum(['draft', 'in-progress', 'review', 'final']).optional(),
+      povCharacterId: z.string().optional(),
+      locationId: z.string().optional()
+    }),
+    needsApproval: true,
+    execute: async () => ({ status: 'pending-approval' })
+  }),
+  createChapter: tool({
+    description: 'Propose a new chapter. Requires explicit backend approval before execution.',
+    inputSchema: z.object({
+      title: z.string(),
+      actId: z.string().optional(),
       summary: z.string().optional(),
       content: z.string().optional(),
       status: z.enum(['draft', 'in-progress', 'review', 'final']).optional(),

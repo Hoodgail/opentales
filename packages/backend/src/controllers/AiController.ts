@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import type {
   ApproveAiToolCallInput,
+  CreateAiAgentSessionInput,
   CreateAiCharacterDialogueInput,
   CreateAiOutlineExpansionInput,
   CreateAiRewriteSuggestionInput,
@@ -79,11 +80,36 @@ export class AiController {
   };
 
   agentSession = async (req: Request, res: Response) => {
-    res.json(await this.agentSessionUseCase.get(this.userId(req), req.params.projectId));
+    res.json(
+      await this.agentSessionUseCase.get(
+        this.userId(req),
+        req.params.projectId,
+        req.params.sessionId
+      )
+    );
+  };
+
+  agentSessions = async (req: Request, res: Response) => {
+    res.json(await this.agentSessionUseCase.list(this.userId(req), req.params.projectId));
+  };
+
+  createAgentSession = async (req: Request, res: Response) => {
+    res.status(201).json(
+      await this.agentSessionUseCase.create(
+        this.userId(req),
+        req.params.projectId,
+        req.body as CreateAiAgentSessionInput
+      )
+    );
   };
 
   agentSessionEvents = async (req: Request, res: Response) => {
-    await this.agentSessionUseCase.subscribe(this.userId(req), req.params.projectId, res);
+    await this.agentSessionUseCase.subscribe(
+      this.userId(req),
+      req.params.projectId,
+      res,
+      req.params.sessionId
+    );
   };
 
   queueAgentPrompt = async (req: Request, res: Response) => {
@@ -91,13 +117,20 @@ export class AiController {
       await this.agentSessionUseCase.queuePrompt(
         this.userId(req),
         req.params.projectId,
-        req.body as QueueAiAgentPromptInput
+        req.body as QueueAiAgentPromptInput,
+        req.params.sessionId
       )
     );
   };
 
   cancelAgentSession = async (req: Request, res: Response) => {
-    res.json(await this.agentSessionUseCase.cancel(this.userId(req), req.params.projectId));
+    res.json(
+      await this.agentSessionUseCase.cancel(
+        this.userId(req),
+        req.params.projectId,
+        req.params.sessionId
+      )
+    );
   };
 
   approveToolCall = async (req: Request, res: Response) => {
@@ -106,7 +139,8 @@ export class AiController {
         this.userId(req),
         req.params.projectId,
         req.params.toolCallId,
-        req.body as ApproveAiToolCallInput
+        req.body as ApproveAiToolCallInput,
+        req.params.sessionId
       )
     );
   };

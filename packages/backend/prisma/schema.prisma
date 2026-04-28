@@ -253,7 +253,7 @@ model Project {
   betaShareLinks BetaShareLink[]
   aiSettings    ProjectAiSettings?
   docs          ProjectDoc[]
-  aiAgentSession ProjectAiAgentSession?
+  aiAgentSessions ProjectAiAgentSession[]
 
   @@unique([orgId, slug])
   @@index([orgId])
@@ -261,7 +261,8 @@ model Project {
 
 model ProjectAiAgentSession {
   id             String               @id @default(cuid())
-  projectId      String               @unique
+  projectId      String
+  title          String?
   status         AiAgentSessionStatus @default(IDLE)
   activePromptId String?
   lastError      String?
@@ -272,6 +273,8 @@ model ProjectAiAgentSession {
   messages  AiAgentMessage[]
   prompts   AiAgentPrompt[]
   toolCalls AiAgentToolCall[]
+
+  @@index([projectId, updatedAt])
 }
 
 model AiAgentMessage {

@@ -14,6 +14,7 @@
   <a href="docs/getting-started.md"><strong>Docs</strong></a> ·
   <a href="CONTRIBUTING.md"><strong>Contributing</strong></a> ·
   <a href="docs/architecture.md"><strong>Architecture</strong></a> ·
+  <a href="docs/ai-system.md"><strong>AI System</strong></a> ·
   <a href="docs/future-directions.md"><strong>Roadmap</strong></a>
 </p>
 
@@ -123,6 +124,8 @@ prisma.md       Data-model design notes
 | --- | --- |
 | **[Getting started](docs/getting-started.md)** | Local setup walkthrough — your first project in five minutes. |
 | **[Architecture](docs/architecture.md)** | High-level system design, package layout, data model, and conventions. |
+| **[AI system](docs/ai-system.md)** | How project AI settings, agent sessions, streaming, tool calls, and approval-gated edits work. |
+| **[AI assistive features](docs/ai-assistive-features.md)** | SDK and endpoint notes for AI settings, docs, one-shot features, and agent tools. |
 | **[Future directions](docs/future-directions.md)** | Roadmap, refactor opportunities, and brainstormed features for novel writing. |
 | **[Contributing](CONTRIBUTING.md)** | How to set up a working copy and submit your first PR. |
 | **[Backend README](packages/backend/README.md)** | Backend-specific notes. |

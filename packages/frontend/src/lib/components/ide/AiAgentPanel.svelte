@@ -5,7 +5,9 @@
     ChevronDown,
     ChevronRight,
     CircleStop,
+    FileText,
     Loader2,
+    Plus,
     Send,
     Sparkles,
     User,
@@ -13,19 +15,19 @@
     Zap
   } from 'lucide-svelte';
   import { tick, untrack } from 'svelte';
-  import type { AiAgentMessage, AiAgentToolCall } from '@opentales/sdk';
+  import type { AiAgentToolCall } from '@opentales/sdk';
+  import { setAiApprovalDoc } from '$lib/data/ai-approval-docs';
   import { ai } from '$lib/stores/ai.svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
-  import { cn } from '$lib/utils';
   import PanelHeader from './PanelHeader.svelte';
 
   let prompt = $state('');
   let scrollEl: HTMLDivElement | undefined = $state();
+  let sessionMenuOpen = $state(false);
 
   const projectId = $derived(manuscript.projectId);
   const session = $derived(ai.session);
   const isRunning = $derived(session?.status === 'running');
-  const isIdle = $derived(!session || session.status === 'idle');
   const aiEnabled = $derived(ai.settings?.enabled ?? false);
 
   // Auto-scroll on new content
@@ -49,8 +51,10 @@
     if (!pid || !aiEnabled) return;
     untrack(() => {
       void ai.loadSession(pid);
+      void ai.loadSessions(pid);
       void ai.startStream(pid);
       void ai.loadToolManifest(pid);
+      void ai.loadDocs(pid, { limit: 100 });
     });
 
     return () => ai.stopStream();
@@ -75,7 +79,8 @@
 
   function approve(toolCallId: string) {
     if (!projectId) return;
-    void ai.approveToolCall(projectId, toolCallId, true);
+    const pid = projectId;
+    void ai.approveToolCall(pid, toolCallId, true).then(() => manuscript.loadProject(pid));
   }
 
   function reject(toolCallId: string) {
@@ -90,29 +95,27 @@
     }
   }
 
+  function createSession() {
+    if (!projectId) return;
+    void ai.createSession(projectId, 'New chat');
+    sessionMenuOpen = false;
+  }
+
+  function selectSession(sessionId: string) {
+    if (!projectId) return;
+    void ai.selectSession(projectId, sessionId);
+    sessionMenuOpen = false;
+  }
+
+  function sessionTime(value: string): string {
+    return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+
   // Collapsible tool call rows
   let expandedTools = $state<Record<string, boolean>>({});
 
   function toggleTool(id: string) {
     expandedTools[id] = !expandedTools[id];
-  }
-
-  const READ_TOOLS = new Set([
-    'listCharacters',
-    'readCharacter',
-    'listChapters',
-    'readChapter',
-    'grepChapter',
-    'grepChapters',
-    'listLocations',
-    'readLocation',
-    'listProjectDocs',
-    'readProjectDoc',
-    'readStoryStructure'
-  ]);
-
-  function isReadTool(name: string) {
-    return READ_TOOLS.has(name);
   }
 
   function toolLabel(name: string): string {
@@ -131,25 +134,442 @@
       updateCharacter: 'Update character',
       createCharacter: 'Create character',
       updateChapter: 'Update chapter',
+      createChapter: 'Create chapter',
       createProjectDoc: 'Create doc',
       updateProjectDoc: 'Update doc'
     };
     return map[name] ?? name;
   }
 
-  function readModeLabel(input: unknown): string {
-    if (!input || typeof input !== 'object') return '';
-    const i = input as Record<string, unknown>;
-    if (i.full) return 'full text';
-    if (i.startLine || i.endLine) return `lines ${i.startLine ?? '?'}–${i.endLine ?? '?'}`;
-    if (i.offset !== undefined || i.length !== undefined) return `offset ${i.offset}+${i.length}`;
-    return 'summary';
+  function toolSummary(tc: AiAgentToolCall): string {
+    const input = inputRecord(tc.input);
+    if (tc.toolName === 'updateChapter') {
+      const chapter = manuscript.chapters.find((c) => c.id === textInput(input, 'chapterId'));
+      return chapter?.title ?? firstLine(textInput(input, 'title'), 'Unknown chapter');
+    }
+    if (tc.toolName === 'createChapter') return firstLine(textInput(input, 'title'), 'New chapter');
+    if (tc.toolName === 'updateCharacter') {
+      const character = manuscript.characters.find((c) => c.id === textInput(input, 'characterId'));
+      return character?.name ?? firstLine(textInput(input, 'name'), 'Unknown character');
+    }
+    if (tc.toolName === 'createCharacter') return firstLine(textInput(input, 'name'), 'New character');
+    if (tc.toolName === 'updateProjectDoc') {
+      const doc = ai.docs.find((d) => d.id === textInput(input, 'docId'));
+      return doc?.title ?? firstLine(textInput(input, 'title'), 'Unknown doc');
+    }
+    if (tc.toolName === 'createProjectDoc') return firstLine(textInput(input, 'title'), 'New doc');
+    return 'Review proposed tool input';
+  }
+
+  type JsonRecord = Record<string, unknown>;
+
+  function inputRecord(input: unknown): JsonRecord {
+    return input && typeof input === 'object' && !Array.isArray(input) ? (input as JsonRecord) : {};
+  }
+
+  function textInput(input: JsonRecord, key: string): string | undefined {
+    const value = input[key];
+    return typeof value === 'string' ? value : undefined;
+  }
+
+  function stringArrayInput(input: JsonRecord, key: string): string[] | undefined {
+    const value = input[key];
+    return Array.isArray(value) && value.every((item) => typeof item === 'string')
+      ? value
+      : undefined;
+  }
+
+  function displayValue(value: unknown): string {
+    if (Array.isArray(value)) return value.length ? value.join(', ') : 'None';
+    if (typeof value === 'string') return value.trim() || 'Empty';
+    if (value === null || value === undefined) return 'None';
+    return String(value);
+  }
+
+  function firstLine(value: string | undefined, fallback: string): string {
+    return value?.split('\n').find((line) => line.trim())?.trim() ?? fallback;
+  }
+
+  function chapterMeta(input: {
+    title?: string;
+    status?: string;
+    povCharacterId?: string;
+    locationId?: string;
+  }) {
+    const pov = manuscript.characters.find((c) => c.id === input.povCharacterId)?.name ?? input.povCharacterId;
+    const location = manuscript.locations.find((l) => l.id === input.locationId)?.name ?? input.locationId;
+    return [
+      `Title: ${displayValue(input.title)}`,
+      `Status: ${displayValue(input.status)}`,
+      `POV: ${displayValue(pov)}`,
+      `Location: ${displayValue(location)}`
+    ].join('\n');
+  }
+
+  function characterBasics(input: {
+    name?: string;
+    role?: string;
+    age?: string;
+    occupation?: string;
+    traits?: string[];
+  }) {
+    return [
+      `Name: ${displayValue(input.name)}`,
+      `Role: ${displayValue(input.role)}`,
+      `Age: ${displayValue(input.age)}`,
+      `Occupation: ${displayValue(input.occupation)}`,
+      `Traits: ${displayValue(input.traits)}`
+    ].join('\n');
+  }
+
+  function docMeta(input: { title?: string; kind?: string }) {
+    return [`Title: ${displayValue(input.title)}`, `Kind: ${displayValue(input.kind)}`].join('\n');
+  }
+
+  function buildApprovalDoc(tc: AiAgentToolCall) {
+    const input = inputRecord(tc.input);
+    const title = toolLabel(tc.toolName);
+
+    if (tc.toolName === 'updateChapter') {
+      const chapter = manuscript.chapters.find((c) => c.id === textInput(input, 'chapterId'));
+      if (!chapter) return null;
+      const modified = {
+        title: textInput(input, 'title') ?? chapter.title,
+        status: textInput(input, 'status') ?? chapter.status,
+        povCharacterId: textInput(input, 'povCharacterId') ?? chapter.povCharacterId,
+        locationId: textInput(input, 'locationId') ?? chapter.locationId,
+        summary: textInput(input, 'summary') ?? chapter.summary,
+        content: textInput(input, 'content') ?? chapter.content
+      };
+      return {
+        targetLabel: chapter.title,
+        title: `AI: ${title}`,
+        panes: [
+          {
+            id: 'chapter-meta',
+            title: 'Chapter Details',
+            description: 'Title, status, POV, and location',
+            original: chapterMeta(chapter),
+            modified: chapterMeta(modified),
+            language: 'markdown'
+          },
+          {
+            id: 'chapter-summary',
+            title: 'Summary',
+            description: 'Synopsis and intent for the chapter',
+            original: chapter.summary,
+            modified: modified.summary ?? '',
+            language: 'markdown'
+          },
+          {
+            id: 'chapter-content',
+            title: 'Manuscript',
+            description: 'Full chapter prose',
+            original: chapter.content,
+            modified: modified.content ?? '',
+            language: 'markdown'
+          }
+        ]
+      };
+    }
+
+    if (tc.toolName === 'createChapter') {
+      const modified = {
+        title: textInput(input, 'title'),
+        status: textInput(input, 'status'),
+        povCharacterId: textInput(input, 'povCharacterId'),
+        locationId: textInput(input, 'locationId'),
+        summary: textInput(input, 'summary'),
+        content: textInput(input, 'content')
+      };
+      return {
+        targetLabel: textInput(input, 'title') ?? 'New chapter',
+        title: `AI: ${title}`,
+        panes: [
+          {
+            id: 'chapter-meta',
+            title: 'Chapter Details',
+            description: 'Title, status, POV, and location',
+            original: '',
+            modified: chapterMeta(modified),
+            language: 'markdown'
+          },
+          {
+            id: 'chapter-summary',
+            title: 'Summary',
+            description: 'Synopsis and intent for the chapter',
+            original: '',
+            modified: modified.summary ?? '',
+            language: 'markdown'
+          },
+          {
+            id: 'chapter-content',
+            title: 'Manuscript',
+            description: 'Full chapter prose',
+            original: '',
+            modified: modified.content ?? '',
+            language: 'markdown'
+          }
+        ]
+      };
+    }
+
+    if (tc.toolName === 'updateCharacter') {
+      const character = manuscript.characters.find((c) => c.id === textInput(input, 'characterId'));
+      if (!character) return null;
+      const modified = {
+        name: textInput(input, 'name') ?? character.name,
+        role: textInput(input, 'role') ?? character.role,
+        age: textInput(input, 'age') ?? character.age,
+        occupation: textInput(input, 'occupation') ?? character.occupation,
+        traits: stringArrayInput(input, 'traits') ?? character.traits,
+        description: textInput(input, 'description') ?? character.description,
+        appearance: textInput(input, 'appearance') ?? character.appearance,
+        motivation: textInput(input, 'motivation') ?? character.motivation,
+        arc: textInput(input, 'arc') ?? character.arc
+      };
+      return {
+        targetLabel: character.name,
+        title: `AI: ${title}`,
+        panes: [
+          {
+            id: 'character-basics',
+            title: 'Basics',
+            description: 'Name, role, age, occupation, and traits',
+            original: characterBasics(character),
+            modified: characterBasics(modified),
+            language: 'markdown'
+          },
+          {
+            id: 'character-description',
+            title: 'Description',
+            description: 'Core identity and backstory notes',
+            original: character.description,
+            modified: modified.description ?? '',
+            language: 'markdown'
+          },
+          {
+            id: 'character-appearance',
+            title: 'Appearance',
+            description: 'Physical presentation and visual cues',
+            original: character.appearance,
+            modified: modified.appearance ?? '',
+            language: 'markdown'
+          },
+          {
+            id: 'character-motivation-arc',
+            title: 'Motivation & Arc',
+            description: 'Driving wants and transformation',
+            original: `## Motivation\n${character.motivation}\n\n## Character Arc\n${character.arc}`,
+            modified: `## Motivation\n${modified.motivation ?? ''}\n\n## Character Arc\n${modified.arc ?? ''}`,
+            language: 'markdown'
+          }
+        ]
+      };
+    }
+
+    if (tc.toolName === 'createCharacter') {
+      const modified = {
+        name: textInput(input, 'name'),
+        role: textInput(input, 'role'),
+        age: textInput(input, 'age'),
+        occupation: textInput(input, 'occupation'),
+        traits: stringArrayInput(input, 'traits'),
+        description: textInput(input, 'description'),
+        appearance: textInput(input, 'appearance'),
+        motivation: textInput(input, 'motivation'),
+        arc: textInput(input, 'arc')
+      };
+      return {
+        targetLabel: textInput(input, 'name') ?? 'New character',
+        title: `AI: ${title}`,
+        panes: [
+          {
+            id: 'character-basics',
+            title: 'Basics',
+            description: 'Name, role, age, occupation, and traits',
+            original: '',
+            modified: characterBasics(modified),
+            language: 'markdown'
+          },
+          {
+            id: 'character-description',
+            title: 'Description',
+            description: 'Core identity and backstory notes',
+            original: '',
+            modified: modified.description ?? '',
+            language: 'markdown'
+          },
+          {
+            id: 'character-appearance',
+            title: 'Appearance',
+            description: 'Physical presentation and visual cues',
+            original: '',
+            modified: modified.appearance ?? '',
+            language: 'markdown'
+          },
+          {
+            id: 'character-motivation-arc',
+            title: 'Motivation & Arc',
+            description: 'Driving wants and transformation',
+            original: '',
+            modified: `## Motivation\n${modified.motivation ?? ''}\n\n## Character Arc\n${modified.arc ?? ''}`,
+            language: 'markdown'
+          }
+        ]
+      };
+    }
+
+    if (tc.toolName === 'updateProjectDoc') {
+      const doc = ai.docs.find((d) => d.id === textInput(input, 'docId'));
+      if (!doc) return null;
+      const modified = {
+        title: textInput(input, 'title') ?? doc.title,
+        kind: textInput(input, 'kind') ?? doc.kind,
+        content: textInput(input, 'content') ?? doc.content
+      };
+      return {
+        targetLabel: doc.title,
+        title: `AI: ${title}`,
+        panes: [
+          {
+            id: 'doc-meta',
+            title: 'Document Details',
+            description: 'Title and document kind',
+            original: docMeta(doc),
+            modified: docMeta(modified),
+            language: 'markdown'
+          },
+          {
+            id: 'doc-content',
+            title: 'Content',
+            description: 'Document body',
+            original: doc.content,
+            modified: modified.content ?? '',
+            language: 'markdown'
+          }
+        ]
+      };
+    }
+
+    if (tc.toolName === 'createProjectDoc') {
+      const modified = {
+        title: textInput(input, 'title'),
+        kind: textInput(input, 'kind'),
+        content: textInput(input, 'content')
+      };
+      return {
+        targetLabel: textInput(input, 'title') ?? 'New doc',
+        title: `AI: ${title}`,
+        panes: [
+          {
+            id: 'doc-meta',
+            title: 'Document Details',
+            description: 'Title and document kind',
+            original: '',
+            modified: docMeta(modified),
+            language: 'markdown'
+          },
+          {
+            id: 'doc-content',
+            title: 'Content',
+            description: 'Document body',
+            original: '',
+            modified: modified.content ?? '',
+            language: 'markdown'
+          }
+        ]
+      };
+    }
+
+    return {
+      targetLabel: title,
+      title: `AI: ${title}`,
+      panes: [
+        {
+          id: 'raw-input',
+          title: 'Raw Input',
+          description: 'Unrecognized tool payload',
+          original: '',
+          modified: JSON.stringify(tc.input, null, 2),
+          language: 'json'
+        }
+      ]
+    };
+  }
+
+  function openApprovalDoc(tc: AiAgentToolCall) {
+    const doc = buildApprovalDoc(tc);
+    if (!doc) return;
+    const id = tc.id;
+    setAiApprovalDoc({ id, sessionId: session?.id ?? ai.activeSessionId ?? '', toolCall: tc, ...doc });
+    void manuscript.openTab({
+      id: `tab-ai-approval-${id}`,
+      type: 'ai-approval',
+      refId: id,
+      title: doc.title
+    });
   }
 </script>
 
 <div class="flex h-full flex-col">
   <PanelHeader title="AI Agent">
     {#snippet actions()}
+      <div class="relative">
+        <button
+          type="button"
+          onclick={() => (sessionMenuOpen = !sessionMenuOpen)}
+          title="Switch AI session"
+          class="flex max-w-32 items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <Bot class="size-3" />
+          <span class="truncate">{session?.title ?? 'Sessions'}</span>
+          <ChevronDown class="size-3" />
+        </button>
+        {#if sessionMenuOpen}
+          <button
+            type="button"
+            aria-label="Close session menu"
+            class="fixed inset-0 z-10 cursor-default bg-transparent"
+            onclick={() => (sessionMenuOpen = false)}
+          ></button>
+          <div class="absolute right-0 top-7 z-20 w-64 overflow-hidden rounded-lg border border-border bg-popover shadow-xl">
+            <div class="flex items-center justify-between border-b border-border px-2 py-1.5">
+              <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">AI Sessions</span>
+              <button
+                type="button"
+                onclick={createSession}
+                class="inline-flex items-center gap-1 rounded bg-accent px-1.5 py-0.5 text-[10px] text-accent-foreground hover:bg-accent/90"
+              >
+                <Plus class="size-3" /> New
+              </button>
+            </div>
+            <div class="max-h-72 overflow-y-auto p-1">
+              {#if ai.sessions.length === 0}
+                <div class="px-2 py-3 text-center text-[11px] text-muted-foreground">No sessions yet.</div>
+              {:else}
+                {#each ai.sessions as s (s.id)}
+                  <button
+                    type="button"
+                    onclick={() => selectSession(s.id)}
+                    class="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted"
+                  >
+                    <span class="min-w-0">
+                      <span class="block truncate text-[11px] text-foreground">{s.title}</span>
+                      <span class="block truncate text-[10px] text-muted-foreground">
+                        {s.messageCount} messages · {sessionTime(s.updatedAt)} · {s.status}
+                      </span>
+                    </span>
+                    {#if s.id === ai.activeSessionId}
+                      <span class="size-1.5 shrink-0 rounded-full bg-accent"></span>
+                    {/if}
+                  </button>
+                {/each}
+              {/if}
+            </div>
+          </div>
+        {/if}
+      </div>
       {#if isRunning}
         <button
           type="button"
@@ -239,10 +659,22 @@
           {#each session.pendingToolCalls as tc (tc.id)}
             {#if tc.status === 'pending-approval'}
               <div class="rounded-md border border-amber-500/30 bg-amber-500/5 p-2.5">
-                <div class="flex items-center gap-2 text-xs">
-                  <Zap class="size-3.5 text-amber-400" />
-                  <span class="font-medium text-amber-300">{toolLabel(tc.toolName)}</span>
-                  <span class="text-[10px] text-muted-foreground">requires approval</span>
+                <div class="flex items-start justify-between gap-2">
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2 text-xs">
+                      <Zap class="size-3.5 text-amber-400" />
+                      <span class="font-medium text-amber-300">{toolLabel(tc.toolName)}</span>
+                      <span class="text-[10px] text-muted-foreground">requires approval</span>
+                    </div>
+                    <p class="mt-1 truncate text-[11px] text-muted-foreground">{toolSummary(tc)}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onclick={() => openApprovalDoc(tc)}
+                    class="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-500/30 bg-background/70 px-2 py-1 text-[10px] text-amber-200 hover:bg-amber-500/10"
+                  >
+                    <FileText class="size-3" /> Open diff
+                  </button>
                 </div>
                 <button
                   type="button"

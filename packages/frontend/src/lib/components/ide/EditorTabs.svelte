@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { BookOpen, Compass, FileText, GitPullRequest, MapPin, Users, X } from 'lucide-svelte';
+  import { BookOpen, Bot, Compass, FileText, GitPullRequest, MapPin, Users, X } from 'lucide-svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
   import type { OpenTab } from '$lib/data/manuscript-types';
@@ -12,7 +12,8 @@
     structure: Compass,
     outline: BookOpen,
     submission: GitPullRequest,
-    doc: FileText
+    doc: FileText,
+    'ai-approval': Bot
   } as const;
 
   function close(e: MouseEvent, t: OpenTab) {

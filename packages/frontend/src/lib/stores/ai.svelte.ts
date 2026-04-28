@@ -2,6 +2,7 @@ import {
   OpenTalesClient,
   type AiAgentSession,
   type AiAgentSessionEvent,
+  type AiAgentSessionSummary,
   type AiAgentToolCall,
   type AiCharacterDialogueSuggestion,
   type AiContinuityReview,
@@ -138,6 +139,8 @@ function createAiStore() {
 
   // ── Agent session ────────────────────────────────────────────────────
   let session = $state<AiAgentSession | null>(null);
+  let sessions = $state<AiAgentSessionSummary[]>([]);
+  let activeSessionId = $state<string | null>(null);
   let sessionLoading = $state(false);
   let sessionError = $state<string | null>(null);
   let streaming = $state(false);
@@ -146,11 +149,39 @@ function createAiStore() {
   // Accumulated streamed text for the current assistant turn
   let streamedText = $state('');
 
-  async function loadSession(projectId: string) {
+  function upsertSessionSummary(next: AiAgentSession) {
+    const summary: AiAgentSessionSummary = {
+      id: next.id,
+      projectId: next.projectId,
+      title: next.title,
+      status: next.status,
+      messageCount: next.messages.length,
+      createdAt: next.updatedAt,
+      updatedAt: next.updatedAt
+    };
+    const idx = sessions.findIndex((candidate) => candidate.id === next.id);
+    if (idx >= 0) sessions[idx] = { ...sessions[idx], ...summary, createdAt: sessions[idx].createdAt };
+    else sessions.unshift(summary);
+  }
+
+  async function loadSessions(projectId: string) {
+    sessionError = null;
+    try {
+      const result = await api.listAiAgentSessions(projectId);
+      sessions.splice(0, sessions.length, ...result);
+      if (!activeSessionId && result[0]) activeSessionId = result[0].id;
+    } catch (err) {
+      sessionError = err instanceof Error ? err.message : 'Failed to load sessions';
+    }
+  }
+
+  async function loadSession(projectId: string, sessionId = activeSessionId ?? undefined) {
     sessionLoading = true;
     sessionError = null;
     try {
-      session = await api.getAiAgentSession(projectId);
+      session = await api.getAiAgentSession(projectId, sessionId);
+      activeSessionId = session.id;
+      upsertSessionSummary(session);
     } catch (err) {
       sessionError = err instanceof Error ? err.message : 'Failed to load session';
     } finally {
@@ -160,10 +191,13 @@ function createAiStore() {
 
   function applyEvent(event: AiAgentSessionEvent) {
     // Every event carries the full session snapshot
+    if (activeSessionId && event.session.id !== activeSessionId) return;
     session = event.session;
+    activeSessionId = event.session.id;
+    upsertSessionSummary(event.session);
 
     if (event.type === 'text-delta') {
-      const delta = (event.data as { textDelta?: string })?.textDelta ?? '';
+      const delta = (event.data as { text?: string; textDelta?: string })?.text ?? (event.data as { textDelta?: string })?.textDelta ?? '';
       streamedText += delta;
     }
     if (event.type === 'prompt-started') {
@@ -174,7 +208,34 @@ function createAiStore() {
     }
   }
 
-  async function startStream(projectId: string) {
+  async function createSession(projectId: string, title?: string) {
+    sessionLoading = true;
+    sessionError = null;
+    try {
+      stopStream();
+      session = await api.createAiAgentSession(projectId, { title });
+      activeSessionId = session.id;
+      streamedText = '';
+      upsertSessionSummary(session);
+      void startStream(projectId, session.id);
+    } catch (err) {
+      sessionError = err instanceof Error ? err.message : 'Failed to create session';
+    } finally {
+      sessionLoading = false;
+    }
+  }
+
+  async function selectSession(projectId: string, sessionId: string) {
+    if (activeSessionId === sessionId && session?.id === sessionId) return;
+    stopStream();
+    activeSessionId = sessionId;
+    streamedText = '';
+    await loadSession(projectId, sessionId);
+    void startStream(projectId, sessionId);
+  }
+
+  async function startStream(projectId: string, sessionId = activeSessionId ?? session?.id) {
+    if (!sessionId) return;
     if (streaming) return;
     stopStream();
 
@@ -182,7 +243,7 @@ function createAiStore() {
     streamAbort = new AbortController();
 
     try {
-      await api.streamAiAgentSession(projectId, applyEvent, {
+      await api.streamAiAgentSession(projectId, sessionId, applyEvent, {
         signal: streamAbort.signal
       });
     } catch (err) {
@@ -206,7 +267,9 @@ function createAiStore() {
   async function queuePrompt(projectId: string, prompt: string, interrupt = false) {
     sessionError = null;
     try {
-      session = await api.queueAiAgentPrompt(projectId, { prompt, interrupt });
+      session = await api.queueAiAgentPrompt(projectId, { prompt, interrupt }, activeSessionId ?? undefined);
+      activeSessionId = session.id;
+      upsertSessionSummary(session);
     } catch (err) {
       sessionError = err instanceof Error ? err.message : 'Failed to queue prompt';
     }
@@ -215,16 +278,20 @@ function createAiStore() {
   async function cancelSession(projectId: string) {
     sessionError = null;
     try {
-      session = await api.cancelAiAgentSession(projectId);
+      session = await api.cancelAiAgentSession(projectId, activeSessionId ?? undefined);
+      activeSessionId = session.id;
+      upsertSessionSummary(session);
     } catch (err) {
       sessionError = err instanceof Error ? err.message : 'Failed to cancel';
     }
   }
 
-  async function approveToolCall(projectId: string, toolCallId: string, approved: boolean) {
+  async function approveToolCall(projectId: string, toolCallId: string, approved: boolean, sessionId = activeSessionId ?? undefined) {
     sessionError = null;
     try {
-      session = await api.approveAiToolCall(projectId, toolCallId, { approved });
+      session = await api.approveAiToolCall(projectId, toolCallId, { approved }, sessionId);
+      activeSessionId = session.id;
+      upsertSessionSummary(session);
     } catch (err) {
       sessionError = err instanceof Error ? err.message : 'Failed to approve tool call';
     }
@@ -344,6 +411,8 @@ function createAiStore() {
     docsError = null;
     stopStream();
     session = null;
+    sessions.splice(0, sessions.length);
+    activeSessionId = null;
     sessionError = null;
     streamedText = '';
     toolManifest = null;
@@ -371,11 +440,16 @@ function createAiStore() {
 
     // agent session
     get session() { return session; },
+    get sessions() { return sessions; },
+    get activeSessionId() { return activeSessionId; },
     get sessionLoading() { return sessionLoading; },
     get sessionError() { return sessionError; },
     get streaming() { return streaming; },
     get streamedText() { return streamedText; },
+    loadSessions,
     loadSession,
+    createSession,
+    selectSession,
     startStream,
     stopStream,
     queuePrompt,

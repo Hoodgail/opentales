@@ -369,13 +369,29 @@ export interface AiAgentToolCall {
 }
 
 export interface AiAgentSession {
+  id: string;
   projectId: string;
+  title: string;
   status: AiAgentSessionStatus;
   activePromptId: string | null;
   queue: AiAgentQueuedPrompt[];
   messages: AiAgentMessage[];
   pendingToolCalls: AiAgentToolCall[];
   updatedAt: string;
+}
+
+export interface AiAgentSessionSummary {
+  id: string;
+  projectId: string;
+  title: string;
+  status: AiAgentSessionStatus;
+  messageCount: number;
+  updatedAt: string;
+  createdAt: string;
+}
+
+export interface CreateAiAgentSessionInput {
+  title?: string;
 }
 
 export interface QueueAiAgentPromptInput {

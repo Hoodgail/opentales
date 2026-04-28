@@ -24,6 +24,7 @@ import type {
   ApproveAiToolCallInput,
   AiAgentSessionEvent,
   AiAgentSession,
+  AiAgentSessionSummary,
   AiCharacterDialogueSuggestion,
   AiContinuityReview,
   AiOutlineExpansion,
@@ -31,6 +32,7 @@ import type {
   AiToolManifest,
   CreateSubmissionInput,
   CreateAiCharacterDialogueInput,
+  CreateAiAgentSessionInput,
   CreateAiOutlineExpansionInput,
   CreateAiRewriteSuggestionInput,
   ListProjectDocsInput,
@@ -558,22 +560,40 @@ export class OpenTalesClient {
     return this.request<AiToolManifest>(`/projects/${projectId}/ai/tools`);
   }
 
-  getAiAgentSession(projectId: string): Promise<AiAgentSession> {
-    return this.request<AiAgentSession>(`/projects/${projectId}/ai/agent-session`);
+  listAiAgentSessions(projectId: string): Promise<AiAgentSessionSummary[]> {
+    return this.request<AiAgentSessionSummary[]>(`/projects/${projectId}/ai/agent-sessions`);
   }
 
-  queueAiAgentPrompt(
+  createAiAgentSession(
     projectId: string,
-    input: QueueAiAgentPromptInput
+    input: CreateAiAgentSessionInput = {}
   ): Promise<AiAgentSession> {
-    return this.request<AiAgentSession>(`/projects/${projectId}/ai/agent-session/prompts`, {
+    return this.request<AiAgentSession>(`/projects/${projectId}/ai/agent-sessions`, {
       method: 'POST',
       body: input
     });
   }
 
-  cancelAiAgentSession(projectId: string): Promise<AiAgentSession> {
-    return this.request<AiAgentSession>(`/projects/${projectId}/ai/agent-session/cancel`, {
+  getAiAgentSession(projectId: string, sessionId?: string): Promise<AiAgentSession> {
+    const suffix = sessionId ? `/agent-sessions/${sessionId}` : '/agent-session';
+    return this.request<AiAgentSession>(`/projects/${projectId}/ai${suffix}`);
+  }
+
+  queueAiAgentPrompt(
+    projectId: string,
+    input: QueueAiAgentPromptInput,
+    sessionId?: string
+  ): Promise<AiAgentSession> {
+    const suffix = sessionId ? `/agent-sessions/${sessionId}` : '/agent-session';
+    return this.request<AiAgentSession>(`/projects/${projectId}/ai${suffix}/prompts`, {
+      method: 'POST',
+      body: input
+    });
+  }
+
+  cancelAiAgentSession(projectId: string, sessionId?: string): Promise<AiAgentSession> {
+    const suffix = sessionId ? `/agent-sessions/${sessionId}` : '/agent-session';
+    return this.request<AiAgentSession>(`/projects/${projectId}/ai${suffix}/cancel`, {
       method: 'POST'
     });
   }
@@ -581,10 +601,12 @@ export class OpenTalesClient {
   approveAiToolCall(
     projectId: string,
     toolCallId: string,
-    input: ApproveAiToolCallInput
+    input: ApproveAiToolCallInput,
+    sessionId?: string
   ): Promise<AiAgentSession> {
+    const suffix = sessionId ? `/agent-sessions/${sessionId}` : '/agent-session';
     return this.request<AiAgentSession>(
-      `/projects/${projectId}/ai/agent-session/tool-calls/${toolCallId}/approval`,
+      `/projects/${projectId}/ai${suffix}/tool-calls/${toolCallId}/approval`,
       {
         method: 'POST',
         body: input
@@ -594,6 +616,7 @@ export class OpenTalesClient {
 
   async streamAiAgentSession(
     projectId: string,
+    sessionId: string | undefined,
     onEvent: (event: AiAgentSessionEvent) => void,
     options: { signal?: AbortSignal } = {}
   ): Promise<void> {
@@ -601,8 +624,9 @@ export class OpenTalesClient {
     headers.set('accept', 'text/event-stream');
     if (this.token) headers.set('authorization', `Bearer ${this.token}`);
 
+    const suffix = sessionId ? `/agent-sessions/${sessionId}` : '/agent-session';
     const response = await this.fetcher(
-      `${this.baseUrl}/projects/${projectId}/ai/agent-session/events`,
+      `${this.baseUrl}/projects/${projectId}/ai${suffix}/events`,
       {
         method: 'GET',
         headers,

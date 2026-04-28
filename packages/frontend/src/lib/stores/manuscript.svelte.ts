@@ -994,6 +994,7 @@ function createStore() {
     },
     setSelectedId,
     initialize,
+    loadProject,
     login,
     register,
     logout,

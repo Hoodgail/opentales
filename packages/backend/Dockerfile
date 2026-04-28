@@ -25,4 +25,4 @@ COPY --from=build /app/packages/backend/dist ./packages/backend/dist
 COPY --from=build /app/packages/backend/prisma ./packages/backend/prisma
 WORKDIR /app/packages/backend
 EXPOSE 4000
-CMD ["node", "dist/src/server.js"]
+CMD ["sh", "-c", "pnpm exec prisma migrate deploy && node dist/src/server.js"]
