@@ -141,12 +141,17 @@
   let monaco = $state<Monaco | null>(null);
   let disposing = false;
   let suppressNext = false;
+  let initialized = false;
   let focusDecorations: import('monaco-editor').editor.IEditorDecorationsCollection | null = null;
 
   $effect(() => {
     if (!browser || !container) return;
+    if (initialized) return;
+    initialized = true;
 
     let cancelled = false;
+    const initialValue = value;
+    const initialLanguage = language;
 
     (async () => {
       // Workers — Monaco needs a getWorker function. We point it at the
@@ -171,8 +176,8 @@
       registerThemes(m);
 
       editor = m.editor.create(container!, {
-        value,
-        language,
+        value: initialValue,
+        language: initialLanguage,
         theme: monacoThemeFor(editorTheme.current),
         fontFamily: 'var(--font-mono), ui-monospace, SFMono-Regular, monospace',
         fontSize: viewport.mobile ? 16 : 14,

@@ -155,7 +155,7 @@ export function toManuscriptProject(project: ProjectWithManuscript): ManuscriptP
   };
 }
 
-function toCharacter(character: ProjectWithManuscript['characters'][number]): Character {
+export function toCharacter(character: ProjectWithManuscript['characters'][number]): Character {
   return {
     id: character.id,
     name: character.name,
@@ -178,7 +178,7 @@ function toCharacter(character: ProjectWithManuscript['characters'][number]): Ch
   };
 }
 
-function toLocation(location: ProjectWithManuscript['locations'][number]): Location {
+export function toLocation(location: ProjectWithManuscript['locations'][number]): Location {
   return {
     id: location.id,
     name: location.name,
@@ -192,7 +192,7 @@ function toLocation(location: ProjectWithManuscript['locations'][number]): Locat
   };
 }
 
-function toChapter(chapter: ProjectWithManuscript['chapters'][number]): Chapter {
+export function toChapter(chapter: ProjectWithManuscript['chapters'][number]): Chapter {
   const head = chapter.bodyWriting.defaultBranch?.headVersion;
   return {
     id: chapter.id,
@@ -237,7 +237,7 @@ function toAct(act: ProjectWithManuscript['acts'][number]): Act {
   };
 }
 
-function toStoryStructure(project: ProjectWithManuscript): StoryStructure {
+export function toStoryStructure(project: ProjectWithManuscript): StoryStructure {
   const structure = project.storyStructure;
   return {
     title: project.title,

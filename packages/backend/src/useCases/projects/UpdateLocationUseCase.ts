@@ -1,9 +1,9 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
-import type { ManuscriptProject, UpdateLocationInput } from '@opentales/sdk';
+import type { Location, UpdateLocationInput } from '@opentales/sdk';
 import { HttpError } from '../../http/HttpError.js';
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
 import { WritingUseCase } from '../writings/WritingUseCase.js';
-import { getProjectInclude, toManuscriptProject } from './projectMapper.js';
+import { toLocation } from './projectMapper.js';
 
 export class UpdateLocationUseCase {
   private readonly access: ProjectAccessRepository;
@@ -18,7 +18,7 @@ export class UpdateLocationUseCase {
     projectId: string,
     locationId: string,
     input: UpdateLocationInput
-  ): Promise<ManuscriptProject> {
+  ): Promise<Location> {
     await this.access.assertProjectAccess(userId, projectId);
 
     await this.prisma.$transaction(async (tx) => {
@@ -59,7 +59,7 @@ export class UpdateLocationUseCase {
       await this.updateText(tx, location.sensoryWritingId, input.sensoryDetails, userId, 'Update location sensory details');
     });
 
-    return this.reload(projectId);
+    return this.reload(locationId);
   }
 
   private async updateText(
@@ -73,11 +73,16 @@ export class UpdateLocationUseCase {
     await this.writingUseCase.updateDefaultBranch(tx, { writingId, body, authorId, message });
   }
 
-  private async reload(projectId: string): Promise<ManuscriptProject> {
-    const project = await this.prisma.project.findUniqueOrThrow({
-      where: { id: projectId },
-      include: getProjectInclude()
+  private async reload(locationId: string): Promise<Location> {
+    const location = await this.prisma.location.findUniqueOrThrow({
+      where: { id: locationId },
+      include: {
+        descriptionWriting: { include: { defaultBranch: { include: { headVersion: true } } } },
+        atmosphereWriting: { include: { defaultBranch: { include: { headVersion: true } } } },
+        significanceWriting: { include: { defaultBranch: { include: { headVersion: true } } } },
+        sensoryWriting: { include: { defaultBranch: { include: { headVersion: true } } } }
+      }
     });
-    return toManuscriptProject(project);
+    return toLocation(location);
   }
 }

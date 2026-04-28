@@ -24,6 +24,8 @@ import {
   type TrashItem,
   type ProjectStats,
   type UpdateChapterInput,
+  type UpdateCharacterInput,
+  type UpdateLocationInput,
   type UpdateObstacleInput,
   type UpdateProjectInput
 } from '@opentales/sdk';
@@ -159,6 +161,42 @@ function createStore() {
   const tabs = $state<OpenTab[]>([]);
   let activeTabId = $state<string | null>(null);
   let selectedId = $state<string | null>(null);
+  const pendingEntityVersions = new Map<string, number>();
+  const patchTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const pendingPatchInputs = new Map<string, Record<string, unknown>>();
+  const AUTOSAVE_DELAY_MS = 900;
+
+  function nextEntityVersion(key: string): number {
+    const next = (pendingEntityVersions.get(key) ?? 0) + 1;
+    pendingEntityVersions.set(key, next);
+    return next;
+  }
+
+  function isLatestEntityVersion(key: string, version: number): boolean {
+    return pendingEntityVersions.get(key) === version;
+  }
+
+  function queuePatch<T extends Record<string, unknown>>(
+    key: string,
+    input: T,
+    persistPatch: (input: T, version: number) => Promise<void>
+  ) {
+    const version = nextEntityVersion(key);
+    pendingPatchInputs.set(key, { ...(pendingPatchInputs.get(key) ?? {}), ...input });
+    const existingTimer = patchTimers.get(key);
+    if (existingTimer) clearTimeout(existingTimer);
+    patchTimers.set(
+      key,
+      setTimeout(() => {
+        patchTimers.delete(key);
+        const queued = (pendingPatchInputs.get(key) ?? {}) as T;
+        pendingPatchInputs.delete(key);
+        void persist(async () => {
+          await persistPatch(queued, version);
+        });
+      }, AUTOSAVE_DELAY_MS)
+    );
+  }
 
   async function initialize() {
     if (initializing || projectId.value) return;
@@ -635,48 +673,60 @@ function createStore() {
     selectedId = id;
   }
 
-  async function updateChapterContent(id: string, content: string) {
+  function updateChapterContent(id: string, content: string) {
     const chapter = chapters.find((candidate) => candidate.id === id);
     if (!chapter || !projectId.value) return;
 
     chapter.content = content;
     chapter.wordCount = countWords(content);
-    await persist(async () => {
-      const project = await api.updateChapter(projectId.value!, id, { content });
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+    queuePatch(`chapter:${id}`, { content }, async (input, version) => {
+      const updated = await api.updateChapter(projectId.value!, id, input);
+      if (isLatestEntityVersion(`chapter:${id}`, version)) {
+        const current = chapters.find((candidate) => candidate.id === id);
+        if (current) Object.assign(current, updated);
+      }
     });
   }
 
-  async function updateChapter(id: string, updates: UpdateChapterInput) {
+  function updateChapter(id: string, updates: UpdateChapterInput) {
     const chapter = chapters.find((candidate) => candidate.id === id);
     if (!chapter || !projectId.value) return;
 
     Object.assign(chapter, updates);
-    await persist(async () => {
-      const project = await api.updateChapter(projectId.value!, id, updates);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+    queuePatch(`chapter:${id}`, updates as Record<string, unknown>, async (input, version) => {
+      const updated = await api.updateChapter(projectId.value!, id, input);
+      if (isLatestEntityVersion(`chapter:${id}`, version)) {
+        const current = chapters.find((candidate) => candidate.id === id);
+        if (current) Object.assign(current, updated);
+      }
     });
   }
 
-  async function updateCharacter(id: string, updates: Partial<Character>) {
+  function updateCharacter(id: string, updates: UpdateCharacterInput) {
     const character = characters.find((candidate) => candidate.id === id);
     if (!character || !projectId.value) return;
 
     Object.assign(character, updates);
-    await persist(async () => {
-      const project = await api.updateCharacter(projectId.value!, id, updates);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+    queuePatch(`character:${id}`, updates as Record<string, unknown>, async (input, version) => {
+      const updated = await api.updateCharacter(projectId.value!, id, input);
+      if (isLatestEntityVersion(`character:${id}`, version)) {
+        const current = characters.find((candidate) => candidate.id === id);
+        if (current) Object.assign(current, updated);
+      }
     });
   }
 
-  async function updateLocation(id: string, updates: Partial<Location>) {
+  function updateLocation(id: string, updates: UpdateLocationInput) {
     const location = locations.find((candidate) => candidate.id === id);
     if (!location || !projectId.value) return;
 
     Object.assign(location, updates);
-    await persist(async () => {
-      const project = await api.updateLocation(projectId.value!, id, updates);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+    queuePatch(`location:${id}`, updates as Record<string, unknown>, async (input, version) => {
+      const updated = await api.updateLocation(projectId.value!, id, input);
+      if (isLatestEntityVersion(`location:${id}`, version)) {
+        const current = locations.find((candidate) => candidate.id === id);
+        if (current) Object.assign(current, updated);
+      }
     });
   }
 
@@ -685,10 +735,11 @@ function createStore() {
     const asset = await uploadAsset(file, 'image');
     if (!asset) return;
     await persist(async () => {
-      const project = await api.updateCharacter(projectId.value!, id, {
+      const updated = await api.updateCharacter(projectId.value!, id, {
         avatarAssetId: asset.id
       });
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      const character = characters.find((candidate) => candidate.id === id);
+      if (character) Object.assign(character, updated);
     });
   }
 
@@ -704,20 +755,23 @@ function createStore() {
     const asset = await uploadAsset(file, 'image');
     if (!asset) return;
     await persist(async () => {
-      const project = await api.updateLocation(projectId.value!, id, {
+      const updated = await api.updateLocation(projectId.value!, id, {
         imageAssetId: asset.id
       });
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      const location = locations.find((candidate) => candidate.id === id);
+      if (location) Object.assign(location, updated);
     });
   }
 
-  async function updateStructure(updates: Partial<StoryStructure>) {
+  function updateStructure(updates: Partial<StoryStructure>) {
     if (!projectId.value) return;
 
     Object.assign(structure, updates);
-    await persist(async () => {
-      const project = await api.updateStructure(projectId.value!, updates);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+    queuePatch('structure', updates as Record<string, unknown>, async (input, version) => {
+      const updated = await api.updateStructure(projectId.value!, input);
+      if (isLatestEntityVersion('structure', version)) {
+        Object.assign(structure, updated);
+      }
     });
   }
 
@@ -880,15 +934,18 @@ function createStore() {
     });
   }
 
-  async function updateObstacle(obstacleId: string, updates: UpdateObstacleInput) {
+  function updateObstacle(obstacleId: string, updates: UpdateObstacleInput) {
     if (!projectId.value) return;
 
     const obstacle = structure.obstacles.find((candidate) => candidate.id === obstacleId);
     if (obstacle) Object.assign(obstacle, updates);
 
-    await persist(async () => {
-      const project = await api.updateObstacle(projectId.value!, obstacleId, updates);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+    queuePatch(`obstacle:${obstacleId}`, updates as Record<string, unknown>, async (input, version) => {
+      const updated = await api.updateObstacle(projectId.value!, obstacleId, input);
+      if (isLatestEntityVersion(`obstacle:${obstacleId}`, version)) {
+        const current = structure.obstacles.find((candidate) => candidate.id === obstacleId);
+        if (current) Object.assign(current, updated);
+      }
     });
   }
 

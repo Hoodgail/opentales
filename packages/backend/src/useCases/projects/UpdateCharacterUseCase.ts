@@ -1,9 +1,9 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
-import type { ManuscriptProject, UpdateCharacterInput } from '@opentales/sdk';
+import type { Character, UpdateCharacterInput } from '@opentales/sdk';
 import { HttpError } from '../../http/HttpError.js';
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
 import { WritingUseCase } from '../writings/WritingUseCase.js';
-import { getProjectInclude, toManuscriptProject } from './projectMapper.js';
+import { toCharacter } from './projectMapper.js';
 
 export class UpdateCharacterUseCase {
   private readonly access: ProjectAccessRepository;
@@ -18,7 +18,7 @@ export class UpdateCharacterUseCase {
     projectId: string,
     characterId: string,
     input: UpdateCharacterInput
-  ): Promise<ManuscriptProject> {
+  ): Promise<Character> {
     await this.access.assertProjectAccess(userId, projectId);
 
     await this.prisma.$transaction(async (tx) => {
@@ -62,7 +62,7 @@ export class UpdateCharacterUseCase {
       await this.updateText(tx, character.arcWritingId, input.arc, userId, 'Update character arc');
     });
 
-    return this.reload(projectId);
+    return this.reload(characterId);
   }
 
   private async updateText(
@@ -76,11 +76,17 @@ export class UpdateCharacterUseCase {
     await this.writingUseCase.updateDefaultBranch(tx, { writingId, body, authorId, message });
   }
 
-  private async reload(projectId: string): Promise<ManuscriptProject> {
-    const project = await this.prisma.project.findUniqueOrThrow({
-      where: { id: projectId },
-      include: getProjectInclude()
+  private async reload(characterId: string): Promise<Character> {
+    const character = await this.prisma.character.findUniqueOrThrow({
+      where: { id: characterId },
+      include: {
+        descriptionWriting: { include: { defaultBranch: { include: { headVersion: true } } } },
+        appearanceWriting: { include: { defaultBranch: { include: { headVersion: true } } } },
+        motivationWriting: { include: { defaultBranch: { include: { headVersion: true } } } },
+        arcWriting: { include: { defaultBranch: { include: { headVersion: true } } } },
+        outgoingRelationships: true
+      }
     });
-    return toManuscriptProject(project);
+    return toCharacter(character);
   }
 }

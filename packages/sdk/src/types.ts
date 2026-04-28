@@ -186,6 +186,13 @@ export interface ManuscriptProject {
   structure: StoryStructure;
 }
 
+export type PatchProjectResult = ProjectSummary;
+export type PatchChapterResult = Chapter;
+export type PatchCharacterResult = Character;
+export type PatchLocationResult = Location;
+export type PatchStructureResult = StoryStructure;
+export type PatchObstacleResult = Obstacle;
+
 export interface PublicChapter {
   id: string;
   number: number;

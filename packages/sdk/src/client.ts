@@ -38,6 +38,11 @@ import type {
   ListProjectDocsInput,
   PaginatedProjectDocs,
   QueueAiAgentPromptInput,
+  PatchChapterResult,
+  PatchCharacterResult,
+  PatchLocationResult,
+  PatchObstacleResult,
+  PatchStructureResult,
   ProjectInvite,
   ProjectAiSettings,
   ProjectDoc,
@@ -274,29 +279,29 @@ export class OpenTalesClient {
     });
   }
 
-  updateChapter(projectId: string, chapterId: string, input: UpdateChapterInput): Promise<ManuscriptProject> {
-    return this.request<ManuscriptProject>(`/projects/${projectId}/chapters/${chapterId}`, {
+  updateChapter(projectId: string, chapterId: string, input: UpdateChapterInput): Promise<PatchChapterResult> {
+    return this.request<PatchChapterResult>(`/projects/${projectId}/chapters/${chapterId}`, {
       method: 'PATCH',
       body: input
     });
   }
 
-  updateCharacter(projectId: string, characterId: string, input: UpdateCharacterInput): Promise<ManuscriptProject> {
-    return this.request<ManuscriptProject>(`/projects/${projectId}/characters/${characterId}`, {
+  updateCharacter(projectId: string, characterId: string, input: UpdateCharacterInput): Promise<PatchCharacterResult> {
+    return this.request<PatchCharacterResult>(`/projects/${projectId}/characters/${characterId}`, {
       method: 'PATCH',
       body: input
     });
   }
 
-  updateLocation(projectId: string, locationId: string, input: UpdateLocationInput): Promise<ManuscriptProject> {
-    return this.request<ManuscriptProject>(`/projects/${projectId}/locations/${locationId}`, {
+  updateLocation(projectId: string, locationId: string, input: UpdateLocationInput): Promise<PatchLocationResult> {
+    return this.request<PatchLocationResult>(`/projects/${projectId}/locations/${locationId}`, {
       method: 'PATCH',
       body: input
     });
   }
 
-  updateStructure(projectId: string, input: UpdateStructureInput): Promise<ManuscriptProject> {
-    return this.request<ManuscriptProject>(`/projects/${projectId}/structure`, {
+  updateStructure(projectId: string, input: UpdateStructureInput): Promise<PatchStructureResult> {
+    return this.request<PatchStructureResult>(`/projects/${projectId}/structure`, {
       method: 'PATCH',
       body: input
     });
@@ -412,8 +417,8 @@ export class OpenTalesClient {
     projectId: string,
     obstacleId: string,
     input: UpdateObstacleInput
-  ): Promise<ManuscriptProject> {
-    return this.request<ManuscriptProject>(`/projects/${projectId}/obstacles/${obstacleId}`, {
+  ): Promise<PatchObstacleResult> {
+    return this.request<PatchObstacleResult>(`/projects/${projectId}/obstacles/${obstacleId}`, {
       method: 'PATCH',
       body: input
     });

@@ -1,9 +1,8 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
-import type { ManuscriptProject, UpdateStructureInput } from '@opentales/sdk';
+import type { StoryStructure, UpdateStructureInput } from '@opentales/sdk';
 import { HttpError } from '../../http/HttpError.js';
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
 import { WritingUseCase } from '../writings/WritingUseCase.js';
-import { getProjectInclude, toManuscriptProject } from './projectMapper.js';
 
 export class UpdateStructureUseCase {
   private readonly access: ProjectAccessRepository;
@@ -13,7 +12,7 @@ export class UpdateStructureUseCase {
     this.access = new ProjectAccessRepository(prisma);
   }
 
-  async execute(userId: string, projectId: string, input: UpdateStructureInput): Promise<ManuscriptProject> {
+  async execute(userId: string, projectId: string, input: UpdateStructureInput): Promise<StoryStructure> {
     await this.access.assertProjectAccess(userId, projectId);
 
     await this.prisma.$transaction(async (tx) => {
@@ -58,11 +57,51 @@ export class UpdateStructureUseCase {
     await this.writingUseCase.updateDefaultBranch(tx, { writingId, body, authorId, message });
   }
 
-  private async reload(projectId: string): Promise<ManuscriptProject> {
+  private async reload(projectId: string): Promise<StoryStructure> {
     const project = await this.prisma.project.findUniqueOrThrow({
       where: { id: projectId },
-      include: getProjectInclude()
+      include: {
+        storyStructure: {
+          include: {
+            loglineWriting: { include: { defaultBranch: { include: { headVersion: true } } } },
+            outlineWriting: { include: { defaultBranch: { include: { headVersion: true } } } },
+            climaxWriting: { include: { defaultBranch: { include: { headVersion: true } } } }
+          }
+        },
+        obstacles: {
+          orderBy: { order: 'asc' },
+          include: {
+            descriptionWriting: { include: { defaultBranch: { include: { headVersion: true } } } },
+            resolutionWriting: { include: { defaultBranch: { include: { headVersion: true } } } }
+          }
+        }
+      }
     });
-    return toManuscriptProject(project);
+    const structure = project.storyStructure;
+    return {
+      title: project.title,
+      genre: project.genre ?? '',
+      perspective: project.perspective ?? '',
+      pov: project.pov ?? '',
+      voice: project.voice ?? '',
+      tone: project.tone ?? '',
+      themes: project.themes,
+      logline: structure ? currentBody(structure.loglineWriting) : '',
+      outline: structure ? currentBody(structure.outlineWriting) : '',
+      climax: structure ? currentBody(structure.climaxWriting) : '',
+      obstacles: project.obstacles.map((obstacle) => ({
+        id: obstacle.id,
+        title: obstacle.title,
+        type: obstacle.type.toLowerCase() as StoryStructure['obstacles'][number]['type'],
+        description: currentBody(obstacle.descriptionWriting),
+        resolution: currentBody(obstacle.resolutionWriting)
+      }))
+    };
   }
+}
+
+function currentBody(writing: {
+  defaultBranch: { headVersion: { body: string | null } | null } | null;
+}): string {
+  return writing.defaultBranch?.headVersion?.body ?? '';
 }

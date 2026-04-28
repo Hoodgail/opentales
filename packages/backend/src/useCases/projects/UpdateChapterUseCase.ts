@@ -1,9 +1,9 @@
 import type { ChapterStatus, PrismaClient } from '@prisma/client';
-import type { ManuscriptProject, UpdateChapterInput } from '@opentales/sdk';
+import type { Chapter, UpdateChapterInput } from '@opentales/sdk';
 import { HttpError } from '../../http/HttpError.js';
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
 import { WritingUseCase } from '../writings/WritingUseCase.js';
-import { getProjectInclude, toManuscriptProject } from './projectMapper.js';
+import { toChapter } from './projectMapper.js';
 
 const statusMap: Record<string, ChapterStatus> = {
   draft: 'DRAFT',
@@ -25,7 +25,7 @@ export class UpdateChapterUseCase {
     projectId: string,
     chapterId: string,
     input: UpdateChapterInput
-  ): Promise<ManuscriptProject> {
+  ): Promise<Chapter> {
     await this.access.assertProjectAccess(userId, projectId);
 
     await this.prisma.$transaction(async (tx) => {
@@ -69,14 +69,16 @@ export class UpdateChapterUseCase {
       }
     });
 
-    return this.reload(projectId);
+    return this.reload(chapterId);
   }
 
-  private async reload(projectId: string): Promise<ManuscriptProject> {
-    const project = await this.prisma.project.findUniqueOrThrow({
-      where: { id: projectId },
-      include: getProjectInclude()
+  private async reload(chapterId: string): Promise<Chapter> {
+    const chapter = await this.prisma.chapter.findUniqueOrThrow({
+      where: { id: chapterId },
+      include: {
+        bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } }
+      }
     });
-    return toManuscriptProject(project);
+    return toChapter(chapter);
   }
 }

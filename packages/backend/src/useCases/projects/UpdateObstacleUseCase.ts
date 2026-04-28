@@ -1,9 +1,8 @@
 import { Prisma, type ObstacleType, type PrismaClient } from '@prisma/client';
-import type { ManuscriptProject, UpdateObstacleInput } from '@opentales/sdk';
+import type { Obstacle, UpdateObstacleInput } from '@opentales/sdk';
 import { HttpError } from '../../http/HttpError.js';
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
 import { WritingUseCase } from '../writings/WritingUseCase.js';
-import { reloadManuscript } from './reloadManuscript.js';
 
 const obstacleTypeMap: Record<string, ObstacleType> = {
   internal: 'INTERNAL',
@@ -24,7 +23,7 @@ export class UpdateObstacleUseCase {
     projectId: string,
     obstacleId: string,
     input: UpdateObstacleInput
-  ): Promise<ManuscriptProject> {
+  ): Promise<Obstacle> {
     await this.access.assertProjectAccess(userId, projectId);
 
     await this.prisma.$transaction(async (tx) => {
@@ -73,6 +72,23 @@ export class UpdateObstacleUseCase {
       }
     });
 
-    return reloadManuscript(this.prisma, projectId);
+    return this.reload(obstacleId);
+  }
+
+  private async reload(obstacleId: string): Promise<Obstacle> {
+    const obstacle = await this.prisma.obstacle.findUniqueOrThrow({
+      where: { id: obstacleId },
+      include: {
+        descriptionWriting: { include: { defaultBranch: { include: { headVersion: true } } } },
+        resolutionWriting: { include: { defaultBranch: { include: { headVersion: true } } } }
+      }
+    });
+    return {
+      id: obstacle.id,
+      title: obstacle.title,
+      type: obstacle.type.toLowerCase() as Obstacle['type'],
+      description: obstacle.descriptionWriting.defaultBranch?.headVersion?.body ?? '',
+      resolution: obstacle.resolutionWriting.defaultBranch?.headVersion?.body ?? ''
+    };
   }
 }
