@@ -2,6 +2,16 @@
   import { Eye, Image as ImageIcon, MapPin, Sparkles, Upload } from 'lucide-svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import type { Location } from '$lib/data/manuscript-types';
+  import ExpandableMarkdownEditor from './ExpandableMarkdownEditor.svelte';
+
+  type LocationMarkdownField = 'description' | 'atmosphere' | 'sensoryDetails' | 'significance';
+
+  interface MarkdownFieldConfig {
+    key: LocationMarkdownField;
+    label: string;
+    icon: typeof MapPin;
+    height: string;
+  }
 
   interface Props {
     location: Location;
@@ -11,12 +21,31 @@
 
   let fileInput: HTMLInputElement | undefined = $state();
 
+  const markdownFields: MarkdownFieldConfig[] = [
+    { key: 'description', label: 'Description', icon: MapPin, height: 'h-40' },
+    { key: 'atmosphere', label: 'Atmosphere', icon: Sparkles, height: 'h-40' },
+    { key: 'sensoryDetails', label: 'Sensory Details', icon: Eye, height: 'h-36' },
+    { key: 'significance', label: 'Narrative Significance', icon: Sparkles, height: 'h-36' }
+  ];
+
   function handleUpload(e: Event) {
     const input = e.currentTarget as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) return;
     void manuscript.setLocationImage(location.id, file);
     input.value = '';
+  }
+
+  function updateMarkdownField(locationId: string, field: LocationMarkdownField, value: string) {
+    if (field === 'description') {
+      void manuscript.updateLocation(locationId, { description: value });
+    } else if (field === 'atmosphere') {
+      void manuscript.updateLocation(locationId, { atmosphere: value });
+    } else if (field === 'sensoryDetails') {
+      void manuscript.updateLocation(locationId, { sensoryDetails: value });
+    } else {
+      void manuscript.updateLocation(locationId, { significance: value });
+    }
   }
 </script>
 
@@ -87,93 +116,16 @@
       </div>
 
       <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <section class="rounded-md border border-border bg-card">
-          <header class="flex items-center gap-2 border-b border-border px-3 py-2">
-            <MapPin class="size-3.5 text-accent/80" />
-            <h3
-              class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-            >
-              Description
-            </h3>
-          </header>
-          <div class="p-3">
-            <textarea
-              value={location.description}
-              oninput={(e) =>
-                void manuscript.updateLocation(location.id, {
-                  description: (e.currentTarget as HTMLTextAreaElement).value
-                })}
-              rows={6}
-              class="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground/90 outline-none"
-            ></textarea>
-          </div>
-        </section>
-
-        <section class="rounded-md border border-border bg-card">
-          <header class="flex items-center gap-2 border-b border-border px-3 py-2">
-            <Sparkles class="size-3.5 text-accent/80" />
-            <h3
-              class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-            >
-              Atmosphere
-            </h3>
-          </header>
-          <div class="p-3">
-            <textarea
-              value={location.atmosphere}
-              oninput={(e) =>
-                void manuscript.updateLocation(location.id, {
-                  atmosphere: (e.currentTarget as HTMLTextAreaElement).value
-                })}
-              rows={6}
-              class="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground/90 outline-none"
-            ></textarea>
-          </div>
-        </section>
-
-        <section class="rounded-md border border-border bg-card">
-          <header class="flex items-center gap-2 border-b border-border px-3 py-2">
-            <Eye class="size-3.5 text-accent/80" />
-            <h3
-              class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-            >
-              Sensory Details
-            </h3>
-          </header>
-          <div class="p-3">
-            <textarea
-              value={location.sensoryDetails}
-              oninput={(e) =>
-                void manuscript.updateLocation(location.id, {
-                  sensoryDetails: (e.currentTarget as HTMLTextAreaElement).value
-                })}
-              rows={5}
-              class="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground/90 outline-none"
-            ></textarea>
-          </div>
-        </section>
-
-        <section class="rounded-md border border-border bg-card">
-          <header class="flex items-center gap-2 border-b border-border px-3 py-2">
-            <Sparkles class="size-3.5 text-accent/80" />
-            <h3
-              class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-            >
-              Narrative Significance
-            </h3>
-          </header>
-          <div class="p-3">
-            <textarea
-              value={location.significance}
-              oninput={(e) =>
-                void manuscript.updateLocation(location.id, {
-                  significance: (e.currentTarget as HTMLTextAreaElement).value
-                })}
-              rows={5}
-              class="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground/90 outline-none"
-            ></textarea>
-          </div>
-        </section>
+        {#each markdownFields as field (field.key)}
+          <ExpandableMarkdownEditor
+            value={location[field.key]}
+            onChange={(next) => updateMarkdownField(location.id, field.key, next)}
+            label={field.label}
+            icon={field.icon}
+            contextLabel={location.name}
+            height={field.height}
+          />
+        {/each}
       </div>
     </div>
   </div>

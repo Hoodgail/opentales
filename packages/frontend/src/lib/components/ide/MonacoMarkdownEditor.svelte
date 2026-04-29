@@ -13,9 +13,10 @@
     onChange: (next: string) => void;
     onSelectionChange?: (selectedText: string) => void;
     language?: string;
+    compact?: boolean;
   }
 
-  let { value, onChange, onSelectionChange, language = 'markdown' }: Props = $props();
+  let { value, onChange, onSelectionChange, language = 'markdown', compact = false }: Props = $props();
 
   function monacoThemeFor(id: EditorThemeId): string {
     return editorThemes.find((t) => t.id === id)?.monacoTheme ?? 'manuscript-dark';
@@ -178,26 +179,28 @@
         language: initialLanguage,
         theme: monacoThemeFor(editorTheme.current),
         fontFamily: 'var(--font-mono), ui-monospace, SFMono-Regular, monospace',
-        fontSize: viewport.mobile ? 16 : 14,
-        lineHeight: 1.7,
+        fontSize: compact ? 13 : viewport.mobile ? 16 : 14,
+        lineHeight: compact ? 1.55 : 1.7,
         letterSpacing: 0,
         wordWrap: 'on',
         wrappingStrategy: 'advanced',
         wrappingIndent: 'same',
         minimap: {
-          enabled: preferences.showMinimap && !viewport.mobile,
+          enabled: !compact && preferences.showMinimap && !viewport.mobile,
           renderCharacters: false,
           maxColumn: 80,
           scale: 1
         },
-        scrollBeyondLastLine: true,
+        scrollBeyondLastLine: !compact,
         scrollbar: {
           verticalScrollbarSize: viewport.mobile ? 6 : 10,
           horizontalScrollbarSize: viewport.mobile ? 6 : 10
         },
         renderLineHighlight: 'line',
         renderWhitespace: 'none',
-        padding: { top: viewport.mobile ? 20 : 24, bottom: viewport.mobile ? 120 : 80 },
+        padding: compact
+          ? { top: 10, bottom: 10 }
+          : { top: viewport.mobile ? 20 : 24, bottom: viewport.mobile ? 120 : 80 },
         smoothScrolling: true,
         cursorBlinking: 'smooth',
         cursorSmoothCaretAnimation: 'on',
@@ -205,9 +208,9 @@
         guides: { indentation: false, bracketPairs: false },
         folding: true,
         glyphMargin: false,
-        lineNumbers: viewport.mobile ? 'off' : 'on',
-        lineNumbersMinChars: viewport.mobile ? 0 : 3,
-        lineDecorationsWidth: viewport.mobile ? 0 : 8,
+        lineNumbers: compact || viewport.mobile ? 'off' : 'on',
+        lineNumbersMinChars: compact || viewport.mobile ? 0 : 3,
+        lineDecorationsWidth: compact || viewport.mobile ? 0 : 8,
         contextmenu: true,
         quickSuggestions: false,
         suggestOnTriggerCharacters: false,
@@ -266,12 +269,12 @@
   $effect(() => {
     if (!editor) return;
     editor.updateOptions({
-      fontSize: viewport.mobile ? 16 : 14,
-      lineNumbers: viewport.mobile ? 'off' : 'on',
-      lineNumbersMinChars: viewport.mobile ? 0 : 3,
-      lineDecorationsWidth: viewport.mobile ? 0 : 8,
+      fontSize: compact ? 13 : viewport.mobile ? 16 : 14,
+      lineNumbers: compact || viewport.mobile ? 'off' : 'on',
+      lineNumbersMinChars: compact || viewport.mobile ? 0 : 3,
+      lineDecorationsWidth: compact || viewport.mobile ? 0 : 8,
       minimap: {
-        enabled: preferences.showMinimap && !viewport.mobile,
+        enabled: !compact && preferences.showMinimap && !viewport.mobile,
         renderCharacters: false,
         maxColumn: 80,
         scale: 1
@@ -280,7 +283,9 @@
         verticalScrollbarSize: viewport.mobile ? 6 : 10,
         horizontalScrollbarSize: viewport.mobile ? 6 : 10
       },
-      padding: { top: viewport.mobile ? 20 : 24, bottom: viewport.mobile ? 120 : 80 },
+      padding: compact
+        ? { top: 10, bottom: 10 }
+        : { top: viewport.mobile ? 20 : 24, bottom: viewport.mobile ? 120 : 80 },
       cursorSurroundingLines: preferences.typewriterMode ? 999 : 0
     });
     updateFocusDecorations();

@@ -2,6 +2,16 @@
   import { Camera, Heart, Plus, ShieldAlert, Sparkles, Target, User, X } from 'lucide-svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import type { Character } from '$lib/data/manuscript-types';
+  import ExpandableMarkdownEditor from './ExpandableMarkdownEditor.svelte';
+
+  type CharacterMarkdownField = 'description' | 'appearance' | 'motivation' | 'arc';
+
+  interface MarkdownFieldConfig {
+    key: CharacterMarkdownField;
+    label: string;
+    icon: typeof User;
+    height: string;
+  }
 
   interface Props {
     character: Character;
@@ -14,6 +24,13 @@
   let newRelToId = $state('');
   let newRelType = $state('');
   let newRelNote = $state('');
+
+  const markdownFields: MarkdownFieldConfig[] = [
+    { key: 'description', label: 'Description', icon: User, height: 'h-36' },
+    { key: 'appearance', label: 'Appearance', icon: Sparkles, height: 'h-36' },
+    { key: 'motivation', label: 'Motivation', icon: Target, height: 'h-32' },
+    { key: 'arc', label: 'Character Arc', icon: ShieldAlert, height: 'h-32' }
+  ];
 
   const availableTargets = $derived(
     manuscript.characters.filter(
@@ -41,6 +58,18 @@
     newRelToId = '';
     newRelType = '';
     newRelNote = '';
+  }
+
+  function updateMarkdownField(characterId: string, field: CharacterMarkdownField, value: string) {
+    if (field === 'description') {
+      void manuscript.updateCharacter(characterId, { description: value });
+    } else if (field === 'appearance') {
+      void manuscript.updateCharacter(characterId, { appearance: value });
+    } else if (field === 'motivation') {
+      void manuscript.updateCharacter(characterId, { motivation: value });
+    } else {
+      void manuscript.updateCharacter(characterId, { arc: value });
+    }
   }
 </script>
 
@@ -153,7 +182,7 @@
             </div>
           </div>
           <div class="mt-3 flex flex-wrap gap-1.5">
-            {#each character.traits as t (t)}
+            {#each character.traits as t, index (`${t}-${index}`)}
               <span
                 class="rounded border border-border bg-card px-2 py-0.5 text-[11px] text-foreground/80"
               >
@@ -166,93 +195,16 @@
 
       <!-- Sections -->
       <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <section class="rounded-md border border-border bg-card">
-          <header class="flex items-center gap-2 border-b border-border px-3 py-2">
-            <User class="size-3.5 text-accent/80" />
-            <h3
-              class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-            >
-              Description
-            </h3>
-          </header>
-          <div class="p-3">
-            <textarea
-              value={character.description}
-              oninput={(e) =>
-                void manuscript.updateCharacter(character.id, {
-                  description: (e.currentTarget as HTMLTextAreaElement).value
-                })}
-              rows={5}
-              class="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground/90 outline-none placeholder:text-muted-foreground"
-            ></textarea>
-          </div>
-        </section>
-
-        <section class="rounded-md border border-border bg-card">
-          <header class="flex items-center gap-2 border-b border-border px-3 py-2">
-            <Sparkles class="size-3.5 text-accent/80" />
-            <h3
-              class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-            >
-              Appearance
-            </h3>
-          </header>
-          <div class="p-3">
-            <textarea
-              value={character.appearance}
-              oninput={(e) =>
-                void manuscript.updateCharacter(character.id, {
-                  appearance: (e.currentTarget as HTMLTextAreaElement).value
-                })}
-              rows={5}
-              class="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground/90 outline-none placeholder:text-muted-foreground"
-            ></textarea>
-          </div>
-        </section>
-
-        <section class="rounded-md border border-border bg-card">
-          <header class="flex items-center gap-2 border-b border-border px-3 py-2">
-            <Target class="size-3.5 text-accent/80" />
-            <h3
-              class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-            >
-              Motivation
-            </h3>
-          </header>
-          <div class="p-3">
-            <textarea
-              value={character.motivation}
-              oninput={(e) =>
-                void manuscript.updateCharacter(character.id, {
-                  motivation: (e.currentTarget as HTMLTextAreaElement).value
-                })}
-              rows={4}
-              class="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground/90 outline-none placeholder:text-muted-foreground"
-            ></textarea>
-          </div>
-        </section>
-
-        <section class="rounded-md border border-border bg-card">
-          <header class="flex items-center gap-2 border-b border-border px-3 py-2">
-            <ShieldAlert class="size-3.5 text-accent/80" />
-            <h3
-              class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-            >
-              Character Arc
-            </h3>
-          </header>
-          <div class="p-3">
-            <textarea
-              value={character.arc}
-              oninput={(e) =>
-                void manuscript.updateCharacter(character.id, {
-                  arc: (e.currentTarget as HTMLTextAreaElement).value
-                })}
-              rows={4}
-              class="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground/90 outline-none placeholder:text-muted-foreground"
-            ></textarea>
-          </div>
-        </section>
+        {#each markdownFields as field (field.key)}
+          <ExpandableMarkdownEditor
+            value={character[field.key]}
+            onChange={(next) => updateMarkdownField(character.id, field.key, next)}
+            label={field.label}
+            icon={field.icon}
+            contextLabel={character.name}
+            height={field.height}
+          />
+        {/each}
 
         <section class="rounded-md border border-border bg-card lg:col-span-2">
           <header class="flex items-center gap-2 border-b border-border px-3 py-2">
@@ -270,7 +222,7 @@
               </p>
             {/if}
             <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
-              {#each character.relationships as r (r.id)}
+              {#each character.relationships as r, index (`${r.id}-${index}`)}
                 {@const other = manuscript.characters.find((c) => c.id === r.characterId)}
                 {#if other}
                   <div
@@ -336,7 +288,7 @@
                   class="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground outline-none focus:border-accent/60"
                 >
                   <option value="">— Select —</option>
-                  {#each availableTargets as candidate (candidate.id)}
+                  {#each availableTargets as candidate, index (`${candidate.id}-${index}`)}
                     <option value={candidate.id}>{candidate.name}</option>
                   {/each}
                 </select>

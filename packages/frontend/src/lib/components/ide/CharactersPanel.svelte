@@ -26,7 +26,7 @@
 
   <div class="flex-1 overflow-y-auto p-2">
     <div class="space-y-1">
-      {#each manuscript.characters as c (c.id)}
+      {#each manuscript.characters as c, index (`${c.id}-${index}`)}
         {@const tabId = `tab-${c.id}`}
         {@const isActive = manuscript.activeTabId === tabId || manuscript.selectedId === c.id}
         <button

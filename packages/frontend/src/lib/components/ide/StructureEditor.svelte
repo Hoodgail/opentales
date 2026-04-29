@@ -3,11 +3,23 @@
   import type { ObstacleType } from '@opentales/sdk';
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import { cn } from '$lib/utils';
+  import ExpandableMarkdownEditor from './ExpandableMarkdownEditor.svelte';
 
   const OBSTACLE_TYPES: ObstacleType[] = ['internal', 'external', 'interpersonal'];
 
+  const themesText = $derived(manuscript.structure.themes.join('\n'));
+
   function addObstacle() {
     void manuscript.createObstacle({ title: 'New obstacle', type: 'internal' });
+  }
+
+  function updateThemes(next: string) {
+    void manuscript.updateStructure({
+      themes: next
+        .split('\n')
+        .map((theme) => theme.trim())
+        .filter(Boolean)
+    });
   }
 </script>
 
@@ -40,158 +52,75 @@
       </div>
 
       <!-- Logline -->
-      <section class="rounded-md border border-border bg-card">
-        <header class="flex items-center gap-2 border-b border-border px-3 py-2">
-          <Tag class="size-3.5 text-accent/80" />
-          <h3 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Logline
-          </h3>
-        </header>
-        <div class="p-3">
-          <textarea
-            value={manuscript.structure.logline}
-            oninput={(e) =>
-              void manuscript.updateStructure({
-                logline: (e.currentTarget as HTMLTextAreaElement).value
-              })}
-            rows={3}
-            class="w-full resize-none bg-transparent font-serif text-base italic leading-relaxed text-foreground/90 outline-none"
-          ></textarea>
-        </div>
-      </section>
+      <ExpandableMarkdownEditor
+        value={manuscript.structure.logline}
+        onChange={(next) => void manuscript.updateStructure({ logline: next })}
+        label="Logline"
+        icon={Tag}
+        contextLabel={manuscript.structure.title}
+        height="h-28"
+      />
 
       <!-- Voice & POV grid -->
       <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <section class="rounded-md border border-border bg-card">
-          <header class="flex items-center gap-2 border-b border-border px-3 py-2">
-            <Eye class="size-3.5 text-accent/80" />
-            <h3
-              class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-            >
-              Perspective
-            </h3>
-          </header>
-          <div class="p-3">
-            <div class="mb-2">
-              <div
-                class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-              >
-                POV Type
-              </div>
-              <input
-                value={manuscript.structure.perspective}
-                oninput={(e) =>
-                  void manuscript.updateStructure({
-                    perspective: (e.currentTarget as HTMLInputElement).value
-                  })}
-                class="mt-1 w-full bg-transparent text-sm text-foreground/90 outline-none"
-              />
-            </div>
-            <div>
-              <div
-                class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-              >
-                POV Characters
-              </div>
-              <textarea
-                value={manuscript.structure.pov}
-                oninput={(e) =>
-                  void manuscript.updateStructure({
-                    pov: (e.currentTarget as HTMLTextAreaElement).value
-                  })}
-                rows={3}
-                class="mt-1 w-full resize-none bg-transparent text-sm leading-relaxed text-foreground/90 outline-none"
-              ></textarea>
-            </div>
-          </div>
-        </section>
+        <ExpandableMarkdownEditor
+          value={manuscript.structure.perspective}
+          onChange={(next) => void manuscript.updateStructure({ perspective: next })}
+          label="POV Type"
+          icon={Eye}
+          contextLabel={manuscript.structure.title}
+          height="h-28"
+        />
 
-        <section class="rounded-md border border-border bg-card">
-          <header class="flex items-center gap-2 border-b border-border px-3 py-2">
-            <Volume2 class="size-3.5 text-accent/80" />
-            <h3
-              class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-            >
-              Voice & Tone
-            </h3>
-          </header>
-          <div class="p-3">
-            <div class="mb-2">
-              <div
-                class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-              >
-                Voice
-              </div>
-              <textarea
-                value={manuscript.structure.voice}
-                oninput={(e) =>
-                  void manuscript.updateStructure({
-                    voice: (e.currentTarget as HTMLTextAreaElement).value
-                  })}
-                rows={3}
-                class="mt-1 w-full resize-none bg-transparent text-sm leading-relaxed text-foreground/90 outline-none"
-              ></textarea>
-            </div>
-            <div>
-              <div
-                class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-              >
-                Tone
-              </div>
-              <input
-                value={manuscript.structure.tone}
-                oninput={(e) =>
-                  void manuscript.updateStructure({
-                    tone: (e.currentTarget as HTMLInputElement).value
-                  })}
-                class="mt-1 w-full bg-transparent text-sm text-foreground/90 outline-none"
-              />
-            </div>
-          </div>
-        </section>
+        <ExpandableMarkdownEditor
+          value={manuscript.structure.pov}
+          onChange={(next) => void manuscript.updateStructure({ pov: next })}
+          label="POV Characters"
+          icon={Eye}
+          contextLabel={manuscript.structure.title}
+          height="h-28"
+        />
+
+        <ExpandableMarkdownEditor
+          value={manuscript.structure.voice}
+          onChange={(next) => void manuscript.updateStructure({ voice: next })}
+          label="Voice"
+          icon={Volume2}
+          contextLabel={manuscript.structure.title}
+          height="h-28"
+        />
+
+        <ExpandableMarkdownEditor
+          value={manuscript.structure.tone}
+          onChange={(next) => void manuscript.updateStructure({ tone: next })}
+          label="Tone"
+          icon={Volume2}
+          contextLabel={manuscript.structure.title}
+          height="h-28"
+        />
       </div>
 
       <!-- Themes -->
-      <section class="mt-4 rounded-md border border-border bg-card">
-        <header class="flex items-center gap-2 border-b border-border px-3 py-2">
-          <Tag class="size-3.5 text-accent/80" />
-          <h3 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Themes
-          </h3>
-        </header>
-        <div class="p-3">
-          <div class="flex flex-wrap gap-1.5">
-            {#each manuscript.structure.themes as t (t)}
-              <span
-                class="rounded border border-border bg-card px-2 py-1 text-xs text-foreground/85"
-              >
-                {t}
-              </span>
-            {/each}
-          </div>
-        </div>
-      </section>
+      <ExpandableMarkdownEditor
+        value={themesText}
+        onChange={updateThemes}
+        label="Themes"
+        icon={Tag}
+        contextLabel={manuscript.structure.title}
+        height="h-32"
+        class="mt-4"
+      />
 
       <!-- Outline -->
-      <section class="mt-4 rounded-md border border-border bg-card">
-        <header class="flex items-center gap-2 border-b border-border px-3 py-2">
-          <Compass class="size-3.5 text-accent/80" />
-          <h3 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Master Outline
-          </h3>
-        </header>
-        <div class="p-3">
-          <textarea
-            value={manuscript.structure.outline}
-            oninput={(e) =>
-              void manuscript.updateStructure({
-                outline: (e.currentTarget as HTMLTextAreaElement).value
-              })}
-            rows={14}
-            class="w-full resize-none bg-transparent font-mono text-xs leading-relaxed text-foreground/90 outline-none"
-          ></textarea>
-        </div>
-      </section>
+      <ExpandableMarkdownEditor
+        value={manuscript.structure.outline}
+        onChange={(next) => void manuscript.updateStructure({ outline: next })}
+        label="Master Outline"
+        icon={Compass}
+        contextLabel={manuscript.structure.title}
+        height="h-80"
+        class="mt-4"
+      />
 
       <!-- Obstacles -->
       <section class="mt-4 rounded-md border border-border bg-card">
@@ -256,30 +185,32 @@
                     <Trash2 class="size-3.5" />
                   </button>
                 </div>
-                <textarea
-                  value={o.description}
-                  oninput={(e) =>
-                    void manuscript.updateObstacle(o.id, {
-                      description: (e.currentTarget as HTMLTextAreaElement).value
-                    })}
-                  rows={2}
-                  placeholder="Describe the obstacle…"
-                  class="w-full resize-none bg-transparent text-xs leading-relaxed text-foreground/80 outline-none"
-                ></textarea>
+                <div class="overflow-hidden rounded border border-border/60">
+                  <ExpandableMarkdownEditor
+                    value={o.description}
+                    onChange={(next) => void manuscript.updateObstacle(o.id, { description: next })}
+                    label="Description"
+                    icon={Zap}
+                    contextLabel={o.title}
+                    height="h-20"
+                    class="border-0"
+                  />
+                </div>
                 <div
                   class="mt-2 flex items-start gap-2 border-t border-border pt-2 text-xs"
                 >
                   <ShieldAlert class="mt-0.5 size-3 shrink-0 text-emerald-400/70" />
-                  <textarea
-                    value={o.resolution}
-                    oninput={(e) =>
-                      void manuscript.updateObstacle(o.id, {
-                        resolution: (e.currentTarget as HTMLTextAreaElement).value
-                      })}
-                    rows={2}
-                    placeholder="How is it resolved?"
-                    class="w-full resize-none bg-transparent text-muted-foreground outline-none"
-                  ></textarea>
+                  <div class="min-w-0 flex-1 overflow-hidden rounded border border-border/60">
+                    <ExpandableMarkdownEditor
+                      value={o.resolution}
+                      onChange={(next) => void manuscript.updateObstacle(o.id, { resolution: next })}
+                      label="Resolution"
+                      icon={ShieldAlert}
+                      contextLabel={o.title}
+                      height="h-20"
+                      class="border-0"
+                    />
+                  </div>
                 </div>
               </div>
             {/each}
@@ -288,25 +219,15 @@
       </section>
 
       <!-- Climax -->
-      <section class="mt-4 rounded-md border border-border bg-card">
-        <header class="flex items-center gap-2 border-b border-border px-3 py-2">
-          <MountainSnow class="size-3.5 text-accent/80" />
-          <h3 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Climax
-          </h3>
-        </header>
-        <div class="p-3">
-          <textarea
-            value={manuscript.structure.climax}
-            oninput={(e) =>
-              void manuscript.updateStructure({
-                climax: (e.currentTarget as HTMLTextAreaElement).value
-              })}
-            rows={8}
-            class="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground/90 outline-none"
-          ></textarea>
-        </div>
-      </section>
+      <ExpandableMarkdownEditor
+        value={manuscript.structure.climax}
+        onChange={(next) => void manuscript.updateStructure({ climax: next })}
+        label="Climax"
+        icon={MountainSnow}
+        contextLabel={manuscript.structure.title}
+        height="h-52"
+        class="mt-4"
+      />
     </div>
   </div>
 </div>

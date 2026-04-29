@@ -176,6 +176,22 @@ function createStore() {
     return pendingEntityVersions.get(key) === version;
   }
 
+  function applySavedCharacterPatch(character: Character, input: UpdateCharacterInput, saved: Character) {
+    if (input.name !== undefined) character.name = saved.name;
+    if (input.role !== undefined) character.role = saved.role;
+    if (input.age !== undefined) character.age = saved.age;
+    if (input.occupation !== undefined) character.occupation = saved.occupation;
+    if (input.traits !== undefined) character.traits = saved.traits;
+    if (input.description !== undefined) character.description = saved.description;
+    if (input.appearance !== undefined) character.appearance = saved.appearance;
+    if (input.motivation !== undefined) character.motivation = saved.motivation;
+    if (input.arc !== undefined) character.arc = saved.arc;
+    if (input.avatarAssetId !== undefined) {
+      character.avatar = saved.avatar;
+      character.avatarAssetId = saved.avatarAssetId;
+    }
+  }
+
   function queuePatch<T extends Record<string, unknown>>(
     key: string,
     input: T,
@@ -711,7 +727,7 @@ function createStore() {
       const updated = await api.updateCharacter(projectId.value!, id, input);
       if (isLatestEntityVersion(`character:${id}`, version)) {
         const current = characters.find((candidate) => candidate.id === id);
-        if (current) Object.assign(current, updated);
+        if (current) applySavedCharacterPatch(current, input, updated);
       }
     });
   }
