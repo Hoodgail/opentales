@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { browser } from '$app/environment';
   import { preferences } from '$lib/stores/preferences.svelte';
   import { editorTheme, editorThemes, type EditorThemeId } from '$lib/stores/editorTheme.svelte';
@@ -141,14 +141,10 @@
   let monaco = $state<Monaco | null>(null);
   let disposing = false;
   let suppressNext = false;
-  let initialized = false;
   let focusDecorations: import('monaco-editor').editor.IEditorDecorationsCollection | null = null;
 
-  $effect(() => {
-    if (!browser || !container) return;
-    if (initialized) return;
-    initialized = true;
-
+  onMount(() => {
+    if (!browser) return;
     let cancelled = false;
     const initialValue = value;
     const initialLanguage = language;
@@ -175,7 +171,9 @@
 
       registerThemes(m);
 
-      editor = m.editor.create(container!, {
+      if (!container) return;
+
+      editor = m.editor.create(container, {
         value: initialValue,
         language: initialLanguage,
         theme: monacoThemeFor(editorTheme.current),
