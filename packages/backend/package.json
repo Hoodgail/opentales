@@ -6,7 +6,7 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "prisma generate && tsc -p tsconfig.json",
+    "build": "prisma generate && tsc -p tsconfig.json && node scripts/copy-prompt-templates.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/server.js",
     "prisma:generate": "prisma generate",
