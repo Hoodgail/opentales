@@ -25,7 +25,7 @@
 {#if manuscript.tabs.length > 0}
   <div
     class={cn(
-      'flex shrink-0 items-stretch overflow-x-auto border-b border-border bg-sidebar',
+      'editor-tabs flex shrink-0 items-stretch overflow-x-auto overflow-y-hidden border-b border-border bg-sidebar',
       viewport.mobile ? 'h-11' : 'h-9'
     )}
   >
@@ -41,7 +41,7 @@
           if (e.key === 'Enter' || e.key === ' ') void manuscript.setActiveTab(t.id);
         }}
         class={cn(
-          'group relative flex h-full min-w-0 max-w-[220px] cursor-pointer items-center gap-2 border-r border-border px-3 text-xs transition-colors',
+          'group relative flex h-full max-w-[220px] shrink-0 cursor-pointer items-center gap-2 border-r border-border px-3 text-xs transition-colors',
           active
             ? 'bg-background text-foreground'
             : 'bg-sidebar text-muted-foreground hover:bg-muted/50 hover:text-foreground/90'
@@ -58,13 +58,29 @@
         <button
           type="button"
           onclick={(e) => close(e, t)}
-          class="ml-1 flex size-4 shrink-0 items-center justify-center rounded opacity-0 transition-opacity hover:bg-muted-foreground/20 group-hover:opacity-100"
+          class={cn(
+            'ml-1 flex size-4 shrink-0 items-center justify-center rounded transition-opacity hover:bg-muted-foreground/20',
+            viewport.mobile
+              ? 'opacity-70'
+              : 'opacity-0 group-hover:opacity-100'
+          )}
           aria-label="Close tab"
         >
           <X class="size-3" />
         </button>
       </div>
     {/each}
-    <div class="flex-1 border-b border-border"></div>
+    <div class="shrink-0 flex-1 border-b border-border"></div>
   </div>
 {/if}
+
+<style>
+  .editor-tabs {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+  }
+  .editor-tabs::-webkit-scrollbar {
+    height: 0;
+  }
+</style>

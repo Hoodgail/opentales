@@ -229,7 +229,7 @@
            drawers and a bottom nav. Drawers and backdrop are siblings of
            the editor so they overlay it without nudging layout. -->
       <div class="relative flex min-h-0 flex-1">
-        <main class="flex min-h-0 flex-1 flex-col">
+        <main class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <EditorArea />
         </main>
 
