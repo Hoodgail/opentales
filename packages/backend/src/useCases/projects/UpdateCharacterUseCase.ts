@@ -62,7 +62,7 @@ export class UpdateCharacterUseCase {
       await this.updateText(tx, character.arcWritingId, input.arc, userId, 'Update character arc');
     });
 
-    return this.reload(characterId);
+    return this.reload(characterId, projectId);
   }
 
   private async updateText(
@@ -76,7 +76,7 @@ export class UpdateCharacterUseCase {
     await this.writingUseCase.updateDefaultBranch(tx, { writingId, body, authorId, message });
   }
 
-  private async reload(characterId: string): Promise<Character> {
+  private async reload(characterId: string, projectId: string): Promise<Character> {
     const character = await this.prisma.character.findUniqueOrThrow({
       where: { id: characterId },
       include: {
@@ -87,6 +87,11 @@ export class UpdateCharacterUseCase {
         outgoingRelationships: true
       }
     });
-    return toCharacter(character);
+    const assets = await this.prisma.asset.findMany({
+      where: { projectId, attachments: { some: { entityType: 'CHARACTER', entityId: characterId } } },
+      include: { attachments: true },
+      orderBy: { createdAt: 'asc' }
+    });
+    return toCharacter(character, assets);
   }
 }

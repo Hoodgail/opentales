@@ -50,6 +50,9 @@ export class DeleteCharacterUseCase {
         where: { povCharacterId: characterId },
         data: { povCharacterId: null }
       });
+      await tx.assetAttachment.deleteMany({
+        where: { entityType: 'CHARACTER', entityId: characterId }
+      });
 
       await tx.character.delete({ where: { id: characterId } });
 

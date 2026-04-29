@@ -40,6 +40,18 @@ export interface CharacterRelationship {
   note: string;
 }
 
+export interface CharacterAsset {
+  id: string;
+  assetId: string;
+  role: string;
+  order: number | null;
+  kind: AssetKind;
+  mimeType: string;
+  sizeBytes: number;
+  url: string;
+  createdAt: string;
+}
+
 export interface Character {
   id: string;
   name: string;
@@ -54,6 +66,7 @@ export interface Character {
   arc: string;
   traits: string[];
   relationships: CharacterRelationship[];
+  assets: CharacterAsset[];
 }
 
 export interface Location {
@@ -494,7 +507,7 @@ export type UpdateChapterInput = Partial<
 > & {
   publishedAt?: string | null;
 };
-export type UpdateCharacterInput = Partial<Omit<Character, 'id' | 'relationships'>> & {
+export type UpdateCharacterInput = Partial<Omit<Character, 'id' | 'relationships' | 'assets'>> & {
   avatarAssetId?: string | null;
 };
 export type UpdateLocationInput = Partial<Omit<Location, 'id'>> & {
@@ -521,6 +534,12 @@ export interface CreateCharacterInput {
   appearance?: string;
   motivation?: string;
   arc?: string;
+}
+
+export interface AttachCharacterAssetInput {
+  assetId: string;
+  role?: string;
+  order?: number | null;
 }
 
 export interface CreateLocationInput {

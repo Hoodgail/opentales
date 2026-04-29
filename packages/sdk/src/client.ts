@@ -1,5 +1,6 @@
 import type {
   AcceptInviteResult,
+  AttachCharacterAssetInput,
   Asset,
   AssetKind,
   AuthSession,
@@ -332,6 +333,28 @@ export class OpenTalesClient {
       method: 'POST',
       body: input
     });
+  }
+
+  attachCharacterAsset(
+    projectId: string,
+    characterId: string,
+    input: AttachCharacterAssetInput
+  ): Promise<PatchCharacterResult> {
+    return this.request<PatchCharacterResult>(
+      `/projects/${projectId}/characters/${characterId}/assets`,
+      { method: 'POST', body: input }
+    );
+  }
+
+  detachCharacterAsset(
+    projectId: string,
+    characterId: string,
+    attachmentId: string
+  ): Promise<PatchCharacterResult> {
+    return this.request<PatchCharacterResult>(
+      `/projects/${projectId}/characters/${characterId}/assets/${attachmentId}`,
+      { method: 'DELETE' }
+    );
   }
 
   deleteCharacter(projectId: string, characterId: string): Promise<ManuscriptProject> {

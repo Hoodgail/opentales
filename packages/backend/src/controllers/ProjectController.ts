@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { prisma } from '../config/prisma.js';
 import { HttpError } from '../http/HttpError.js';
+import { AttachCharacterAssetUseCase } from '../useCases/projects/AttachCharacterAssetUseCase.js';
 import { CreateActUseCase } from '../useCases/projects/CreateActUseCase.js';
 import { CreateChapterUseCase } from '../useCases/projects/CreateChapterUseCase.js';
 import { CreateCharacterUseCase } from '../useCases/projects/CreateCharacterUseCase.js';
@@ -9,6 +10,7 @@ import { CreateLocationUseCase } from '../useCases/projects/CreateLocationUseCas
 import { CreateObstacleUseCase } from '../useCases/projects/CreateObstacleUseCase.js';
 import { CreateProjectUseCase } from '../useCases/projects/CreateProjectUseCase.js';
 import { DeleteActUseCase } from '../useCases/projects/DeleteActUseCase.js';
+import { DetachCharacterAssetUseCase } from '../useCases/projects/DetachCharacterAssetUseCase.js';
 import { DeleteChapterUseCase } from '../useCases/projects/DeleteChapterUseCase.js';
 import { DeleteCharacterUseCase } from '../useCases/projects/DeleteCharacterUseCase.js';
 import { DeleteCharacterRelationshipUseCase } from '../useCases/projects/DeleteCharacterRelationshipUseCase.js';
@@ -37,6 +39,8 @@ export class ProjectController {
   private readonly updateActUseCase = new UpdateActUseCase(prisma);
   private readonly deleteActUseCase = new DeleteActUseCase(prisma);
   private readonly createCharacterUseCase = new CreateCharacterUseCase(prisma);
+  private readonly attachCharacterAssetUseCase = new AttachCharacterAssetUseCase(prisma);
+  private readonly detachCharacterAssetUseCase = new DetachCharacterAssetUseCase(prisma);
   private readonly deleteCharacterUseCase = new DeleteCharacterUseCase(prisma);
   private readonly createLocationUseCase = new CreateLocationUseCase(prisma);
   private readonly deleteLocationUseCase = new DeleteLocationUseCase(prisma);
@@ -138,6 +142,30 @@ export class ProjectController {
         this.userId(req),
         req.params.projectId,
         req.params.characterId
+      )
+    );
+  };
+
+  attachCharacterAsset = async (req: Request, res: Response) => {
+    res
+      .status(201)
+      .json(
+        await this.attachCharacterAssetUseCase.execute(
+          this.userId(req),
+          req.params.projectId,
+          req.params.characterId,
+          req.body
+        )
+      );
+  };
+
+  detachCharacterAsset = async (req: Request, res: Response) => {
+    res.json(
+      await this.detachCharacterAssetUseCase.execute(
+        this.userId(req),
+        req.params.projectId,
+        req.params.characterId,
+        req.params.attachmentId
       )
     );
   };

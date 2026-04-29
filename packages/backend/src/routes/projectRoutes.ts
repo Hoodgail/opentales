@@ -64,6 +64,14 @@ projectRoutes.post('/:projectId/characters', asyncHandler(controller.createChara
 projectRoutes.patch('/:projectId/characters/:characterId', asyncHandler(controller.updateCharacter));
 projectRoutes.delete('/:projectId/characters/:characterId', asyncHandler(controller.deleteCharacter));
 projectRoutes.post(
+  '/:projectId/characters/:characterId/assets',
+  asyncHandler(controller.attachCharacterAsset)
+);
+projectRoutes.delete(
+  '/:projectId/characters/:characterId/assets/:attachmentId',
+  asyncHandler(controller.detachCharacterAsset)
+);
+projectRoutes.post(
   '/:projectId/characters/:characterId/relationships',
   asyncHandler(controller.createCharacterRelationship)
 );

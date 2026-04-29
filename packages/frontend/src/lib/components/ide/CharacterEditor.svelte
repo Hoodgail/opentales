@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Camera, Heart, Plus, ShieldAlert, Sparkles, Target, User, X } from 'lucide-svelte';
+  import { Camera, Heart, ImagePlus, Plus, ShieldAlert, Sparkles, Target, User, X } from 'lucide-svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import type { Character } from '$lib/data/manuscript-types';
   import ExpandableMarkdownEditor from './ExpandableMarkdownEditor.svelte';
@@ -20,6 +20,7 @@
   let { character }: Props = $props();
 
   let fileInput: HTMLInputElement | undefined = $state();
+  let assetInput: HTMLInputElement | undefined = $state();
 
   let newRelToId = $state('');
   let newRelType = $state('');
@@ -45,6 +46,16 @@
     const file = input.files?.[0];
     if (!file) return;
     void manuscript.setCharacterAvatar(character.id, file);
+    input.value = '';
+  }
+
+  function handleAsset(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const files = Array.from(input.files ?? []);
+    if (files.length === 0) return;
+    for (const file of files) {
+      void manuscript.addCharacterAsset(character.id, file);
+    }
     input.value = '';
   }
 
@@ -195,6 +206,75 @@
 
       <!-- Sections -->
       <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <section class="rounded-md border border-border bg-card lg:col-span-2">
+          <header class="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
+            <div class="flex items-center gap-2">
+              <ImagePlus class="size-3.5 text-accent/80" />
+              <h3
+                class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+              >
+                Reference Assets
+              </h3>
+            </div>
+            <button
+              type="button"
+              onclick={() => assetInput?.click()}
+              class="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 text-[11px] font-medium text-foreground transition-colors hover:border-accent/60 hover:bg-muted"
+            >
+              <Plus class="size-3" />
+              Add images
+            </button>
+            <input
+              bind:this={assetInput}
+              type="file"
+              accept="image/*"
+              multiple
+              onchange={handleAsset}
+              class="hidden"
+            />
+          </header>
+          <div class="p-3">
+            {#if character.assets.length === 0}
+              <button
+                type="button"
+                onclick={() => assetInput?.click()}
+                class="flex min-h-36 w-full flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border bg-background/50 text-center text-xs text-muted-foreground transition-colors hover:border-accent/60 hover:text-foreground"
+              >
+                <ImagePlus class="size-6" />
+                Upload landscape character sheets, full-body designs, expression boards, or other references.
+              </button>
+            {:else}
+              <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {#each character.assets as asset (asset.id)}
+                  <figure class="group overflow-hidden rounded-md border border-border bg-background">
+                    <a href={asset.url} target="_blank" rel="noreferrer" class="block">
+                      <img
+                        src={asset.url}
+                        alt="{character.name} reference asset"
+                        class="aspect-video w-full bg-muted object-cover transition-transform group-hover:scale-[1.02]"
+                      />
+                    </a>
+                    <figcaption class="flex items-center justify-between gap-2 px-2 py-1.5">
+                      <span class="truncate text-[11px] text-muted-foreground">
+                        {asset.mimeType} · {Math.ceil(asset.sizeBytes / 1024)} KB
+                      </span>
+                      <button
+                        type="button"
+                        onclick={() => void manuscript.removeCharacterAsset(character.id, asset.id)}
+                        class="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/20 hover:text-destructive-foreground"
+                        title="Remove asset"
+                        aria-label="Remove asset"
+                      >
+                        <X class="size-3.5" />
+                      </button>
+                    </figcaption>
+                  </figure>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        </section>
+
         {#each markdownFields as field (field.key)}
           <ExpandableMarkdownEditor
             value={character[field.key]}

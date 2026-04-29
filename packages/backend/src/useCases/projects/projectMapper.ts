@@ -70,6 +70,10 @@ const projectInclude = {
       outgoingRelationships: true
     }
   },
+  assets: {
+    where: { attachments: { some: { entityType: 'CHARACTER' } } },
+    include: { attachments: true }
+  },
   locations: {
     orderBy: { createdAt: 'asc' },
     include: {
@@ -106,6 +110,7 @@ const projectInclude = {
 
 export type ProjectWithManuscript = Prisma.ProjectGetPayload<{ include: typeof projectInclude }>;
 type WritingWithHead = ProjectWithManuscript['chapters'][number]['bodyWriting'];
+type CharacterAssetWithAttachments = ProjectWithManuscript['assets'][number];
 
 export function getProjectInclude() {
   return projectInclude;
@@ -146,7 +151,7 @@ export function toManuscriptProject(project: ProjectWithManuscript): ManuscriptP
     coverAssetId: project.coverAssetId ?? null,
     coverOrientation: toCoverOrientation(project.coverOrientation),
     orgSlug: project.org.slug,
-    characters: project.characters.map(toCharacter),
+    characters: project.characters.map((character) => toCharacter(character, project.assets)),
     locations: project.locations.map(toLocation),
     chapters: project.chapters.map(toChapter),
     docs: project.docs.map(toProjectDoc),
@@ -155,7 +160,18 @@ export function toManuscriptProject(project: ProjectWithManuscript): ManuscriptP
   };
 }
 
-export function toCharacter(character: ProjectWithManuscript['characters'][number]): Character {
+export function toCharacter(
+  character: ProjectWithManuscript['characters'][number],
+  characterAssets: CharacterAssetWithAttachments[] = []
+): Character {
+  const assets = characterAssets
+    .flatMap((asset) =>
+      asset.attachments
+        .filter((attachment) => attachment.entityType === 'CHARACTER' && attachment.entityId === character.id)
+        .map((attachment) => ({ asset, attachment }))
+    )
+    .sort((left, right) => (left.attachment.order ?? 0) - (right.attachment.order ?? 0));
+
   return {
     id: character.id,
     name: character.name,
@@ -174,6 +190,17 @@ export function toCharacter(character: ProjectWithManuscript['characters'][numbe
       characterId: relationship.toCharacterId,
       type: relationship.type,
       note: relationship.note ?? ''
+    })),
+    assets: assets.map(({ asset, attachment }) => ({
+      id: attachment.id,
+      assetId: asset.id,
+      role: attachment.role,
+      order: attachment.order,
+      kind: asset.kind === 'IMAGE' ? 'image' : asset.kind === 'AUDIO' ? 'audio' : asset.kind === 'VIDEO' ? 'video' : 'document',
+      mimeType: asset.mimeType,
+      sizeBytes: Number(asset.sizeBytes),
+      url: assetUrl(asset.id) ?? '',
+      createdAt: asset.createdAt.toISOString()
     }))
   };
 }

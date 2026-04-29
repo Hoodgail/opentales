@@ -759,6 +759,29 @@ function createStore() {
     });
   }
 
+  async function addCharacterAsset(id: string, file: Blob) {
+    if (!projectId.value) return;
+    const asset = await uploadAsset(file, 'image');
+    if (!asset) return;
+    await persist(async () => {
+      const character = characters.find((candidate) => candidate.id === id);
+      const updated = await api.attachCharacterAsset(projectId.value!, id, {
+        assetId: asset.id,
+        order: character?.assets.length ?? 0
+      });
+      if (character) Object.assign(character, updated);
+    });
+  }
+
+  async function removeCharacterAsset(id: string, attachmentId: string) {
+    if (!projectId.value) return;
+    await persist(async () => {
+      const updated = await api.detachCharacterAsset(projectId.value!, id, attachmentId);
+      const character = characters.find((candidate) => candidate.id === id);
+      if (character) Object.assign(character, updated);
+    });
+  }
+
   async function setProjectCover(file: Blob) {
     if (!projectId.value) return;
     const asset = await uploadAsset(file, 'image');
@@ -1124,6 +1147,8 @@ function createStore() {
     createNewProject,
     uploadAsset,
     setCharacterAvatar,
+    addCharacterAsset,
+    removeCharacterAsset,
     setLocationImage,
     setProjectCover,
     updateChapterContent,

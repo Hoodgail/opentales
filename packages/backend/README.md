@@ -80,6 +80,8 @@ Project routes require `Authorization: Bearer <token>`.
 | `PATCH` | `/projects/:projectId` | Update project metadata |
 | `PATCH` | `/projects/:projectId/chapters/:chapterId` | Update chapter metadata and content |
 | `PATCH` | `/projects/:projectId/characters/:characterId` | Update character fields and prose |
+| `POST` | `/projects/:projectId/characters/:characterId/assets` | Attach an uploaded asset to a character |
+| `DELETE` | `/projects/:projectId/characters/:characterId/assets/:attachmentId` | Remove a character asset attachment |
 | `PATCH` | `/projects/:projectId/locations/:locationId` | Update location fields and prose |
 | `PATCH` | `/projects/:projectId/structure` | Update project structure prose and metadata |
 

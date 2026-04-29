@@ -21,6 +21,7 @@ export const initialCharacters: Character[] = [
       { id: "rel-mock-char-iris", characterId: "char-iris", type: "Ally", note: "Local librarian who becomes her confidante" },
       { id: "rel-mock-char-silas", characterId: "char-silas", type: "Antagonist", note: "Rival claimant to the estate" },
     ],
+    assets: [],
   },
   {
     id: "char-marcus",
@@ -40,6 +41,7 @@ export const initialCharacters: Character[] = [
       { id: "rel-mock-char-elena", characterId: "char-elena", type: "Mentee", note: "Sees her grandmother in her" },
       { id: "rel-mock-char-silas", characterId: "char-silas", type: "Adversary", note: "Decades-old grudge" },
     ],
+    assets: [],
   },
   {
     id: "char-iris",
@@ -55,6 +57,7 @@ export const initialCharacters: Character[] = [
     arc: "Moves from cautious observer to active participant, finding her own courage in the process.",
     traits: ["Curious", "Witty", "Resourceful", "Empathetic"],
     relationships: [{ id: "rel-mock-char-elena", characterId: "char-elena", type: "Friend", note: "Sees a kindred spirit" }],
+    assets: [],
   },
   {
     id: "char-silas",
@@ -73,6 +76,7 @@ export const initialCharacters: Character[] = [
       { id: "rel-mock-char-elena", characterId: "char-elena", type: "Adversary", note: "Underestimates her at first" },
       { id: "rel-mock-char-marcus", characterId: "char-marcus", type: "Enemy", note: "Old wound, never healed" },
     ],
+    assets: [],
   },
 ]
 

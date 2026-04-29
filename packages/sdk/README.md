@@ -84,5 +84,7 @@ Important DTOs:
 | `updateProject(projectId, input)` | `PATCH /projects/:projectId` |
 | `updateChapter(projectId, chapterId, input)` | `PATCH /projects/:projectId/chapters/:chapterId` |
 | `updateCharacter(projectId, characterId, input)` | `PATCH /projects/:projectId/characters/:characterId` |
+| `attachCharacterAsset(projectId, characterId, input)` | `POST /projects/:projectId/characters/:characterId/assets` |
+| `detachCharacterAsset(projectId, characterId, attachmentId)` | `DELETE /projects/:projectId/characters/:characterId/assets/:attachmentId` |
 | `updateLocation(projectId, locationId, input)` | `PATCH /projects/:projectId/locations/:locationId` |
 | `updateStructure(projectId, input)` | `PATCH /projects/:projectId/structure` |
