@@ -15,11 +15,19 @@
 </script>
 
 <div
-  class="flex items-center justify-between border-b border-border px-3 py-2 text-xs last:border-b-0"
+  class="flex items-start justify-between gap-3 border-b border-border px-3 py-2 text-xs last:border-b-0"
+  title={`${label}: ${value}`}
 >
-  <span class="flex items-center gap-2 text-muted-foreground">
-    {#if Icon}<Icon class="size-3" />{/if}
-    {label}
+  <span class="flex shrink-0 items-center gap-2 text-muted-foreground">
+    {#if Icon}<Icon class="size-3 shrink-0" />{/if}
+    <span class="truncate">{label}</span>
   </span>
-  <span class={cn('text-foreground', mono && 'font-mono text-[11px]')}>{value}</span>
+  <span
+    class={cn(
+      'min-w-0 flex-1 break-words text-right text-foreground',
+      mono && 'font-mono text-[11px]'
+    )}
+  >
+    {value}
+  </span>
 </div>

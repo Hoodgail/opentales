@@ -683,72 +683,87 @@
 
       <!-- Pending tool calls (need approval) -->
       {#if session?.pendingToolCalls && session.pendingToolCalls.length > 0}
-        <div class="space-y-2 border-t border-border p-2">
-          {#each session.pendingToolCalls as tc (tc.id)}
-            {#if tc.status === 'pending-approval'}
-              <div class="rounded-md border border-amber-500/30 bg-amber-500/5 p-2.5">
-                <div class="flex items-start justify-between gap-2">
-                  <div class="min-w-0">
-                    <div class="flex items-center gap-2 text-xs">
-                      <Zap class="size-3.5 text-amber-400" />
-                      <span class="font-medium text-amber-300">{toolLabel(tc.toolName)}</span>
-                      <span class="text-[10px] text-muted-foreground">requires approval</span>
+        <div class="border-t border-border">
+          <div class="flex items-center gap-1.5 px-3 pt-2 pb-1">
+            <span class="size-1 rounded-full bg-accent"></span>
+            <p class="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Pending approval
+            </p>
+          </div>
+          <ul class="divide-y divide-border/60">
+            {#each session.pendingToolCalls as tc (tc.id)}
+              {#if tc.status === 'pending-approval'}
+                <li class="group px-3 py-2">
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onclick={() => openApprovalDoc(tc)}
+                      class="flex min-w-0 flex-1 items-center gap-2 text-left"
+                      title="Open diff"
+                    >
+                      <FileText class="size-3 shrink-0 text-muted-foreground" />
+                      <span class="min-w-0 flex-1">
+                        <span class="block truncate text-[11px] text-foreground">
+                          {toolLabel(tc.toolName)}
+                          <span class="text-muted-foreground">— {toolSummary(tc)}</span>
+                        </span>
+                      </span>
+                    </button>
+                    <div class="flex shrink-0 items-center gap-0.5">
+                      <button
+                        type="button"
+                        onclick={() => toggleTool(tc.id)}
+                        title={expandedTools[tc.id] ? 'Hide input' : 'Show input'}
+                        class="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        {#if expandedTools[tc.id]}
+                          <ChevronDown class="size-3" />
+                        {:else}
+                          <ChevronRight class="size-3" />
+                        {/if}
+                      </button>
+                      <button
+                        type="button"
+                        onclick={() => reject(tc.id)}
+                        title="Reject"
+                        class="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-destructive"
+                      >
+                        <X class="size-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onclick={() => approve(tc.id)}
+                        title="Approve"
+                        class="flex size-6 items-center justify-center rounded text-emerald-500 hover:bg-emerald-500/10"
+                      >
+                        <Check class="size-3.5" />
+                      </button>
                     </div>
-                    <p class="mt-1 truncate text-[11px] text-muted-foreground">{toolSummary(tc)}</p>
                   </div>
-                  <button
-                    type="button"
-                    onclick={() => openApprovalDoc(tc)}
-                    class="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-500/30 bg-background/70 px-2 py-1 text-[10px] text-amber-200 hover:bg-amber-500/10"
-                  >
-                    <FileText class="size-3" /> Open diff
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onclick={() => toggleTool(tc.id)}
-                  class="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
-                >
                   {#if expandedTools[tc.id]}
-                    <ChevronDown class="size-3" /> Hide input
-                  {:else}
-                    <ChevronRight class="size-3" /> Show input
+                    <pre class="mt-1.5 ml-5 max-h-40 overflow-auto rounded bg-muted/40 p-2 text-[10px] leading-relaxed text-muted-foreground">{JSON.stringify(tc.input, null, 2)}</pre>
                   {/if}
-                </button>
-                {#if expandedTools[tc.id]}
-                  <pre class="mt-1 max-h-32 overflow-auto rounded bg-background/60 p-2 text-[10px] text-foreground/80">{JSON.stringify(tc.input, null, 2)}</pre>
-                {/if}
-                <div class="mt-2 flex gap-1.5">
-                  <button
-                    type="button"
-                    onclick={() => approve(tc.id)}
-                    class="inline-flex items-center gap-1 rounded-md bg-emerald-600/80 px-2.5 py-1 text-[11px] text-white hover:bg-emerald-500"
-                  >
-                    <Check class="size-3" /> Approve
-                  </button>
-                  <button
-                    type="button"
-                    onclick={() => reject(tc.id)}
-                    class="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[11px] text-muted-foreground hover:bg-muted"
-                  >
-                    <X class="size-3" /> Reject
-                  </button>
-                </div>
-              </div>
-            {/if}
-          {/each}
+                </li>
+              {/if}
+            {/each}
+          </ul>
         </div>
       {/if}
 
       <!-- Queue -->
       {#if session?.queue && session.queue.filter((q) => q.status === 'queued').length > 0}
-        <div class="border-t border-border p-2">
-          <p class="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">Queued</p>
-          {#each session.queue.filter((q) => q.status === 'queued') as q (q.id)}
-            <div class="rounded bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
-              {q.prompt}
-            </div>
-          {/each}
+        <div class="border-t border-border px-3 py-2">
+          <div class="mb-1 flex items-center gap-1.5">
+            <span class="size-1 rounded-full bg-muted-foreground/60"></span>
+            <p class="text-[10px] uppercase tracking-wider text-muted-foreground">Queued</p>
+          </div>
+          <ul class="space-y-0.5">
+            {#each session.queue.filter((q) => q.status === 'queued') as q (q.id)}
+              <li class="truncate pl-2.5 text-[11px] text-muted-foreground">
+                {q.prompt}
+              </li>
+            {/each}
+          </ul>
         </div>
       {/if}
     </div>

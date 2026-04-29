@@ -31,12 +31,15 @@
         {@const isActive = manuscript.activeTabId === tabId || manuscript.selectedId === c.id}
         <button
           type="button"
+          title={c.role && c.occupation
+            ? `${c.name} — ${c.role} · ${c.occupation}`
+            : (c.role ?? c.occupation ?? c.name)}
           onclick={() => {
             void manuscript.setSelectedId(c.id);
             void manuscript.openTab({ id: tabId, type: 'character', refId: c.id, title: c.name });
           }}
           class={cn(
-            'group flex w-full items-center gap-2.5 rounded-md p-2 text-left transition-colors',
+            'group flex w-full items-start gap-2.5 rounded-md p-2 text-left transition-colors',
             isActive ? 'bg-muted' : 'hover:bg-muted/50'
           )}
         >
@@ -53,18 +56,28 @@
               </div>
             {/if}
           </div>
-          <div class="min-w-0 flex-1">
-            <div class="truncate text-sm font-medium text-foreground">{c.name}</div>
-            <div class="truncate text-[11px] text-muted-foreground">{c.occupation}</div>
+          <div class="flex min-w-0 flex-1 flex-col gap-1">
+            <div class="flex min-w-0 items-center gap-1.5">
+              <span class="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                {c.name}
+              </span>
+              {#if c.role}
+                <span
+                  class={cn(
+                    'max-w-[45%] shrink-0 truncate rounded-sm px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide',
+                    roleColor[c.role] ?? 'bg-muted-foreground/20 text-foreground/80'
+                  )}
+                >
+                  {c.role}
+                </span>
+              {/if}
+            </div>
+            {#if c.occupation}
+              <div class="truncate text-[11px] leading-tight text-muted-foreground">
+                {c.occupation}
+              </div>
+            {/if}
           </div>
-          <span
-            class={cn(
-              'shrink-0 rounded-sm px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide',
-              roleColor[c.role] ?? 'bg-muted-foreground/20 text-foreground/80'
-            )}
-          >
-            {c.role}
-          </span>
         </button>
       {/each}
     </div>
