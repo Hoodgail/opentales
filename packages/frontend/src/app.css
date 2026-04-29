@@ -215,6 +215,19 @@
       font-size: 16px;
       min-height: 44px;
     }
+    /* Ensure scrollable surfaces inside editors aren't hidden under the
+       floating mobile bottom nav. Touch scrolling stays smooth. */
+    main .overflow-y-auto,
+    main .overflow-auto {
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      padding-bottom: calc(
+        var(--app-bottom-nav-height) + var(--app-safe-bottom) + 12px
+      );
+      scroll-padding-bottom: calc(
+        var(--app-bottom-nav-height) + var(--app-safe-bottom) + 12px
+      );
+    }
   }
   /* Hide scrollbars by default in webkit, but keep functionality */
   ::-webkit-scrollbar {

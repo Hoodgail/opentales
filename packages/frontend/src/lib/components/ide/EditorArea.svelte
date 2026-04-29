@@ -32,9 +32,9 @@
   );
 </script>
 
-<div class="flex min-w-0 flex-1 flex-col">
+<div class="flex min-h-0 min-w-0 flex-1 flex-col">
   <EditorTabs />
-  <div class="min-h-0 flex-1">
+  <div class="flex min-h-0 min-w-0 flex-1 flex-col">
     {#if !activeTab}
       <div class="flex h-full items-center justify-center bg-background">
         <div class="max-w-md text-center">
