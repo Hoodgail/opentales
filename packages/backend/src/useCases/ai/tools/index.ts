@@ -8,6 +8,32 @@ import { mutationTools, type ApprovalHandler } from './mutations.js';
 import { readChapterTool } from './readChapter.js';
 import { readCharacterTool } from './readCharacter.js';
 import { readLocationTool } from './readLocation.js';
+import {
+  getProjectStatsTool,
+  grepProjectTool,
+  listActsTool,
+  listAssetsTool,
+  listBetaShareLinksTool,
+  listCharacterRelationshipsTool,
+  listMembersTool,
+  listObstaclesTool,
+  listScenesTool,
+  listSubmissionsTool,
+  listTrashTool,
+  listWritingVersionsTool,
+  readActTool,
+  readAssetContentTool,
+  readAssetMetadataTool,
+  readBetaShareLinkTool,
+  readObstacleTool,
+  readProjectAiSettingsTool,
+  readProjectTool,
+  readPublicProjectTool,
+  readSceneTool,
+  readSubmissionTool,
+  readTrashedChapterTool,
+  readWritingVersionTool
+} from './readMore.js';
 import { readProjectDocTool } from './readProjectDoc.js';
 import { readStoryStructureTool } from './readStoryStructure.js';
 import type { ToolContext } from './shared.js';
@@ -18,17 +44,41 @@ export function buildAgentTools(
   approval: ApprovalHandler
 ) {
   return {
+    readProject: readProjectTool(prisma, context),
     listCharacters: listCharactersTool(prisma, context),
     readCharacter: readCharacterTool(prisma, context),
+    listCharacterRelationships: listCharacterRelationshipsTool(prisma, context),
     listChapters: listChaptersTool(prisma, context),
     grepChapter: grepChapterTool(prisma, context),
     grepChapters: grepChaptersTool(prisma, context),
     readChapter: readChapterTool(prisma, context),
+    listActs: listActsTool(prisma, context),
+    readAct: readActTool(prisma, context),
+    listScenes: listScenesTool(prisma, context),
+    readScene: readSceneTool(prisma, context),
     listLocations: listLocationsTool(prisma, context),
     readLocation: readLocationTool(prisma, context),
+    listObstacles: listObstaclesTool(prisma, context),
+    readObstacle: readObstacleTool(prisma, context),
     listProjectDocs: listProjectDocsTool(prisma, context),
     readProjectDoc: readProjectDocTool(prisma, context),
     readStoryStructure: readStoryStructureTool(prisma, context),
+    listSubmissions: listSubmissionsTool(prisma, context),
+    readSubmission: readSubmissionTool(prisma, context),
+    listTrash: listTrashTool(prisma, context),
+    readTrashedChapter: readTrashedChapterTool(prisma, context),
+    listAssets: listAssetsTool(prisma, context),
+    readAssetMetadata: readAssetMetadataTool(prisma, context),
+    readAssetContent: readAssetContentTool(prisma, context),
+    getProjectStats: getProjectStatsTool(prisma, context),
+    listMembers: listMembersTool(prisma, context),
+    listBetaShareLinks: listBetaShareLinksTool(prisma, context),
+    readBetaShareLink: readBetaShareLinkTool(prisma, context),
+    readPublicProject: readPublicProjectTool(prisma, context),
+    readProjectAiSettings: readProjectAiSettingsTool(prisma, context),
+    listWritingVersions: listWritingVersionsTool(prisma, context),
+    readWritingVersion: readWritingVersionTool(prisma, context),
+    grepProject: grepProjectTool(prisma, context),
     ...mutationTools(prisma, context, approval)
   };
 }

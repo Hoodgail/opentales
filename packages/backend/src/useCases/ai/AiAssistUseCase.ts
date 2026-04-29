@@ -240,6 +240,97 @@ export class AiAssistUseCase {
 
   async listTools(userId: string, projectId: string): Promise<AiToolManifest> {
     await this.access.assertProjectAccess(userId, projectId);
+    const readToolNames = [
+      'readProject',
+      'listCharacters',
+      'readCharacter',
+      'listCharacterRelationships',
+      'listChapters',
+      'readChapter',
+      'grepChapter',
+      'grepChapters',
+      'listActs',
+      'readAct',
+      'listScenes',
+      'readScene',
+      'listLocations',
+      'readLocation',
+      'listObstacles',
+      'readObstacle',
+      'listProjectDocs',
+      'readProjectDoc',
+      'readStoryStructure',
+      'listSubmissions',
+      'readSubmission',
+      'listTrash',
+      'readTrashedChapter',
+      'listAssets',
+      'readAssetMetadata',
+      'readAssetContent',
+      'getProjectStats',
+      'listMembers',
+      'listBetaShareLinks',
+      'readBetaShareLink',
+      'readPublicProject',
+      'readProjectAiSettings',
+      'listWritingVersions',
+      'readWritingVersion',
+      'grepProject'
+    ];
+    const mutationToolNames = [
+      'updateProject',
+      'updateProjectAiSettings',
+      'createAct',
+      'updateAct',
+      'deleteAct',
+      'createCharacter',
+      'updateCharacter',
+      'deleteCharacter',
+      'createCharacterRelationship',
+      'deleteCharacterRelationship',
+      'createLocation',
+      'updateLocation',
+      'deleteLocation',
+      'createChapter',
+      'updateChapter',
+      'deleteChapter',
+      'restoreTrashChapter',
+      'purgeTrashChapter',
+      'createScene',
+      'updateScene',
+      'deleteScene',
+      'updateStoryStructure',
+      'createObstacle',
+      'updateObstacle',
+      'deleteObstacle',
+      'createProjectDoc',
+      'updateProjectDoc',
+      'deleteProjectDoc',
+      'createSubmission',
+      'mergeSubmission',
+      'declineSubmission',
+      'commentSubmission',
+      'uploadAsset',
+      'attachAsset',
+      'detachAsset',
+      'updateMemberRole',
+      'removeMember',
+      'createInvite',
+      'revokeInvite',
+      'acceptInvite',
+      'createBetaShareLink',
+      'updateBetaShareLink',
+      'revokeBetaShareLink',
+      'postBetaShareComment'
+    ];
+    return {
+      tools: [
+        ...readToolNames.map((name) => ({ name, description: `${name} read-only agent tool.`, requiresApproval: false, inputSchema: genericSchema })),
+        ...mutationToolNames.map((name) => ({ name, description: `${name} approval-gated mutation tool.`, requiresApproval: true, inputSchema: genericSchema }))
+      ]
+    };
+
+    /* legacy explicit manifest kept below for reference; unreachable after generic coverage above */
     return {
       tools: [
         {
@@ -362,6 +453,12 @@ const rewriteModes = new Set(['tighter', 'softer', 'more-visceral', 'more-lyrica
 const emptySchema = {
   type: 'object',
   additionalProperties: false,
+  properties: {}
+} satisfies Record<string, unknown>;
+
+const genericSchema = {
+  type: 'object',
+  additionalProperties: true,
   properties: {}
 } satisfies Record<string, unknown>;
 

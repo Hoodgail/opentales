@@ -140,12 +140,50 @@
       listProjectDocs: 'Listed docs',
       readProjectDoc: 'Read doc',
       readStoryStructure: 'Read story structure',
+      updateProject: 'Update project',
+      updateProjectAiSettings: 'Update AI settings',
+      createAct: 'Create act',
+      updateAct: 'Update act',
+      deleteAct: 'Delete act',
       updateCharacter: 'Update character',
       createCharacter: 'Create character',
+      deleteCharacter: 'Delete character',
+      createCharacterRelationship: 'Create relationship',
+      deleteCharacterRelationship: 'Delete relationship',
+      createLocation: 'Create location',
+      updateLocation: 'Update location',
+      deleteLocation: 'Delete location',
       updateChapter: 'Update chapter',
       createChapter: 'Create chapter',
+      deleteChapter: 'Delete chapter',
+      restoreTrashChapter: 'Restore chapter',
+      purgeTrashChapter: 'Purge chapter',
+      createScene: 'Create scene',
+      updateScene: 'Update scene',
+      deleteScene: 'Delete scene',
+      updateStoryStructure: 'Update structure',
+      createObstacle: 'Create obstacle',
+      updateObstacle: 'Update obstacle',
+      deleteObstacle: 'Delete obstacle',
       createProjectDoc: 'Create doc',
-      updateProjectDoc: 'Update doc'
+      updateProjectDoc: 'Update doc',
+      deleteProjectDoc: 'Delete doc',
+      createSubmission: 'Create submission',
+      mergeSubmission: 'Merge submission',
+      declineSubmission: 'Decline submission',
+      commentSubmission: 'Comment submission',
+      uploadAsset: 'Upload asset',
+      attachAsset: 'Attach asset',
+      detachAsset: 'Detach asset',
+      updateMemberRole: 'Update member role',
+      removeMember: 'Remove member',
+      createInvite: 'Create invite',
+      revokeInvite: 'Revoke invite',
+      acceptInvite: 'Accept invite',
+      createBetaShareLink: 'Create share link',
+      updateBetaShareLink: 'Update share link',
+      revokeBetaShareLink: 'Revoke share link',
+      postBetaShareComment: 'Post share comment'
     };
     return map[name] ?? name;
   }
@@ -167,6 +205,13 @@
       return doc?.title ?? firstLine(textInput(input, 'title'), 'Unknown doc');
     }
     if (tc.toolName === 'createProjectDoc') return firstLine(textInput(input, 'title'), 'New doc');
+    if (typeof input.title === 'string') return firstLine(input.title, 'Review proposed tool input');
+    if (typeof input.name === 'string') return firstLine(input.name, 'Review proposed tool input');
+    if (typeof input.label === 'string') return firstLine(input.label, 'Review proposed tool input');
+    for (const key of ['chapterId', 'characterId', 'locationId', 'actId', 'docId', 'submissionId', 'shareLinkId', 'assetId']) {
+      const value = textInput(input, key);
+      if (value) return value;
+    }
     return 'Review proposed tool input';
   }
 
