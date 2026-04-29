@@ -12,6 +12,8 @@
     UserCog,
     Users,
   } from "lucide-svelte";
+  import { fly } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
   import { manuscript } from "$lib/stores/manuscript.svelte";
   import { ui } from "$lib/stores/ui.svelte";
   import type { ActivityView } from "$lib/data/manuscript-types";
@@ -40,27 +42,55 @@
   }
 </script>
 
-<nav
-  class="flex h-(--app-bottom-nav-height) shrink-0 items-stretch gap-2 overflow-x-auto border-t border-border bg-sidebar px-2 [scrollbar-width:none] [-webkit-overflow-scrolling:touch]"
-  aria-label="Sections"
->
-  {#each items as item (item.id)}
-    {@const active = manuscript.activeView === item.id && ui.drawer === "side"}
-    <button
-      type="button"
-      onclick={() => activate(item.id)}
-      class={cn(
-        "flex min-w-16 flex-col items-center justify-center gap-0.5 rounded-xl px-2 text-[10px] font-medium transition-colors",
-        active
-          ? "text-foreground bg-muted/50"
-          : "text-muted-foreground hover:text-foreground",
-      )}
+{#if ui.drawer === "side"}
+  <div
+    class="pointer-events-none fixed inset-x-0 z-50 flex justify-center px-3"
+    style="bottom: calc(var(--app-safe-bottom) + env(safe-area-inset-bottom, 0px));"
+    transition:fly={{ y: 24, duration: 220, easing: cubicOut }}
+  >
+    <div
+      class="pointer-events-auto relative w-full max-w-[32rem] overflow-hidden rounded-2xl border border-border bg-sidebar/85 shadow-2xl backdrop-blur-xl supports-[backdrop-filter]:bg-sidebar/70"
     >
-      <item.icon class="size-5" strokeWidth={1.75} />
-      <span class="leading-none">{item.label}</span>
-    </button>
-  {/each}
-</nav>
+      <!-- edge fade hints to suggest horizontal scroll -->
+      <div
+        class="pointer-events-none absolute inset-y-0 left-0 z-10 w-6 bg-gradient-to-r from-sidebar to-transparent"
+      ></div>
+      <div
+        class="pointer-events-none absolute inset-y-0 right-0 z-10 w-6 bg-gradient-to-l from-sidebar to-transparent"
+      ></div>
+
+      <nav
+        class="flex h-14 items-center gap-1 overflow-x-auto px-3 [scrollbar-width:none] [-webkit-overflow-scrolling:touch]"
+        aria-label="Sections"
+      >
+        {#each items as item (item.id)}
+          {@const active = manuscript.activeView === item.id}
+          <button
+            type="button"
+            onclick={() => activate(item.id)}
+            aria-label={item.label}
+            aria-current={active ? "page" : undefined}
+            title={item.label}
+            class={cn(
+              "group flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-all duration-200 ease-out",
+              active
+                ? "bg-accent/15 text-accent px-3"
+                : "text-muted-foreground hover:bg-muted/40 hover:text-foreground",
+            )}
+          >
+            <item.icon
+              class={cn("size-5 transition-transform", active && "scale-110")}
+              strokeWidth={active ? 2.25 : 1.75}
+            />
+            {#if active}
+              <span class="leading-none whitespace-nowrap">{item.label}</span>
+            {/if}
+          </button>
+        {/each}
+      </nav>
+    </div>
+  </div>
+{/if}
 
 <style>
   nav::-webkit-scrollbar {

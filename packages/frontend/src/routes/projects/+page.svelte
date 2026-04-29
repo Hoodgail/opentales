@@ -240,13 +240,13 @@
             aria-label="Close panel"
             tabindex="-1"
             class="fixed inset-x-0 z-30 cursor-default bg-black/40 backdrop-blur-[1px]"
-            style="top: calc(env(safe-area-inset-top) + var(--app-titlebar-height)); bottom: calc(env(safe-area-inset-bottom) + var(--app-bottom-nav-height));"
+            style="top: calc(env(safe-area-inset-top) + var(--app-titlebar-height)); bottom: var(--app-safe-bottom);"
           ></button>
         {/if}
 
         <aside
           class="fixed left-0 z-40 flex w-[88vw] max-w-[20rem] flex-col border-r border-border bg-sidebar shadow-2xl transition-transform duration-200 ease-out"
-          style="top: calc(env(safe-area-inset-top) + var(--app-titlebar-height)); bottom: calc(env(safe-area-inset-bottom) + var(--app-bottom-nav-height)); padding-left: env(safe-area-inset-left);"
+          style="top: calc(env(safe-area-inset-top) + var(--app-titlebar-height)); bottom: var(--app-safe-bottom); padding-left: env(safe-area-inset-left); padding-bottom: calc(var(--app-bottom-nav-height) + 12px);"
           class:-translate-x-full={ui.drawer !== 'side'}
           aria-hidden={ui.drawer !== 'side'}
         >
@@ -255,7 +255,7 @@
 
         <aside
           class="fixed right-0 z-40 flex w-[88vw] max-w-[22rem] flex-col border-l border-border bg-sidebar shadow-2xl transition-transform duration-200 ease-out"
-          style="top: calc(env(safe-area-inset-top) + var(--app-titlebar-height)); bottom: calc(env(safe-area-inset-bottom) + var(--app-bottom-nav-height)); padding-right: env(safe-area-inset-right);"
+          style="top: calc(env(safe-area-inset-top) + var(--app-titlebar-height)); bottom: var(--app-safe-bottom); padding-right: env(safe-area-inset-right);"
           class:translate-x-full={ui.drawer !== 'inspector'}
           aria-hidden={ui.drawer !== 'inspector'}
         >
