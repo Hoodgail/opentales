@@ -15,7 +15,7 @@
     Zap
   } from 'lucide-svelte';
   import { tick, untrack } from 'svelte';
-  import type { AiAgentToolCall } from '@opentales/sdk';
+  import type { AiAgentMessage, AiAgentToolCall } from '@opentales/sdk';
   import { setAiApprovalDoc } from '$lib/data/ai-approval-docs';
   import { ai } from '$lib/stores/ai.svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
@@ -29,15 +29,24 @@
   const session = $derived(ai.session);
   const isRunning = $derived(session?.status === 'running');
   const aiEnabled = $derived(ai.settings?.enabled ?? false);
+  const activeAssistantMessage = $derived(session ? latestAssistantMessage(session.messages) : null);
+  const showThinking = $derived(isRunning && !activeAssistantMessage?.content);
 
   // Auto-scroll on new content
   $effect(() => {
-    const _ = ai.streamedText;
+    const _ = activeAssistantMessage?.content;
     const __ = session?.messages?.length;
     void tick().then(() => {
       if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
     });
   });
+
+  function latestAssistantMessage(messages: AiAgentMessage[]): AiAgentMessage | null {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].role === 'assistant') return messages[index];
+    }
+    return null;
+  }
 
   // Hydrate session + start stream when project is loaded and AI is enabled
   $effect(() => {
@@ -645,12 +654,17 @@
                 </p>
               </div>
             {:else if msg.role === 'assistant'}
-              <div class="flex gap-2 px-3 py-2">
-                <Bot class="mt-0.5 size-3.5 shrink-0 text-accent" />
-                <div class="min-w-0 flex-1 text-xs text-foreground/90 whitespace-pre-wrap">
-                  {msg.content}
+              {#if msg.content || msg.id !== activeAssistantMessage?.id || !isRunning}
+                <div class="flex gap-2 px-3 py-2">
+                  <Bot class="mt-0.5 size-3.5 shrink-0 text-accent" />
+                  <div class="min-w-0 flex-1 text-xs text-foreground/90 whitespace-pre-wrap">
+                    {msg.content}
+                    {#if isRunning && msg.id === activeAssistantMessage?.id}
+                      <span class="inline-block w-1.5 h-3.5 bg-accent/60 animate-pulse rounded-sm"></span>
+                    {/if}
+                  </div>
                 </div>
-              </div>
+              {/if}
             {:else if msg.role === 'system'}
               <div class="px-3 py-1 text-[10px] italic text-muted-foreground">
                 {msg.content}
@@ -658,16 +672,7 @@
             {/if}
           {/each}
 
-          <!-- Streamed delta (while running) -->
-          {#if isRunning && ai.streamedText}
-            <div class="flex gap-2 px-3 py-2">
-              <Bot class="mt-0.5 size-3.5 shrink-0 text-accent animate-pulse" />
-              <div class="min-w-0 flex-1 text-xs text-foreground/90 whitespace-pre-wrap">
-                {ai.streamedText}
-                <span class="inline-block w-1.5 h-3.5 bg-accent/60 animate-pulse rounded-sm"></span>
-              </div>
-            </div>
-          {:else if isRunning}
+          {#if showThinking}
             <div class="flex items-center gap-2 px-3 py-2 text-[11px] text-muted-foreground">
               <Loader2 class="size-3.5 animate-spin" />
               <span>Thinking…</span>
