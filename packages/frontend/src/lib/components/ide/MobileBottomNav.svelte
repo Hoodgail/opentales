@@ -45,7 +45,7 @@
 {#if ui.drawer === "side"}
   <div
     class="pointer-events-none fixed inset-x-0 z-50 flex justify-center px-3"
-    style="bottom: calc(var(--app-safe-bottom) + env(safe-area-inset-bottom, 0px));"
+    style="bottom: var(--app-safe-bottom);"
     transition:fly={{ y: 24, duration: 220, easing: cubicOut }}
   >
     <div

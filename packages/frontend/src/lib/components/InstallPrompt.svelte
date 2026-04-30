@@ -70,7 +70,7 @@
 {#if visible}
   <div
     class="fixed inset-x-4 z-50 flex items-center gap-3 rounded-xl border border-border bg-card/95 px-3 py-3 text-sm shadow-lg backdrop-blur sm:left-auto sm:right-3 sm:max-w-sm sm:rounded-md"
-    style="bottom: calc(env(safe-area-inset-bottom) + 12px);"
+    style="bottom: 12px;"
     role="dialog"
     aria-label="Install OpenTales"
   >

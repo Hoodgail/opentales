@@ -17,10 +17,8 @@
   --app-titlebar-height: 36px;
   --app-bottom-nav-height: 56px;
   --app-edge: 16px;
-  /* Custom safe-area override — the OS-provided env(safe-area-inset-bottom)
-     can be quite tall on some devices. Use this token instead for visual
-     bottom padding so we control the exact offset. */
-  --app-safe-bottom: 10px;
+  /* Keep bottom spacing under app control instead of inheriting iOS safe-area padding. */
+  --app-safe-bottom: 0px;
 
   --background: oklch(0.18 0 0);
   --foreground: oklch(0.93 0 0);
