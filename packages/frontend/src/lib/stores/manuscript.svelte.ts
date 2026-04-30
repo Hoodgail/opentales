@@ -275,8 +275,8 @@ function createStore() {
     clearProject();
   }
 
-  async function loadProject(targetProjectId?: string) {
-    initializing = true;
+  async function loadProject(targetProjectId?: string, options: { silent?: boolean } = {}) {
+    if (!options.silent) initializing = true;
     error = null;
 
     try {
@@ -294,21 +294,23 @@ function createStore() {
       const project = await api.getProject(target.id);
       applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
 
-      tabs.splice(0, tabs.length);
-      activeTabId = null;
-      selectedId = null;
+      if (!options.silent) {
+        tabs.splice(0, tabs.length);
+        activeTabId = null;
+        selectedId = null;
 
-      const firstChapter = project.chapters[0];
-      if (firstChapter) {
-        const tab = {
-          id: `tab-${firstChapter.id}`,
-          type: 'chapter',
-          refId: firstChapter.id,
-          title: firstChapter.title
-        } satisfies OpenTab;
-        tabs.splice(0, tabs.length, tab);
-        activeTabId = tab.id;
-        selectedId = firstChapter.id;
+        const firstChapter = project.chapters[0];
+        if (firstChapter) {
+          const tab = {
+            id: `tab-${firstChapter.id}`,
+            type: 'chapter',
+            refId: firstChapter.id,
+            title: firstChapter.title
+          } satisfies OpenTab;
+          tabs.splice(0, tabs.length, tab);
+          activeTabId = tab.id;
+          selectedId = firstChapter.id;
+        }
       }
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : 'Failed to load manuscript';
@@ -319,8 +321,12 @@ function createStore() {
       }
       error = caught instanceof Error ? caught.message : 'Failed to load manuscript';
     } finally {
-      initializing = false;
+      if (!options.silent) initializing = false;
     }
+  }
+
+  async function refreshProject(targetProjectId?: string) {
+    await loadProject(targetProjectId, { silent: true });
   }
 
   function clearProject() {
@@ -1091,6 +1097,7 @@ function createStore() {
     setSelectedId,
     initialize,
     loadProject,
+    refreshProject,
     login,
     register,
     logout,

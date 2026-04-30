@@ -9,6 +9,7 @@ import type {
   AiAgentSessionSummary,
   AiAgentToolCall,
   ApproveAiToolCallInput,
+  ApproveAiToolCallsInput,
   CreateAiAgentSessionInput,
   QueueAiAgentPromptInput
 } from '@opentales/sdk';
@@ -172,82 +173,49 @@ export class AiAgentSessionUseCase {
       }
     });
     if (!toolCall) throw new HttpError(404, 'Pending tool call not found');
-
-    if (!input.approved) {
-      await this.prisma.aiAgentToolCall.update({
-        where: { id: toolCall.id },
-        data: { status: 'REJECTED', decidedAt: new Date(), decidedById: userId }
-      });
-      const pending = pendingApprovals.get(toolCall.id);
-      if (pending) {
-        clearTimeout(pending.timeout);
-        pendingApprovals.delete(toolCall.id);
-        pending.reject(new Error(`Rejected ${toolCall.toolName}`));
-      }
-      await this.prisma.aiAgentMessage.create({
-        data: {
-          sessionId: session.id,
-          role: 'TOOL',
-          content: `Rejected ${toolCall.toolName}`
-        }
-      });
-    } else {
-      await this.prisma.aiAgentToolCall.update({
-        where: { id: toolCall.id },
-        data: { status: 'APPROVED', decidedAt: new Date(), decidedById: userId }
-      });
-      try {
-        const pending = pendingApprovals.get(toolCall.id);
-        if (pending) {
-          clearTimeout(pending.timeout);
-          pendingApprovals.delete(toolCall.id);
-        }
-        const output = pending
-          ? await pending.execute()
-          : await executeMutationTool(this.prisma, { projectId, userId }, toolCall.toolName, inputRecord(toolCall.input));
-        await this.prisma.aiAgentToolCall.update({
-          where: { id: toolCall.id },
-          data: { status: 'EXECUTED', output: output as Prisma.InputJsonValue }
-        });
-        pending?.resolve(output);
-        await this.prisma.aiAgentMessage.create({
-          data: {
-            sessionId: session.id,
-            role: 'TOOL',
-            content: `${toolCall.toolName} approved and executed.`
-          }
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Tool execution failed';
-        await this.prisma.aiAgentToolCall.update({
-          where: { id: toolCall.id },
-          data: {
-            status: 'ERROR',
-            error: message
-          }
-        });
-        const pending = pendingApprovals.get(toolCall.id);
-        if (pending) {
-          clearTimeout(pending.timeout);
-          pendingApprovals.delete(toolCall.id);
-          pending.reject(error instanceof Error ? error : new Error(message));
-        }
-        await this.prisma.aiAgentMessage.create({
-          data: {
-            sessionId: session.id,
-            role: 'TOOL',
-            content: `${toolCall.toolName} approval failed: ${message}`
-          }
-        });
-        throw new HttpError(400, `${toolCall.toolName} approval failed: ${message}`);
-      }
-    }
+    await this.applyToolCallApproval(userId, projectId, session.id, toolCall, input.approved);
 
     const snapshot = await this.snapshot(session.id, projectId);
     await this.broadcast(projectId, {
       type: 'tool-approval',
       session: snapshot,
       data: { toolCallId: toolCall.id, approved: input.approved }
+    });
+    return snapshot;
+  }
+
+  async approveToolCalls(
+    userId: string,
+    projectId: string,
+    input: ApproveAiToolCallsInput,
+    sessionId?: string
+  ): Promise<AiAgentSession> {
+    await this.access.assertPermission(userId, projectId, 'project:write');
+    const session = sessionId
+      ? await this.getSession(projectId, sessionId)
+      : await this.ensureDefaultSession(projectId);
+    const ids = [...new Set(Array.isArray(input.toolCallIds) ? input.toolCallIds.filter(Boolean) : [])];
+    if (ids.length === 0) throw new HttpError(400, 'toolCallIds is required');
+
+    const toolCalls = await this.prisma.aiAgentToolCall.findMany({
+      where: {
+        sessionId: session.id,
+        status: 'PENDING_APPROVAL',
+        OR: [{ id: { in: ids } }, { toolCallId: { in: ids } }]
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+    if (toolCalls.length !== ids.length) throw new HttpError(404, 'One or more pending tool calls were not found');
+
+    for (const toolCall of toolCalls) {
+      await this.applyToolCallApproval(userId, projectId, session.id, toolCall, input.approved);
+    }
+
+    const snapshot = await this.snapshot(session.id, projectId);
+    await this.broadcast(projectId, {
+      type: 'tool-approval',
+      session: snapshot,
+      data: { toolCallIds: toolCalls.map((toolCall) => toolCall.id), approved: input.approved }
     });
     return snapshot;
   }
@@ -561,6 +529,85 @@ export class AiAgentSessionUseCase {
       }, APPROVAL_TIMEOUT_MS);
       pendingApprovals.set(toolCall.id, { resolve, reject, execute, timeout });
     });
+  }
+
+  private async applyToolCallApproval(
+    userId: string,
+    projectId: string,
+    sessionId: string,
+    toolCall: { id: string; toolName: string; input: unknown },
+    approved: boolean
+  ): Promise<void> {
+    if (!approved) {
+      await this.prisma.aiAgentToolCall.update({
+        where: { id: toolCall.id },
+        data: { status: 'REJECTED', decidedAt: new Date(), decidedById: userId }
+      });
+      const pending = pendingApprovals.get(toolCall.id);
+      if (pending) {
+        clearTimeout(pending.timeout);
+        pendingApprovals.delete(toolCall.id);
+        pending.reject(new Error(`Rejected ${toolCall.toolName}`));
+      }
+      await this.prisma.aiAgentMessage.create({
+        data: {
+          sessionId,
+          role: 'TOOL',
+          content: `Rejected ${toolCall.toolName}`
+        }
+      });
+      return;
+    }
+
+    await this.prisma.aiAgentToolCall.update({
+      where: { id: toolCall.id },
+      data: { status: 'APPROVED', decidedAt: new Date(), decidedById: userId }
+    });
+    try {
+      const pending = pendingApprovals.get(toolCall.id);
+      if (pending) {
+        clearTimeout(pending.timeout);
+        pendingApprovals.delete(toolCall.id);
+      }
+      const output = pending
+        ? await pending.execute()
+        : await executeMutationTool(this.prisma, { projectId, userId }, toolCall.toolName, inputRecord(toolCall.input));
+      await this.prisma.aiAgentToolCall.update({
+        where: { id: toolCall.id },
+        data: { status: 'EXECUTED', output: output as Prisma.InputJsonValue }
+      });
+      pending?.resolve(output);
+      await this.prisma.aiAgentMessage.create({
+        data: {
+          sessionId,
+          role: 'TOOL',
+          content: `${toolCall.toolName} approved and executed.`
+        }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Tool execution failed';
+      await this.prisma.aiAgentToolCall.update({
+        where: { id: toolCall.id },
+        data: {
+          status: 'ERROR',
+          error: message
+        }
+      });
+      const pending = pendingApprovals.get(toolCall.id);
+      if (pending) {
+        clearTimeout(pending.timeout);
+        pendingApprovals.delete(toolCall.id);
+        pending.reject(error instanceof Error ? error : new Error(message));
+      }
+      await this.prisma.aiAgentMessage.create({
+        data: {
+          sessionId,
+          role: 'TOOL',
+          content: `${toolCall.toolName} approval failed: ${message}`
+        }
+      });
+      throw new HttpError(400, `${toolCall.toolName} approval failed: ${message}`);
+    }
   }
 
   private async persistToolCall(sessionId: string, promptId: string, part: unknown) {

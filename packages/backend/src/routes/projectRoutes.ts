@@ -30,6 +30,10 @@ projectRoutes.get('/:projectId/ai/agent-sessions/:sessionId/events', asyncHandle
 projectRoutes.post('/:projectId/ai/agent-sessions/:sessionId/prompts', asyncHandler(ai.queueAgentPrompt));
 projectRoutes.post('/:projectId/ai/agent-sessions/:sessionId/cancel', asyncHandler(ai.cancelAgentSession));
 projectRoutes.post(
+  '/:projectId/ai/agent-sessions/:sessionId/tool-calls/approvals',
+  asyncHandler(ai.approveToolCalls)
+);
+projectRoutes.post(
   '/:projectId/ai/agent-sessions/:sessionId/tool-calls/:toolCallId/approval',
   asyncHandler(ai.approveToolCall)
 );
@@ -37,6 +41,10 @@ projectRoutes.get('/:projectId/ai/agent-session', asyncHandler(ai.agentSession))
 projectRoutes.get('/:projectId/ai/agent-session/events', asyncHandler(ai.agentSessionEvents));
 projectRoutes.post('/:projectId/ai/agent-session/prompts', asyncHandler(ai.queueAgentPrompt));
 projectRoutes.post('/:projectId/ai/agent-session/cancel', asyncHandler(ai.cancelAgentSession));
+projectRoutes.post(
+  '/:projectId/ai/agent-session/tool-calls/approvals',
+  asyncHandler(ai.approveToolCalls)
+);
 projectRoutes.post(
   '/:projectId/ai/agent-session/tool-calls/:toolCallId/approval',
   asyncHandler(ai.approveToolCall)

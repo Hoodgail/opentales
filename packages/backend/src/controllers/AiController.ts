@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import type {
   ApproveAiToolCallInput,
+  ApproveAiToolCallsInput,
   CreateAiAgentSessionInput,
   CreateAiCharacterDialogueInput,
   CreateAiOutlineExpansionInput,
@@ -140,6 +141,17 @@ export class AiController {
         req.params.projectId,
         req.params.toolCallId,
         req.body as ApproveAiToolCallInput,
+        req.params.sessionId
+      )
+    );
+  };
+
+  approveToolCalls = async (req: Request, res: Response) => {
+    res.json(
+      await this.agentSessionUseCase.approveToolCalls(
+        this.userId(req),
+        req.params.projectId,
+        req.body as ApproveAiToolCallsInput,
         req.params.sessionId
       )
     );

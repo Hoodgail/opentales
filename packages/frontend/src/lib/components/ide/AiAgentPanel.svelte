@@ -17,7 +17,7 @@
   } from 'lucide-svelte';
   import { tick, untrack } from 'svelte';
   import type { AiAgentMessage, AiAgentToolCall } from '@opentales/sdk';
-  import { setAiApprovalDoc } from '$lib/data/ai-approval-docs';
+  import { deleteAiApprovalDoc, setAiApprovalDoc } from '$lib/data/ai-approval-docs';
   import { ai } from '$lib/stores/ai.svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import PanelHeader from './PanelHeader.svelte';
@@ -32,6 +32,9 @@
   const aiEnabled = $derived(ai.settings?.enabled ?? false);
   const activeAssistantMessage = $derived(session ? latestAssistantMessage(session.messages) : null);
   const showThinking = $derived(isRunning && !activeAssistantMessage?.content);
+  const pendingToolCalls = $derived(
+    session?.pendingToolCalls?.filter((tc) => tc.status === 'pending-approval') ?? []
+  );
 
   // Auto-scroll on new content
   $effect(() => {
@@ -90,7 +93,22 @@
   function approve(toolCallId: string) {
     if (!projectId) return;
     const pid = projectId;
-    void ai.approveToolCall(pid, toolCallId, true).then(() => manuscript.loadProject(pid));
+    void ai.approveToolCall(pid, toolCallId, true).then(() => manuscript.refreshProject(pid));
+  }
+
+  function approveAll() {
+    if (!projectId || pendingToolCalls.length === 0) return;
+    const pid = projectId;
+    const toolCallIds = pendingToolCalls.map((tc) => tc.id);
+    void ai
+      .approveToolCalls(pid, toolCallIds, true)
+      .then(() => manuscript.refreshProject(pid))
+      .then(() => {
+        for (const toolCallId of toolCallIds) {
+          deleteAiApprovalDoc(toolCallId);
+          void manuscript.closeTab(`tab-ai-approval-${toolCallId}`);
+        }
+      });
   }
 
   function reject(toolCallId: string) {
@@ -764,69 +782,78 @@
       {/if}
 
       <!-- Pending tool calls (need approval) -->
-      {#if session?.pendingToolCalls && session.pendingToolCalls.length > 0}
+      {#if pendingToolCalls.length > 0}
         <div class="border-t border-border">
-          <div class="flex items-center gap-1.5 px-3 pt-2 pb-1">
-            <span class="size-1 rounded-full bg-accent"></span>
-            <p class="text-[10px] uppercase tracking-wider text-muted-foreground">
-              Pending approval
-            </p>
+          <div class="flex items-center justify-between gap-2 px-3 pt-2 pb-1">
+            <div class="flex items-center gap-1.5">
+              <span class="size-1 rounded-full bg-accent"></span>
+              <p class="text-[10px] uppercase tracking-wider text-muted-foreground">
+                Pending approval
+              </p>
+            </div>
+            {#if pendingToolCalls.length > 1}
+              <button
+                type="button"
+                onclick={approveAll}
+                class="inline-flex items-center gap-1 rounded border border-emerald-500/30 px-1.5 py-0.5 text-[10px] text-emerald-500 hover:bg-emerald-500/10"
+              >
+                <Check class="size-3" /> Approve all
+              </button>
+            {/if}
           </div>
           <ul class="divide-y divide-border/60">
-            {#each session.pendingToolCalls as tc (tc.id)}
-              {#if tc.status === 'pending-approval'}
-                <li class="group px-3 py-2">
-                  <div class="flex items-center gap-2">
+            {#each pendingToolCalls as tc (tc.id)}
+              <li class="group px-3 py-2">
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onclick={() => openApprovalDoc(tc)}
+                    class="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    title="Open diff"
+                  >
+                    <FileText class="size-3 shrink-0 text-muted-foreground" />
+                    <span class="min-w-0 flex-1">
+                      <span class="block truncate text-[11px] text-foreground">
+                        {toolLabel(tc.toolName)}
+                        <span class="text-muted-foreground">— {toolSummary(tc)}</span>
+                      </span>
+                    </span>
+                  </button>
+                  <div class="flex shrink-0 items-center gap-0.5">
                     <button
                       type="button"
-                      onclick={() => openApprovalDoc(tc)}
-                      class="flex min-w-0 flex-1 items-center gap-2 text-left"
-                      title="Open diff"
+                      onclick={() => toggleTool(tc.id)}
+                      title={expandedTools[tc.id] ? 'Hide input' : 'Show input'}
+                      class="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
                     >
-                      <FileText class="size-3 shrink-0 text-muted-foreground" />
-                      <span class="min-w-0 flex-1">
-                        <span class="block truncate text-[11px] text-foreground">
-                          {toolLabel(tc.toolName)}
-                          <span class="text-muted-foreground">— {toolSummary(tc)}</span>
-                        </span>
-                      </span>
+                      {#if expandedTools[tc.id]}
+                        <ChevronDown class="size-3" />
+                      {:else}
+                        <ChevronRight class="size-3" />
+                      {/if}
                     </button>
-                    <div class="flex shrink-0 items-center gap-0.5">
-                      <button
-                        type="button"
-                        onclick={() => toggleTool(tc.id)}
-                        title={expandedTools[tc.id] ? 'Hide input' : 'Show input'}
-                        class="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                      >
-                        {#if expandedTools[tc.id]}
-                          <ChevronDown class="size-3" />
-                        {:else}
-                          <ChevronRight class="size-3" />
-                        {/if}
-                      </button>
-                      <button
-                        type="button"
-                        onclick={() => reject(tc.id)}
-                        title="Reject"
-                        class="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-destructive"
-                      >
-                        <X class="size-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onclick={() => approve(tc.id)}
-                        title="Approve"
-                        class="flex size-6 items-center justify-center rounded text-emerald-500 hover:bg-emerald-500/10"
-                      >
-                        <Check class="size-3.5" />
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      onclick={() => reject(tc.id)}
+                      title="Reject"
+                      class="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-destructive"
+                    >
+                      <X class="size-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onclick={() => approve(tc.id)}
+                      title="Approve"
+                      class="flex size-6 items-center justify-center rounded text-emerald-500 hover:bg-emerald-500/10"
+                    >
+                      <Check class="size-3.5" />
+                    </button>
                   </div>
-                  {#if expandedTools[tc.id]}
-                    <pre class="mt-1.5 ml-5 max-h-40 overflow-auto rounded bg-muted/40 p-2 text-[10px] leading-relaxed text-muted-foreground">{JSON.stringify(tc.input, null, 2)}</pre>
-                  {/if}
-                </li>
-              {/if}
+                </div>
+                {#if expandedTools[tc.id]}
+                  <pre class="mt-1.5 ml-5 max-h-40 overflow-auto rounded bg-muted/40 p-2 text-[10px] leading-relaxed text-muted-foreground">{JSON.stringify(tc.input, null, 2)}</pre>
+                {/if}
+              </li>
             {/each}
           </ul>
         </div>

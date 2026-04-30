@@ -433,6 +433,11 @@ export interface ApproveAiToolCallInput {
   approved: boolean;
 }
 
+export interface ApproveAiToolCallsInput {
+  toolCallIds: string[];
+  approved: boolean;
+}
+
 export interface OrgMember {
   userId: string;
   username: string;

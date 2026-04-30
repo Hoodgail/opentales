@@ -21,7 +21,7 @@
     const pid = projectId;
     void ai
       .approveToolCall(pid, doc.toolCall.id, true, doc.sessionId)
-      .then(() => manuscript.loadProject(pid))
+      .then(() => manuscript.refreshProject(pid))
       .then(() => {
         deleteAiApprovalDoc(doc.id);
         void manuscript.closeTab(`tab-ai-approval-${doc.toolCall.id}`);

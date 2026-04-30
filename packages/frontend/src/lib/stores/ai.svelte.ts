@@ -297,6 +297,17 @@ function createAiStore() {
     }
   }
 
+  async function approveToolCalls(projectId: string, toolCallIds: string[], approved: boolean, sessionId = activeSessionId ?? undefined) {
+    sessionError = null;
+    try {
+      session = await api.approveAiToolCalls(projectId, { toolCallIds, approved }, sessionId);
+      activeSessionId = session.id;
+      upsertSessionSummary(session);
+    } catch (err) {
+      sessionError = err instanceof Error ? err.message : 'Failed to approve tool calls';
+    }
+  }
+
   // ── Tool manifest ───────────────────────────────────────────────────
   let toolManifest = $state<AiToolManifest | null>(null);
 
@@ -455,6 +466,7 @@ function createAiStore() {
     queuePrompt,
     cancelSession,
     approveToolCall,
+    approveToolCalls,
 
     // tool manifest
     get toolManifest() { return toolManifest; },
