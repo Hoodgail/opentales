@@ -396,6 +396,7 @@ export interface AiAgentSession {
   activePromptId: string | null;
   queue: AiAgentQueuedPrompt[];
   messages: AiAgentMessage[];
+  toolCalls: AiAgentToolCall[];
   pendingToolCalls: AiAgentToolCall[];
   updatedAt: string;
 }

@@ -10,6 +10,7 @@
     Plus,
     Send,
     Sparkles,
+    Wrench,
     User,
     X,
     Zap
@@ -186,6 +187,29 @@
       postBetaShareComment: 'Post share comment'
     };
     return map[name] ?? name;
+  }
+
+  function toolForMessage(msg: AiAgentMessage): AiAgentToolCall | undefined {
+    if (msg.role !== 'tool' || !session?.toolCalls) return undefined;
+    return session.toolCalls.find((tc) => toolMessageMatches(msg, tc));
+  }
+
+  function toolMessageMatches(msg: AiAgentMessage, tc: AiAgentToolCall): boolean {
+    if (msg.content.includes(tc.toolName)) return true;
+    const createdAt = Date.parse(msg.createdAt);
+    const toolCreatedAt = Date.parse(tc.createdAt);
+    return !Number.isNaN(createdAt) && !Number.isNaN(toolCreatedAt) && Math.abs(createdAt - toolCreatedAt) < 10_000;
+  }
+
+  function toolStatusLabel(status: AiAgentToolCall['status']): string {
+    const map: Record<AiAgentToolCall['status'], string> = {
+      'pending-approval': 'pending',
+      approved: 'approved',
+      rejected: 'rejected',
+      executed: 'executed',
+      error: 'failed'
+    };
+    return map[status];
   }
 
   function toolSummary(tc: AiAgentToolCall): string {
@@ -710,6 +734,19 @@
                   </div>
                 </div>
               {/if}
+            {:else if msg.role === 'tool'}
+              {@const tc = toolForMessage(msg)}
+              <div class="flex items-center gap-2 px-3 py-1.5 text-[11px] text-muted-foreground">
+                <Wrench class="size-3 shrink-0 text-muted-foreground/80" />
+                <span class="min-w-0 truncate">
+                  {tc ? toolLabel(tc.toolName) : firstLine(msg.content, 'Tool call')}
+                </span>
+                {#if tc}
+                  <span class="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                    {toolStatusLabel(tc.status)}
+                  </span>
+                {/if}
+              </div>
             {:else if msg.role === 'system'}
               <div class="px-3 py-1 text-[10px] italic text-muted-foreground">
                 {msg.content}

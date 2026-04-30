@@ -419,7 +419,7 @@ export class AiAgentSessionUseCase {
   }
 
   private async snapshot(sessionId: string, projectId: string): Promise<AiAgentSession> {
-    const [session, messages, prompts, toolCalls] = await Promise.all([
+    const [session, messages, prompts, pendingToolCalls, recentToolCalls] = await Promise.all([
       this.prisma.projectAiAgentSession.findUniqueOrThrow({ where: { id: sessionId } }),
       this.prisma.aiAgentMessage.findMany({
         where: { sessionId },
@@ -433,6 +433,11 @@ export class AiAgentSessionUseCase {
       this.prisma.aiAgentToolCall.findMany({
         where: { sessionId, status: 'PENDING_APPROVAL' },
         orderBy: { createdAt: 'asc' }
+      }),
+      this.prisma.aiAgentToolCall.findMany({
+        where: { sessionId },
+        orderBy: { createdAt: 'asc' },
+        take: 200
       })
     ]);
     return {
@@ -443,7 +448,8 @@ export class AiAgentSessionUseCase {
       activePromptId: session.activePromptId,
       queue: prompts.map(toQueuedPrompt),
       messages: messages.map(toMessage),
-      pendingToolCalls: toolCalls.map(toToolCall),
+      toolCalls: recentToolCalls.map(toToolCall),
+      pendingToolCalls: pendingToolCalls.map(toToolCall),
       updatedAt: session.updatedAt.toISOString()
     };
   }
