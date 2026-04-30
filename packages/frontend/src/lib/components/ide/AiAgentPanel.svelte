@@ -920,7 +920,6 @@
         {isRunning}
         {activeAssistantMessage}
         {showThinking}
-        {toolForMessage}
         {toolLabel}
         {toolStatusLabel}
       />
@@ -1036,11 +1035,16 @@
     </div>
 
     <!-- Error -->
-    {#if ai.sessionError}
+    {#if ai.sessionError || session?.error}
       <div
         class="border-t border-destructive/30 bg-destructive/10 px-3 py-2 text-[11px] text-destructive"
       >
-        {ai.sessionError}
+        <div>{ai.sessionError ?? session?.error}</div>
+        {#if session?.contextUsage && session.status === 'error'}
+          <div class="mt-1 text-[10px] text-destructive/80">
+            Request context: {formatUsage(session.contextUsage.totalTokens)} / {formatUsage(session.contextUsage.maxTokens)} tokens ({session.contextUsage.percentage}%)
+          </div>
+        {/if}
       </div>
     {/if}
 
@@ -1142,7 +1146,7 @@
         </span>
         {#if session?.contextUsage}
           <span
-            class="min-w-24 text-right"
+            class="min-w-24 text-right {session.contextUsage.percentage > 100 ? 'text-destructive' : ''}"
             title={`${session.contextUsage.totalTokens} / ${session.contextUsage.maxTokens} tokens`}
           >
             Context {session.contextUsage.percentage}% · {formatUsage(

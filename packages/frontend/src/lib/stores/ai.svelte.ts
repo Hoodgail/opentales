@@ -207,7 +207,7 @@ function createAiStore() {
       streamedText = '';
     }
     if (event.type === 'error') {
-      sessionError = (event.data as { message?: string })?.message ?? 'Agent error';
+      sessionError = event.session.error ?? (event.data as { message?: string })?.message ?? 'Agent error';
     }
   }
 

@@ -293,7 +293,7 @@ export function mutationTools(
       inputSchema: mutationToolSchemas.updateCharacter,
       execute: async (input) => {
         const validated = validateMutationInput('updateCharacter', input);
-        return approval.handleApproval('updateCharacter', validated, () => updateCharacter(prisma, context, validated));
+        return approval.handleApproval('updateCharacter', validated, () => executeMutationTool(prisma, context, 'updateCharacter', validated));
       }
     }),
     createCharacter: approvalTool({
@@ -302,7 +302,7 @@ export function mutationTools(
       inputSchema: mutationToolSchemas.createCharacter,
       execute: async (input) => {
         const validated = validateMutationInput('createCharacter', input);
-        return approval.handleApproval('createCharacter', validated, () => createCharacter(prisma, context, validated));
+        return approval.handleApproval('createCharacter', validated, () => executeMutationTool(prisma, context, 'createCharacter', validated));
       }
     }),
     updateChapter: approvalTool({
@@ -311,7 +311,7 @@ export function mutationTools(
       inputSchema: mutationToolSchemas.updateChapter,
       execute: async (input) => {
         const validated = validateMutationInput('updateChapter', input);
-        return approval.handleApproval('updateChapter', validated, () => updateChapter(prisma, context, validated));
+        return approval.handleApproval('updateChapter', validated, () => executeMutationTool(prisma, context, 'updateChapter', validated));
       }
     }),
     createChapter: approvalTool({
@@ -320,7 +320,7 @@ export function mutationTools(
       inputSchema: mutationToolSchemas.createChapter,
       execute: async (input) => {
         const validated = validateMutationInput('createChapter', input);
-        return approval.handleApproval('createChapter', validated, () => createChapter(prisma, context, validated));
+        return approval.handleApproval('createChapter', validated, () => executeMutationTool(prisma, context, 'createChapter', validated));
       }
     }),
     createProjectDoc: approvalTool({
@@ -329,7 +329,7 @@ export function mutationTools(
       inputSchema: mutationToolSchemas.createProjectDoc,
       execute: async (input) => {
         const validated = validateMutationInput('createProjectDoc', input);
-        return approval.handleApproval('createProjectDoc', validated, () => createProjectDoc(prisma, context, validated));
+        return approval.handleApproval('createProjectDoc', validated, () => executeMutationTool(prisma, context, 'createProjectDoc', validated));
       }
     }),
     updateProjectDoc: approvalTool({
@@ -338,7 +338,7 @@ export function mutationTools(
       inputSchema: mutationToolSchemas.updateProjectDoc,
       execute: async (input) => {
         const validated = validateMutationInput('updateProjectDoc', input);
-        return approval.handleApproval('updateProjectDoc', validated, () => updateProjectDoc(prisma, context, validated));
+        return approval.handleApproval('updateProjectDoc', validated, () => executeMutationTool(prisma, context, 'updateProjectDoc', validated));
       }
     })
   } as Record<MutatingToolName, Tool<any, any>>;
@@ -388,50 +388,50 @@ export async function executeMutationTool(
   toolName: string,
   input: Record<string, unknown>
 ) {
-  if (toolName === 'updateProject') return updateProject(prisma, context, input);
-  if (toolName === 'updateProjectAiSettings') return updateProjectAiSettings(prisma, context, input);
-  if (toolName === 'createAct') return createAct(prisma, context, input);
-  if (toolName === 'updateAct') return updateAct(prisma, context, input);
-  if (toolName === 'deleteAct') return deleteAct(prisma, context, input);
-  if (toolName === 'createProjectDoc') return createProjectDoc(prisma, context, input);
-  if (toolName === 'updateProjectDoc') return updateProjectDoc(prisma, context, input);
-  if (toolName === 'deleteProjectDoc') return deleteProjectDoc(prisma, context, input);
-  if (toolName === 'updateChapter') return updateChapter(prisma, context, input);
-  if (toolName === 'createChapter') return createChapter(prisma, context, input);
-  if (toolName === 'deleteChapter') return deleteChapter(prisma, context, input);
-  if (toolName === 'restoreTrashChapter') return restoreTrashChapter(prisma, context, input);
-  if (toolName === 'purgeTrashChapter') return purgeTrashChapter(prisma, context, input);
-  if (toolName === 'createScene') return createScene(prisma, context, input);
-  if (toolName === 'updateScene') return updateScene(prisma, context, input);
-  if (toolName === 'deleteScene') return deleteScene(prisma, context, input);
-  if (toolName === 'createCharacter') return createCharacter(prisma, context, input);
-  if (toolName === 'updateCharacter') return updateCharacter(prisma, context, input);
-  if (toolName === 'deleteCharacter') return deleteCharacter(prisma, context, input);
-  if (toolName === 'createCharacterRelationship') return createCharacterRelationship(prisma, context, input);
-  if (toolName === 'deleteCharacterRelationship') return deleteCharacterRelationship(prisma, context, input);
-  if (toolName === 'createLocation') return createLocation(prisma, context, input);
-  if (toolName === 'updateLocation') return updateLocation(prisma, context, input);
-  if (toolName === 'deleteLocation') return deleteLocation(prisma, context, input);
-  if (toolName === 'updateStoryStructure') return updateStoryStructure(prisma, context, input);
-  if (toolName === 'createObstacle') return createObstacle(prisma, context, input);
-  if (toolName === 'updateObstacle') return updateObstacle(prisma, context, input);
-  if (toolName === 'deleteObstacle') return deleteObstacle(prisma, context, input);
-  if (toolName === 'createSubmission') return createSubmission(prisma, context, input);
-  if (toolName === 'mergeSubmission') return mergeSubmission(prisma, context, input);
-  if (toolName === 'declineSubmission') return declineSubmission(prisma, context, input);
-  if (toolName === 'commentSubmission') return commentSubmission(prisma, context, input);
-  if (toolName === 'uploadAsset') return uploadAsset(prisma, context, input);
-  if (toolName === 'attachAsset') return attachAsset(prisma, context, input);
-  if (toolName === 'detachAsset') return detachAsset(prisma, context, input);
-  if (toolName === 'updateMemberRole') return updateMemberRole(prisma, context, input);
-  if (toolName === 'removeMember') return removeMember(prisma, context, input);
-  if (toolName === 'createInvite') return createInvite(prisma, context, input);
-  if (toolName === 'revokeInvite') return revokeInvite(prisma, context, input);
-  if (toolName === 'acceptInvite') return acceptInvite(prisma, context, input);
-  if (toolName === 'createBetaShareLink') return createBetaShareLink(prisma, context, input);
-  if (toolName === 'updateBetaShareLink') return updateBetaShareLink(prisma, context, input);
-  if (toolName === 'revokeBetaShareLink') return revokeBetaShareLink(prisma, context, input);
-  if (toolName === 'postBetaShareComment') return postBetaShareComment(prisma, context, input);
+  if (toolName === 'updateProject') return compactToolResult(toolName, input, await updateProject(prisma, context, input));
+  if (toolName === 'updateProjectAiSettings') return compactToolResult(toolName, input, await updateProjectAiSettings(prisma, context, input));
+  if (toolName === 'createAct') return compactToolResult(toolName, input, await createAct(prisma, context, input));
+  if (toolName === 'updateAct') return compactToolResult(toolName, input, await updateAct(prisma, context, input));
+  if (toolName === 'deleteAct') return compactToolResult(toolName, input, await deleteAct(prisma, context, input));
+  if (toolName === 'createProjectDoc') return compactToolResult(toolName, input, await createProjectDoc(prisma, context, input));
+  if (toolName === 'updateProjectDoc') return compactToolResult(toolName, input, await updateProjectDoc(prisma, context, input));
+  if (toolName === 'deleteProjectDoc') return compactToolResult(toolName, input, await deleteProjectDoc(prisma, context, input));
+  if (toolName === 'updateChapter') return compactToolResult(toolName, input, await updateChapter(prisma, context, input));
+  if (toolName === 'createChapter') return compactToolResult(toolName, input, await createChapter(prisma, context, input));
+  if (toolName === 'deleteChapter') return compactToolResult(toolName, input, await deleteChapter(prisma, context, input));
+  if (toolName === 'restoreTrashChapter') return compactToolResult(toolName, input, await restoreTrashChapter(prisma, context, input));
+  if (toolName === 'purgeTrashChapter') return compactToolResult(toolName, input, await purgeTrashChapter(prisma, context, input));
+  if (toolName === 'createScene') return compactToolResult(toolName, input, await createScene(prisma, context, input));
+  if (toolName === 'updateScene') return compactToolResult(toolName, input, await updateScene(prisma, context, input));
+  if (toolName === 'deleteScene') return compactToolResult(toolName, input, await deleteScene(prisma, context, input));
+  if (toolName === 'createCharacter') return compactToolResult(toolName, input, await createCharacter(prisma, context, input));
+  if (toolName === 'updateCharacter') return compactToolResult(toolName, input, await updateCharacter(prisma, context, input));
+  if (toolName === 'deleteCharacter') return compactToolResult(toolName, input, await deleteCharacter(prisma, context, input));
+  if (toolName === 'createCharacterRelationship') return compactToolResult(toolName, input, await createCharacterRelationship(prisma, context, input));
+  if (toolName === 'deleteCharacterRelationship') return compactToolResult(toolName, input, await deleteCharacterRelationship(prisma, context, input));
+  if (toolName === 'createLocation') return compactToolResult(toolName, input, await createLocation(prisma, context, input));
+  if (toolName === 'updateLocation') return compactToolResult(toolName, input, await updateLocation(prisma, context, input));
+  if (toolName === 'deleteLocation') return compactToolResult(toolName, input, await deleteLocation(prisma, context, input));
+  if (toolName === 'updateStoryStructure') return compactToolResult(toolName, input, await updateStoryStructure(prisma, context, input));
+  if (toolName === 'createObstacle') return compactToolResult(toolName, input, await createObstacle(prisma, context, input));
+  if (toolName === 'updateObstacle') return compactToolResult(toolName, input, await updateObstacle(prisma, context, input));
+  if (toolName === 'deleteObstacle') return compactToolResult(toolName, input, await deleteObstacle(prisma, context, input));
+  if (toolName === 'createSubmission') return compactToolResult(toolName, input, await createSubmission(prisma, context, input));
+  if (toolName === 'mergeSubmission') return compactToolResult(toolName, input, await mergeSubmission(prisma, context, input));
+  if (toolName === 'declineSubmission') return compactToolResult(toolName, input, await declineSubmission(prisma, context, input));
+  if (toolName === 'commentSubmission') return compactToolResult(toolName, input, await commentSubmission(prisma, context, input));
+  if (toolName === 'uploadAsset') return compactToolResult(toolName, input, await uploadAsset(prisma, context, input));
+  if (toolName === 'attachAsset') return compactToolResult(toolName, input, await attachAsset(prisma, context, input));
+  if (toolName === 'detachAsset') return compactToolResult(toolName, input, await detachAsset(prisma, context, input));
+  if (toolName === 'updateMemberRole') return compactToolResult(toolName, input, await updateMemberRole(prisma, context, input));
+  if (toolName === 'removeMember') return compactToolResult(toolName, input, await removeMember(prisma, context, input));
+  if (toolName === 'createInvite') return compactToolResult(toolName, input, await createInvite(prisma, context, input));
+  if (toolName === 'revokeInvite') return compactToolResult(toolName, input, await revokeInvite(prisma, context, input));
+  if (toolName === 'acceptInvite') return compactToolResult(toolName, input, await acceptInvite(prisma, context, input));
+  if (toolName === 'createBetaShareLink') return compactToolResult(toolName, input, await createBetaShareLink(prisma, context, input));
+  if (toolName === 'updateBetaShareLink') return compactToolResult(toolName, input, await updateBetaShareLink(prisma, context, input));
+  if (toolName === 'revokeBetaShareLink') return compactToolResult(toolName, input, await revokeBetaShareLink(prisma, context, input));
+  if (toolName === 'postBetaShareComment') return compactToolResult(toolName, input, await postBetaShareComment(prisma, context, input));
   throw new HttpError(400, `Approval execution for ${toolName} is not implemented yet`);
 }
 
@@ -604,6 +604,145 @@ async function updateCharacter(
     arc: stringOrUndefined(input.arc)
   };
   return new UpdateCharacterUseCase(prisma).execute(context.userId, context.projectId, characterId, data);
+}
+
+function compactToolResult(toolName: string, input: Record<string, unknown>, result: unknown) {
+  const record = resultRecord(result);
+  const id = stringField(record, 'id') ?? stringField(input, idInputKey(toolName));
+  const label = labelForToolResult(toolName, input, record) ?? id;
+  return {
+    ok: true,
+    tool: toolName,
+    action: compactAction(toolName),
+    id,
+    label,
+    message: compactMessage(toolName, label ?? id)
+  };
+}
+
+function compactAction(toolName: string): string {
+  if (toolName.startsWith('create')) return 'created';
+  if (toolName.startsWith('update')) return 'updated';
+  if (toolName.startsWith('delete') || toolName.startsWith('purge') || toolName.startsWith('remove')) return 'deleted';
+  if (toolName.startsWith('restore')) return 'restored';
+  if (toolName.startsWith('merge')) return 'merged';
+  if (toolName.startsWith('decline')) return 'declined';
+  if (toolName.startsWith('revoke')) return 'revoked';
+  if (toolName.startsWith('attach')) return 'attached';
+  if (toolName.startsWith('detach')) return 'detached';
+  if (toolName.startsWith('upload')) return 'uploaded';
+  if (toolName.startsWith('comment') || toolName.startsWith('post')) return 'posted';
+  if (toolName.startsWith('accept')) return 'accepted';
+  return 'executed';
+}
+
+function compactMessage(toolName: string, label: string | undefined): string {
+  const noun = toolNoun(toolName);
+  const action = compactAction(toolName);
+  return label ? `${noun} ${label} ${action}` : `${noun} ${action}`;
+}
+
+function toolNoun(toolName: string): string {
+  const map: Record<string, string> = {
+    updateProject: 'Project',
+    updateProjectAiSettings: 'AI settings',
+    createAct: 'Act',
+    updateAct: 'Act',
+    deleteAct: 'Act',
+    createProjectDoc: 'Document',
+    updateProjectDoc: 'Document',
+    deleteProjectDoc: 'Document',
+    createChapter: 'Chapter',
+    updateChapter: 'Chapter',
+    deleteChapter: 'Chapter',
+    restoreTrashChapter: 'Chapter',
+    purgeTrashChapter: 'Chapter',
+    createScene: 'Scene',
+    updateScene: 'Scene',
+    deleteScene: 'Scene',
+    createCharacter: 'Character',
+    updateCharacter: 'Character',
+    deleteCharacter: 'Character',
+    createCharacterRelationship: 'Relationship',
+    deleteCharacterRelationship: 'Relationship',
+    createLocation: 'Location',
+    updateLocation: 'Location',
+    deleteLocation: 'Location',
+    updateStoryStructure: 'Story structure',
+    createObstacle: 'Obstacle',
+    updateObstacle: 'Obstacle',
+    deleteObstacle: 'Obstacle',
+    createSubmission: 'Submission',
+    mergeSubmission: 'Submission',
+    declineSubmission: 'Submission',
+    commentSubmission: 'Submission comment',
+    uploadAsset: 'Asset',
+    attachAsset: 'Asset',
+    detachAsset: 'Asset',
+    updateMemberRole: 'Member role',
+    removeMember: 'Member',
+    createInvite: 'Invite',
+    revokeInvite: 'Invite',
+    acceptInvite: 'Invite',
+    createBetaShareLink: 'Share link',
+    updateBetaShareLink: 'Share link',
+    revokeBetaShareLink: 'Share link',
+    postBetaShareComment: 'Share comment'
+  };
+  return map[toolName] ?? toolName;
+}
+
+function labelForToolResult(toolName: string, input: Record<string, unknown>, result: Record<string, unknown> | null): string | undefined {
+  return stringField(result, 'title')
+    ?? stringField(result, 'name')
+    ?? stringField(result, 'label')
+    ?? stringField(resultRecord(result?.project), 'title')
+    ?? stringField(input, 'title')
+    ?? stringField(input, 'name')
+    ?? stringField(input, 'label')
+    ?? stringField(input, idInputKey(toolName));
+}
+
+function idInputKey(toolName: string): string {
+  const map: Record<string, string> = {
+    updateAct: 'actId',
+    deleteAct: 'actId',
+    updateProjectDoc: 'docId',
+    deleteProjectDoc: 'docId',
+    updateChapter: 'chapterId',
+    deleteChapter: 'chapterId',
+    restoreTrashChapter: 'chapterId',
+    purgeTrashChapter: 'chapterId',
+    updateScene: 'sceneId',
+    deleteScene: 'sceneId',
+    updateCharacter: 'characterId',
+    deleteCharacter: 'characterId',
+    deleteCharacterRelationship: 'relationshipId',
+    updateLocation: 'locationId',
+    deleteLocation: 'locationId',
+    updateObstacle: 'obstacleId',
+    deleteObstacle: 'obstacleId',
+    mergeSubmission: 'submissionId',
+    declineSubmission: 'submissionId',
+    commentSubmission: 'submissionId',
+    attachAsset: 'assetId',
+    detachAsset: 'attachmentId',
+    updateMemberRole: 'userId',
+    removeMember: 'userId',
+    revokeInvite: 'inviteId',
+    updateBetaShareLink: 'shareLinkId',
+    revokeBetaShareLink: 'shareLinkId'
+  };
+  return map[toolName] ?? 'id';
+}
+
+function resultRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function stringField(record: Record<string, unknown> | null | undefined, key: string): string | undefined {
+  const value = record?.[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 function isContentEdit(value: unknown): value is { oldString: string; newString: string; replaceAll?: boolean } {

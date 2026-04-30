@@ -426,6 +426,7 @@ export interface AiAgentSession {
   toolCalls: AiAgentToolCall[];
   pendingToolCalls: AiAgentToolCall[];
   contextUsage: AiAgentContextUsage | null;
+  error: string | null;
   updatedAt: string;
 }
 

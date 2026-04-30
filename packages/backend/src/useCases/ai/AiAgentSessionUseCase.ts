@@ -296,8 +296,8 @@ export class AiAgentSessionUseCase {
       });
 
       let assistantText = '';
+      const promptPayload = parsePromptPayload(queued.prompt);
       try {
-        const promptPayload = parsePromptPayload(queued.prompt);
         const model = await loadAiModelForProject(this.prisma, projectId, promptPayload.model);
         const { systemPrompt, userPrompt } = await this.buildPrompts(
           projectId,
@@ -381,15 +381,20 @@ export class AiAgentSessionUseCase {
           data: {
             status: aborted ? 'CANCELLED' : 'ERROR',
             activePromptId: null,
-            lastError: error instanceof Error ? error.message : 'AI agent failed'
+            lastError: mergeSessionMeta(null, {
+              error: errorMessage(error),
+              contextUsage: usageFromError(error, promptPayload.model)
+            })
           }
         });
+        const snapshot = await this.snapshot(session.id, projectId);
         await this.broadcast(projectId, {
           type: aborted ? 'session' : 'error',
-          session: await this.snapshot(session.id, projectId),
+          session: snapshot,
           data: {
             promptId: queued.id,
-            message: error instanceof Error ? error.message : 'AI agent failed'
+            message: snapshot.error ?? errorMessage(error),
+            contextUsage: snapshot.contextUsage
           }
         });
       }
@@ -448,6 +453,7 @@ export class AiAgentSessionUseCase {
       toolCalls: recentToolCalls.map(toToolCall),
       pendingToolCalls: pendingToolCalls.map(toToolCall),
       contextUsage: contextUsageFromSession(session.lastError),
+      error: sessionErrorFromSession(session.lastError),
       updatedAt: session.updatedAt.toISOString()
     };
   }
@@ -703,7 +709,7 @@ export class AiAgentSessionUseCase {
     });
     await this.prisma.projectAiAgentSession.update({
       where: { id: sessionId },
-      data: { lastError: mergeContextUsage(session?.lastError ?? null, usage) }
+      data: { lastError: mergeSessionMeta(session?.lastError ?? null, { contextUsage: usage }) }
     });
   }
 
@@ -988,38 +994,92 @@ function contextWindowForModel(model: string | null): number {
   return DEFAULT_CONTEXT_WINDOW;
 }
 
-function mergeContextUsage(lastError: string | null, usage: UsagePayload): string {
-  const payload = { type: 'opentales.aiSessionMeta', version: 1, contextUsage: usage };
-  if (!lastError) return JSON.stringify(payload);
-  try {
-    const parsed = JSON.parse(lastError) as Record<string, unknown>;
-    if (parsed.type === 'opentales.aiSessionMeta') return JSON.stringify({ ...parsed, contextUsage: usage });
-  } catch {
-    // Keep real error strings intact by replacing metadata only when no error is present.
-  }
-  return lastError;
+function errorMessage(error: unknown): string {
+  if (!error || typeof error !== 'object') return error instanceof Error ? error.message : 'AI agent failed';
+  const record = error as Record<string, unknown>;
+  const data = objectRecord(record.data);
+  const dataError = objectRecord(data?.error);
+  const responseBody = typeof record.responseBody === 'string' ? parseJsonRecord(record.responseBody) : null;
+  const bodyError = objectRecord(responseBody?.error);
+  const message = stringValue(dataError?.message) ?? stringValue(bodyError?.message) ?? (error instanceof Error ? error.message : null);
+  return message ?? 'AI agent failed';
 }
 
-function contextUsageFromSession(lastError: string | null): UsagePayload | null {
-  if (!lastError) return null;
+function usageFromError(error: unknown, model: string | null): UsagePayload | null {
+  const message = errorMessage(error);
+  const match = message.match(/Prompt tokens limit exceeded:\s*(\d+)\s*>\s*(\d+)/i);
+  if (!match) return null;
+  const inputTokens = Number(match[1]);
+  const maxTokens = Number(match[2]);
+  if (!Number.isFinite(inputTokens) || !Number.isFinite(maxTokens) || maxTokens <= 0) return null;
+  return {
+    inputTokens,
+    outputTokens: 0,
+    totalTokens: inputTokens,
+    maxTokens,
+    percentage: Math.round((inputTokens / maxTokens) * 1000) / 10,
+    model
+  };
+}
+
+function mergeSessionMeta(
+  lastError: string | null,
+  update: { contextUsage?: UsagePayload | null; error?: string | null }
+): string | null {
+  const existing = sessionMetaRecord(lastError);
+  const next = {
+    type: 'opentales.aiSessionMeta',
+    version: 1,
+    contextUsage: update.contextUsage === undefined ? contextUsageFromSession(lastError) : update.contextUsage,
+    error: update.error === undefined ? sessionErrorFromSession(lastError) : update.error
+  };
+  if (existing) Object.assign(next, existing, update);
+  if (!next.contextUsage && !next.error) return null;
+  return JSON.stringify(next);
+}
+
+function sessionMetaRecord(value: string | null): Record<string, unknown> | null {
+  if (!value) return null;
   try {
-    const parsed = JSON.parse(lastError) as Record<string, unknown>;
-    if (parsed.type !== 'opentales.aiSessionMeta') return null;
-    const usage = objectRecord(parsed.contextUsage);
-    if (!usage) return null;
-    const inputTokens = numberValue(usage.inputTokens) ?? 0;
-    const outputTokens = numberValue(usage.outputTokens) ?? 0;
-    const totalTokens = numberValue(usage.totalTokens) ?? inputTokens + outputTokens;
-    const maxTokens = numberValue(usage.maxTokens) ?? DEFAULT_CONTEXT_WINDOW;
-    return {
-      inputTokens,
-      outputTokens,
-      totalTokens,
-      maxTokens,
-      percentage: numberValue(usage.percentage) ?? Math.min(100, Math.round((totalTokens / maxTokens) * 1000) / 10),
-      model: typeof usage.model === 'string' ? usage.model : null
-    };
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    return parsed.type === 'opentales.aiSessionMeta' ? parsed : null;
   } catch {
     return null;
   }
+}
+
+function contextUsageFromSession(lastError: string | null): UsagePayload | null {
+  const usage = objectRecord(sessionMetaRecord(lastError)?.contextUsage);
+  if (!usage) return null;
+  const inputTokens = numberValue(usage.inputTokens) ?? 0;
+  const outputTokens = numberValue(usage.outputTokens) ?? 0;
+  const totalTokens = numberValue(usage.totalTokens) ?? inputTokens + outputTokens;
+  const maxTokens = numberValue(usage.maxTokens) ?? DEFAULT_CONTEXT_WINDOW;
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    maxTokens,
+    percentage: numberValue(usage.percentage) ?? Math.min(100, Math.round((totalTokens / maxTokens) * 1000) / 10),
+    model: typeof usage.model === 'string' ? usage.model : null
+  };
+}
+
+function sessionErrorFromSession(lastError: string | null): string | null {
+  if (!lastError) return null;
+  const metaError = sessionMetaRecord(lastError)?.error;
+  if (typeof metaError === 'string') return metaError;
+  return sessionMetaRecord(lastError) ? null : lastError;
+}
+
+function parseJsonRecord(value: string): Record<string, unknown> | null {
+  try {
+    return objectRecord(JSON.parse(value));
+  } catch {
+    return null;
+  }
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
 }
