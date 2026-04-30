@@ -60,7 +60,7 @@
   })}</` + `script>`}
 </svelte:head>
 
-<div class="min-h-screen bg-background text-foreground">
+<div class="h-full overflow-auto bg-background text-foreground">
   <Nav />
   <main>
     <Hero />
