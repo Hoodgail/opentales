@@ -83,7 +83,7 @@ const contentEditSchema = editContentInputSchema.extend({
 });
 
 function withAtLeastOne<T extends z.ZodRawShape>(schema: z.ZodObject<T>, fields: Array<keyof T>) {
-  return schema.refine((input) => fields.some((field) => input[field] !== undefined), {
+  return schema.refine((input) => fields.some((field) => (input as Record<PropertyKey, unknown>)[field] !== undefined), {
     message: `At least one of ${fields.map(String).join(', ')} is required`
   });
 }

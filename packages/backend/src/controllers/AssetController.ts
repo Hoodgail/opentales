@@ -36,7 +36,7 @@ export class AssetController {
   };
 
   private userId(req: Request): string {
-    const id = (req as Request & { userId?: string }).userId;
+    const id = req.user?.id;
     if (!id) {
       throw new HttpError(401, 'Authentication required');
     }

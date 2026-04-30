@@ -1,9 +1,12 @@
 import {
   OpenTalesClient,
+  type Asset,
+  type AssetKind,
   type AiAgentSession,
   type AiAgentSessionEvent,
   type AiAgentSessionSummary,
   type AiAgentToolCall,
+  type AiAgentAttachmentInput,
   type AiCharacterDialogueSuggestion,
   type AiContinuityReview,
   type AiOutlineExpansion,
@@ -264,10 +267,19 @@ function createAiStore() {
     streaming = false;
   }
 
-  async function queuePrompt(projectId: string, prompt: string, interrupt = false) {
+  async function queuePrompt(
+    projectId: string,
+    prompt: string,
+    interrupt = false,
+    options: { model?: string; attachments?: AiAgentAttachmentInput[] } = {}
+  ) {
     sessionError = null;
     try {
-      session = await api.queueAiAgentPrompt(projectId, { prompt, interrupt }, activeSessionId ?? undefined);
+      session = await api.queueAiAgentPrompt(
+        projectId,
+        { prompt, interrupt, model: options.model, attachments: options.attachments },
+        activeSessionId ?? undefined
+      );
       activeSessionId = session.id;
       upsertSessionSummary(session);
     } catch (err) {
@@ -305,6 +317,16 @@ function createAiStore() {
       upsertSessionSummary(session);
     } catch (err) {
       sessionError = err instanceof Error ? err.message : 'Failed to approve tool calls';
+    }
+  }
+
+  async function uploadAttachment(projectId: string, file: Blob, options: { kind?: AssetKind; filename?: string } = {}): Promise<Asset | null> {
+    sessionError = null;
+    try {
+      return await api.uploadAsset(projectId, file, options);
+    } catch (err) {
+      sessionError = err instanceof Error ? err.message : 'Failed to upload attachment';
+      return null;
     }
   }
 
@@ -467,6 +489,7 @@ function createAiStore() {
     cancelSession,
     approveToolCall,
     approveToolCalls,
+    uploadAttachment,
 
     // tool manifest
     get toolManifest() { return toolManifest; },

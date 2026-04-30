@@ -366,14 +366,41 @@ export interface AiAgentMessage {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
+  model?: string | null;
+  attachments?: AiAgentAttachment[];
   createdAt: string;
 }
 
 export interface AiAgentQueuedPrompt {
   id: string;
   prompt: string;
+  model?: string | null;
+  attachments?: AiAgentAttachment[];
   status: 'queued' | 'running' | 'completed' | 'cancelled' | 'error';
   createdAt: string;
+}
+
+export interface AiAgentAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  kind: AssetKind;
+  sizeBytes: number;
+  url?: string;
+  assetId?: string;
+}
+
+export interface AiAgentAttachmentInput extends AiAgentAttachment {
+  base64?: string;
+}
+
+export interface AiAgentContextUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  maxTokens: number;
+  percentage: number;
+  model: string | null;
 }
 
 export interface AiAgentToolCall {
@@ -398,6 +425,7 @@ export interface AiAgentSession {
   messages: AiAgentMessage[];
   toolCalls: AiAgentToolCall[];
   pendingToolCalls: AiAgentToolCall[];
+  contextUsage: AiAgentContextUsage | null;
   updatedAt: string;
 }
 
@@ -417,6 +445,8 @@ export interface CreateAiAgentSessionInput {
 
 export interface QueueAiAgentPromptInput {
   prompt: string;
+  model?: string;
+  attachments?: AiAgentAttachmentInput[];
   /**
    * If true, cancels the active generation and runs this prompt next.
    */

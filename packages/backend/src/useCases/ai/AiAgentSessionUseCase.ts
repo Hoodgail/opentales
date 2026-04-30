@@ -2,6 +2,7 @@ import type { Response } from 'express';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import type { ToolSet } from 'ai';
 import type {
+  AiAgentAttachment,
   AiAgentMessage,
   AiAgentQueuedPrompt,
   AiAgentSession,
@@ -36,6 +37,22 @@ const runtimes = new Map<string, RuntimeSession>();
 const MUTATING_TOOLS = new Set<string>(mutatingToolNames);
 const pendingApprovals = new Map<string, PendingApproval>();
 const APPROVAL_TIMEOUT_MS = Number(process.env.AI_APPROVAL_TIMEOUT_MS ?? 10 * 60 * 1000);
+const DEFAULT_CONTEXT_WINDOW = Number(process.env.AI_CONTEXT_WINDOW_TOKENS ?? 128_000);
+
+interface PromptPayload {
+  prompt: string;
+  model: string | null;
+  attachments: AiAgentAttachment[];
+}
+
+interface UsagePayload {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  maxTokens: number;
+  percentage: number;
+  model: string | null;
+}
 
 export class AiAgentSessionUseCase {
   private readonly access: ProjectAccessRepository;
@@ -91,10 +108,15 @@ export class AiAgentSessionUseCase {
     sessionId?: string
   ): Promise<AiAgentSession> {
     await this.access.assertPermission(userId, projectId, 'project:write');
-    await loadAiModelForProject(this.prisma, projectId);
+    await loadAiModelForProject(this.prisma, projectId, input.model);
 
     const prompt = input.prompt?.trim();
     if (!prompt) throw new HttpError(400, 'Prompt is required');
+    const payload = normalizePromptPayload({
+      prompt,
+      model: typeof input.model === 'string' ? input.model.trim() || null : null,
+      attachments: sanitizeAttachments(input.attachments)
+    });
 
     const session = sessionId
       ? await this.getSession(projectId, sessionId)
@@ -120,7 +142,7 @@ export class AiAgentSessionUseCase {
     const queued = await this.prisma.aiAgentPrompt.create({
       data: {
         sessionId: session.id,
-        prompt,
+        prompt: serializePromptPayload(payload),
         order: input.interrupt ? -Date.now() : (last?.order ?? 0) + 1
       }
     });
@@ -275,19 +297,23 @@ export class AiAgentSessionUseCase {
 
       let assistantText = '';
       try {
-        const model = await loadAiModelForProject(this.prisma, projectId);
+        const promptPayload = parsePromptPayload(queued.prompt);
+        const model = await loadAiModelForProject(this.prisma, projectId, promptPayload.model);
         const { systemPrompt, userPrompt } = await this.buildPrompts(
           projectId,
           session.id,
-          queued.prompt
+          promptPayload.prompt,
+          promptPayload.attachments
         );
+        const messagePrompt = modelContent(userPrompt, promptPayload.attachments);
+        const messages = [{ role: 'user' as const, content: messagePrompt }] as NonNullable<Parameters<typeof streamText>[0]['messages']>;
         const result = streamText({
           model,
           abortSignal: runtime.abortController.signal,
           tools: this.buildAgentTools(projectId, session.id, queued.id, userId),
           stopWhen: stepCountIs(8),
           system: systemPrompt,
-          prompt: userPrompt
+          messages
         });
 
         for await (const part of result.fullStream) {
@@ -323,6 +349,9 @@ export class AiAgentSessionUseCase {
               session: await this.snapshot(session.id, projectId),
               data: part
             });
+          } else if (type === 'finish' || type === 'finish-step') {
+            const usage = usageFromPart(part, promptPayload.model);
+            if (usage) await this.saveContextUsage(session.id, usage);
           }
         }
 
@@ -418,6 +447,7 @@ export class AiAgentSessionUseCase {
       messages: messages.map(toMessage),
       toolCalls: recentToolCalls.map(toToolCall),
       pendingToolCalls: pendingToolCalls.map(toToolCall),
+      contextUsage: contextUsageFromSession(session.lastError),
       updatedAt: session.updatedAt.toISOString()
     };
   }
@@ -429,7 +459,8 @@ export class AiAgentSessionUseCase {
   private async buildPrompts(
     projectId: string,
     sessionId: string,
-    prompt: string
+    prompt: string,
+    attachments: AiAgentAttachment[]
   ): Promise<{ systemPrompt: string; userPrompt: string }> {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
@@ -458,7 +489,12 @@ export class AiAgentSessionUseCase {
     });
     const transcript = messages
       .reverse()
-      .map((message) => `${toMessageRole(message.role)}: ${message.content}`)
+      .map((message) => {
+        const role = toMessageRole(message.role);
+        const payload = role === 'user' ? parsePromptPayload(message.content) : null;
+        const suffix = payload?.attachments.length ? `\nAttachments: ${payload.attachments.map(attachmentLabel).join(', ')}` : '';
+        return `${role}: ${payload?.prompt ?? message.content}${suffix}`;
+      })
       .join('\n');
 
     const systemPrompt = renderSystemPrompt({
@@ -477,7 +513,12 @@ export class AiAgentSessionUseCase {
       }))
     });
 
-    const userPrompt = renderUserContext({ transcript, prompt });
+    const userPrompt = renderUserContext({
+      transcript,
+      prompt: attachments.length
+        ? `${prompt}\n\nAttached files:\n${attachments.map((attachment) => `- ${attachmentLabel(attachment)}`).join('\n')}`
+        : prompt
+    });
 
     return { systemPrompt, userPrompt };
   }
@@ -571,7 +612,7 @@ export class AiAgentSessionUseCase {
       }
       const output = pending
         ? await pending.execute()
-        : await executeMutationTool(this.prisma, { projectId, userId }, toolCall.toolName, inputRecord(toolCall.input));
+        : await executeMutationTool(this.prisma, { projectId, userId }, toolCall.toolName, inputRecord(toolCall.input as Prisma.JsonValue));
       await this.prisma.aiAgentToolCall.update({
         where: { id: toolCall.id },
         data: { status: 'EXECUTED', output: output as Prisma.InputJsonValue }
@@ -655,6 +696,17 @@ export class AiAgentSessionUseCase {
     });
   }
 
+  private async saveContextUsage(sessionId: string, usage: UsagePayload): Promise<void> {
+    const session = await this.prisma.projectAiAgentSession.findUnique({
+      where: { id: sessionId },
+      select: { lastError: true }
+    });
+    await this.prisma.projectAiAgentSession.update({
+      where: { id: sessionId },
+      data: { lastError: mergeContextUsage(session?.lastError ?? null, usage) }
+    });
+  }
+
 }
 
 function getRuntime(sessionId: string): RuntimeSession {
@@ -679,9 +731,12 @@ function toQueuedPrompt(prompt: {
   status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'CANCELLED' | 'ERROR';
   createdAt: Date;
 }): AiAgentQueuedPrompt {
+  const payload = parsePromptPayload(prompt.prompt);
   return {
     id: prompt.id,
-    prompt: prompt.prompt,
+    prompt: payload.prompt,
+    model: payload.model,
+    attachments: payload.attachments,
     status: toPromptStatus(prompt.status),
     createdAt: prompt.createdAt.toISOString()
   };
@@ -693,10 +748,14 @@ function toMessage(message: {
   content: string;
   createdAt: Date;
 }): AiAgentMessage {
+  const role = toMessageRole(message.role);
+  const payload = role === 'user' ? parsePromptPayload(message.content) : null;
   return {
     id: message.id,
-    role: toMessageRole(message.role),
-    content: message.content,
+    role,
+    content: payload?.prompt ?? message.content,
+    model: payload?.model,
+    attachments: payload?.attachments,
     createdAt: message.createdAt.toISOString()
   };
 }
@@ -810,4 +869,157 @@ function parseToolResultPart(part: unknown): { toolCallId: string | null; output
 
 function inputRecord(input: Prisma.JsonValue): Record<string, unknown> {
   return input && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+}
+
+function normalizePromptPayload(payload: PromptPayload): PromptPayload {
+  return {
+    prompt: payload.prompt.trim(),
+    model: payload.model?.trim() || null,
+    attachments: sanitizeAttachments(payload.attachments)
+  };
+}
+
+function serializePromptPayload(payload: PromptPayload): string {
+  if (!payload.model && payload.attachments.length === 0) return payload.prompt;
+  return JSON.stringify({
+    type: 'opentales.aiPrompt',
+    version: 1,
+    ...payload
+  });
+}
+
+function parsePromptPayload(value: string): PromptPayload {
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    if (parsed.type !== 'opentales.aiPrompt') throw new Error('Not an AI prompt payload');
+    return normalizePromptPayload({
+      prompt: typeof parsed.prompt === 'string' ? parsed.prompt : value,
+      model: typeof parsed.model === 'string' ? parsed.model : null,
+      attachments: sanitizeAttachments(parsed.attachments)
+    });
+  } catch {
+    return { prompt: value, model: null, attachments: [] };
+  }
+}
+
+function sanitizeAttachments(value: unknown): AiAgentAttachment[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    const name = typeof record.name === 'string' ? record.name.trim() : '';
+    const mimeType = typeof record.mimeType === 'string' ? record.mimeType.trim() : '';
+    const url = typeof record.url === 'string' ? record.url : undefined;
+    if (!name || !mimeType) return [];
+    const kind = record.kind === 'audio' || record.kind === 'video' || record.kind === 'document' ? record.kind : 'image';
+    return [{
+      id: typeof record.id === 'string' && record.id ? record.id : `attachment-${index}`,
+      name,
+      mimeType,
+      kind,
+      sizeBytes: typeof record.sizeBytes === 'number' && Number.isFinite(record.sizeBytes) ? record.sizeBytes : 0,
+      url,
+      assetId: typeof record.assetId === 'string' ? record.assetId : undefined
+    } satisfies AiAgentAttachment];
+  });
+}
+
+function attachmentLabel(attachment: AiAgentAttachment): string {
+  return `${attachment.name} (${attachment.mimeType}, ${formatBytes(attachment.sizeBytes)})`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+type AgentModelContent = string | Array<
+  | { type: 'text'; text: string }
+  | { type: 'image'; image: string; mimeType: string }
+  | { type: 'file'; data: string; mimeType: string; filename: string }
+>;
+
+function modelContent(prompt: string, attachments: AiAgentAttachment[]): AgentModelContent {
+  if (attachments.length === 0) return prompt;
+  const parts: Exclude<AgentModelContent, string> = [{ type: 'text', text: prompt }];
+  for (const attachment of attachments) {
+    if (!attachment.url) continue;
+    if (attachment.mimeType.startsWith('image/')) {
+      parts.push({ type: 'image', image: attachment.url, mimeType: attachment.mimeType });
+    } else if (attachment.mimeType === 'application/pdf') {
+      parts.push({ type: 'file', data: attachment.url, mimeType: attachment.mimeType, filename: attachment.name });
+    }
+  }
+  return parts;
+}
+
+function usageFromPart(part: unknown, model: string | null): UsagePayload | null {
+  if (!part || typeof part !== 'object') return null;
+  const record = part as Record<string, unknown>;
+  const usage = objectRecord(record.totalUsage) ?? objectRecord(record.usage);
+  if (!usage) return null;
+  const inputTokens = numberValue(usage.inputTokens) ?? numberValue(usage.promptTokens) ?? 0;
+  const outputTokens = numberValue(usage.outputTokens) ?? numberValue(usage.completionTokens) ?? 0;
+  const totalTokens = numberValue(usage.totalTokens) ?? inputTokens + outputTokens;
+  const maxTokens = contextWindowForModel(model);
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    maxTokens,
+    percentage: Math.min(100, Math.round((totalTokens / maxTokens) * 1000) / 10),
+    model
+  };
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function numberValue(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function contextWindowForModel(model: string | null): number {
+  const id = model?.toLowerCase() ?? '';
+  if (id.includes('gpt-5') || id.includes('gpt-4.1') || id.includes('gemini')) return 1_000_000;
+  if (id.includes('claude') || id.includes('gpt-4o')) return 200_000;
+  return DEFAULT_CONTEXT_WINDOW;
+}
+
+function mergeContextUsage(lastError: string | null, usage: UsagePayload): string {
+  const payload = { type: 'opentales.aiSessionMeta', version: 1, contextUsage: usage };
+  if (!lastError) return JSON.stringify(payload);
+  try {
+    const parsed = JSON.parse(lastError) as Record<string, unknown>;
+    if (parsed.type === 'opentales.aiSessionMeta') return JSON.stringify({ ...parsed, contextUsage: usage });
+  } catch {
+    // Keep real error strings intact by replacing metadata only when no error is present.
+  }
+  return lastError;
+}
+
+function contextUsageFromSession(lastError: string | null): UsagePayload | null {
+  if (!lastError) return null;
+  try {
+    const parsed = JSON.parse(lastError) as Record<string, unknown>;
+    if (parsed.type !== 'opentales.aiSessionMeta') return null;
+    const usage = objectRecord(parsed.contextUsage);
+    if (!usage) return null;
+    const inputTokens = numberValue(usage.inputTokens) ?? 0;
+    const outputTokens = numberValue(usage.outputTokens) ?? 0;
+    const totalTokens = numberValue(usage.totalTokens) ?? inputTokens + outputTokens;
+    const maxTokens = numberValue(usage.maxTokens) ?? DEFAULT_CONTEXT_WINDOW;
+    return {
+      inputTokens,
+      outputTokens,
+      totalTokens,
+      maxTokens,
+      percentage: numberValue(usage.percentage) ?? Math.min(100, Math.round((totalTokens / maxTokens) * 1000) / 10),
+      model: typeof usage.model === 'string' ? usage.model : null
+    };
+  } catch {
+    return null;
+  }
 }
