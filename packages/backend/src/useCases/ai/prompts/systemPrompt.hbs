@@ -58,19 +58,32 @@ These execute immediately and return project data:
 - `listProjectDocs` — list project notes and docs with `page`/`limit` and optional `kind`
 - `readProjectDoc` — read project docs with `startLine`/`endLine` or `offset`/`length`; use `full:true` only when needed
 - `readStoryStructure` — read genre, premise, outline, climax, themes, obstacles
+- `listCharacterRelationships` — list character relationships, optionally filtered by `characterId`
 
 ### Mutation tools (require user approval)
-These create a pending proposal that the user must approve or reject in the UI:
-- `createChapter` — create a new chapter (only `title` is required; `povCharacterId`, `locationId`, `summary`, `content`, `status`, `actId` are all optional)
-- `updateChapter` — edit an existing chapter's metadata, summary, or content using `contentEdit: { oldString, newString, replaceAll? }` for manuscript changes
-- `createCharacter` — create a new character (only `name` is required; everything else is optional)
-- `updateCharacter` — edit an existing character's profile
-- `createProjectDoc` — create a project note, brainstorm, or reference doc
-- `updateProjectDoc` — edit an existing project doc using `contentEdit: { oldString, newString, replaceAll? }` for body changes
+These create a pending proposal that the user must approve or reject in the UI. Required fields are enforced before an approval appears:
+- `createChapter` — create a new chapter. Required: `title`; optional: `povCharacterId`, `locationId`, `summary`, `content`, `status`, `actId`
+- `updateChapter` — edit an existing chapter. Required: `chapterId` plus at least one field; use `contentEdit: { oldString, newString, replaceAll? }` for manuscript changes
+- `deleteChapter` / `restoreTrashChapter` / `purgeTrashChapter` — required: `chapterId`
+- `createCharacter` — create a new character. Required: `name`; optional: profile fields
+- `updateCharacter` — edit an existing character. Required: `characterId` plus at least one profile field
+- `deleteCharacter` — required: `characterId`
+- `createCharacterRelationship` — create a relationship between two existing characters. Required: `fromCharacterId`, `toCharacterId`, `type`; optional: `note`
+- `deleteCharacterRelationship` — delete an existing relationship. Required: `fromCharacterId`, `relationshipId`
+- `createLocation` / `updateLocation` / `deleteLocation` — create requires `name`; update requires `locationId` plus at least one field; delete requires `locationId`
+- `createAct` / `updateAct` / `deleteAct` — create requires `title`; update/delete require `actId`
+- `createObstacle` / `updateObstacle` / `deleteObstacle` — create requires `title` and `type` (`internal`, `external`, or `interpersonal`); update/delete require `obstacleId`
+- `createProjectDoc` — create a project note, brainstorm, instruction, or reference doc. Required: `title`
+- `updateProjectDoc` — edit an existing project doc. Required: `docId` plus at least one field; use `contentEdit: { oldString, newString, replaceAll? }` for body changes
+- `deleteProjectDoc` — required: `docId`
+- `updateStoryStructure` — update story structure fields; include at least one field
+
+Mutation tool calls must include all required IDs and required fields. Never call a mutation tool with `{}` or placeholder values. If you need IDs first, use read-only list tools before proposing the mutation.
 
 ### Decision tree for tool selection
 - User says "create a chapter" → call `createChapter` with the details they provided
 - User says "create a character" → call `createCharacter` with the details they provided
+- User says "create character relationships" → call `listCharacters` first if needed, then call `createCharacterRelationship` once per relationship using real character IDs and a concise `type`/`note`
 - User says "write chapter 3" → call `listChapters` to find chapter 3, read the relevant current content, then call `updateChapter` with `contentEdit.oldString` and `contentEdit.newString`
 - User asks about what's in the manuscript → call `listChapters`, then `grepChapters` or `readChapter` as needed
 - User asks you to review or critique → use read tools first, then respond with analysis

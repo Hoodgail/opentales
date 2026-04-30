@@ -67,6 +67,27 @@ import { applyContentEdit, bodyOf, countWords, editContentInputSchema, toPrismaD
 
 type ApprovalToolConfig = Tool<any, any>;
 
+const nonEmptyString = z.string().trim().min(1);
+const optionalString = z.string().optional();
+const nullableString = z.string().nullable().optional();
+const stringArray = z.array(z.string());
+const chapterStatusSchema = z.enum(['draft', 'in-progress', 'review', 'final']);
+const docKindSchema = z.enum(['note', 'brainstorm', 'instructions', 'reference', 'other']);
+const roleSchema = z.enum(['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
+const obstacleTypeSchema = z.enum(['internal', 'external', 'interpersonal']);
+const assetKindSchema = z.enum(['image', 'audio', 'video', 'document']);
+const attachmentEntitySchema = z.enum(['CHARACTER', 'LOCATION', 'CHAPTER', 'SCENE', 'PROJECT', 'WRITING_VERSION', 'USER']);
+const contentEditSchema = editContentInputSchema.extend({
+  oldString: z.string().min(1),
+  newString: z.string()
+});
+
+function withAtLeastOne<T extends z.ZodRawShape>(schema: z.ZodObject<T>, fields: Array<keyof T>) {
+  return schema.refine((input) => fields.some((field) => input[field] !== undefined), {
+    message: `At least one of ${fields.map(String).join(', ')} is required`
+  });
+}
+
 export const mutatingToolNames = [
   'updateProject',
   'updateProjectAiSettings',
@@ -116,6 +137,145 @@ export const mutatingToolNames = [
 
 export type MutatingToolName = (typeof mutatingToolNames)[number];
 
+const mutationToolSchemas = {
+  updateProject: withAtLeastOne(z.object({
+    title: optionalString,
+    slug: optionalString,
+    description: nullableString,
+    genre: nullableString,
+    perspective: nullableString,
+    pov: nullableString,
+    voice: nullableString,
+    tone: nullableString,
+    themes: stringArray.optional(),
+    visibility: z.enum(['private', 'public']).optional(),
+    coverAssetId: nullableString,
+    coverOrientation: z.enum(['landscape', 'portrait']).optional()
+  }), ['title', 'slug', 'description', 'genre', 'perspective', 'pov', 'voice', 'tone', 'themes', 'visibility', 'coverAssetId', 'coverOrientation']),
+  updateProjectAiSettings: withAtLeastOne(z.object({
+    enabled: z.boolean().optional(),
+    providerKind: z.enum(['gateway', 'openai-compatible']).optional(),
+    model: optionalString,
+    baseUrl: nullableString,
+    apiKey: nullableString
+  }), ['enabled', 'providerKind', 'model', 'baseUrl', 'apiKey']),
+  createAct: z.object({ title: nonEmptyString }),
+  updateAct: withAtLeastOne(z.object({ actId: nonEmptyString, title: optionalString, chapterIds: stringArray.optional() }), ['title', 'chapterIds']),
+  deleteAct: z.object({ actId: nonEmptyString }),
+  updateCharacter: withAtLeastOne(z.object({
+    characterId: nonEmptyString,
+    name: optionalString,
+    role: optionalString,
+    age: optionalString,
+    occupation: optionalString,
+    traits: stringArray.optional(),
+    description: optionalString,
+    appearance: optionalString,
+    motivation: optionalString,
+    arc: optionalString
+  }), ['name', 'role', 'age', 'occupation', 'traits', 'description', 'appearance', 'motivation', 'arc']),
+  createCharacter: z.object({
+    name: nonEmptyString,
+    role: optionalString,
+    age: optionalString,
+    occupation: optionalString,
+    traits: stringArray.optional(),
+    description: optionalString,
+    appearance: optionalString,
+    motivation: optionalString,
+    arc: optionalString
+  }),
+  deleteCharacter: z.object({ characterId: nonEmptyString }),
+  createCharacterRelationship: z.object({
+    fromCharacterId: nonEmptyString.describe('ID of the source character whose relationship list receives this entry'),
+    toCharacterId: nonEmptyString.describe('ID of the related character'),
+    type: nonEmptyString.describe('Relationship label, such as "creator / creation", "mentor", or "operator / asset"'),
+    note: optionalString.describe('Short explanation of the relationship')
+  }),
+  deleteCharacterRelationship: z.object({ fromCharacterId: nonEmptyString, relationshipId: nonEmptyString }),
+  createLocation: z.object({ name: nonEmptyString, type: optionalString, description: optionalString, atmosphere: optionalString, significance: optionalString, sensoryDetails: optionalString }),
+  updateLocation: withAtLeastOne(z.object({ locationId: nonEmptyString, name: optionalString, type: optionalString, imageAssetId: nullableString, description: optionalString, atmosphere: optionalString, significance: optionalString, sensoryDetails: optionalString }), ['name', 'type', 'imageAssetId', 'description', 'atmosphere', 'significance', 'sensoryDetails']),
+  deleteLocation: z.object({ locationId: nonEmptyString }),
+  updateChapter: withAtLeastOne(z.object({ chapterId: nonEmptyString, title: optionalString, summary: optionalString, status: chapterStatusSchema.optional(), povCharacterId: optionalString, locationId: optionalString, contentEdit: contentEditSchema.optional() }), ['title', 'summary', 'status', 'povCharacterId', 'locationId', 'contentEdit']),
+  createChapter: z.object({ title: nonEmptyString, actId: optionalString, summary: optionalString, content: optionalString, status: chapterStatusSchema.optional(), povCharacterId: optionalString, locationId: optionalString }),
+  deleteChapter: z.object({ chapterId: nonEmptyString }),
+  restoreTrashChapter: z.object({ chapterId: nonEmptyString }),
+  purgeTrashChapter: z.object({ chapterId: nonEmptyString }),
+  createScene: z.object({ chapterId: nonEmptyString, title: optionalString, content: optionalString, order: z.number().optional(), povCharacterId: optionalString, locationId: optionalString }),
+  updateScene: withAtLeastOne(z.object({ sceneId: nonEmptyString, title: nullableString, content: optionalString, contentEdit: contentEditSchema.optional(), order: z.number().optional(), povCharacterId: nullableString, locationId: nullableString }), ['title', 'content', 'contentEdit', 'order', 'povCharacterId', 'locationId']),
+  deleteScene: z.object({ sceneId: nonEmptyString }),
+  updateStoryStructure: withAtLeastOne(z.object({ title: optionalString, genre: optionalString, perspective: optionalString, pov: optionalString, voice: optionalString, tone: optionalString, themes: stringArray.optional(), logline: optionalString, outline: optionalString, climax: optionalString }), ['title', 'genre', 'perspective', 'pov', 'voice', 'tone', 'themes', 'logline', 'outline', 'climax']),
+  createObstacle: z.object({ title: nonEmptyString, type: obstacleTypeSchema, description: optionalString, resolution: optionalString }),
+  updateObstacle: withAtLeastOne(z.object({ obstacleId: nonEmptyString, title: optionalString, type: obstacleTypeSchema.optional(), description: optionalString, resolution: optionalString, order: z.number().optional() }), ['title', 'type', 'description', 'resolution', 'order']),
+  deleteObstacle: z.object({ obstacleId: nonEmptyString }),
+  createProjectDoc: z.object({ title: nonEmptyString, kind: docKindSchema.optional(), content: optionalString }),
+  updateProjectDoc: withAtLeastOne(z.object({ docId: nonEmptyString, title: optionalString, kind: docKindSchema.optional(), contentEdit: contentEditSchema.optional() }), ['title', 'kind', 'contentEdit']),
+  deleteProjectDoc: z.object({ docId: nonEmptyString }),
+  createSubmission: z.object({ kind: z.enum(['chapter-edit', 'new-chapter']).optional(), title: nonEmptyString, message: optionalString, chapterId: optionalString, body: nonEmptyString, proposedTitle: optionalString, proposedNumber: z.number().optional(), proposedActId: nullableString }),
+  mergeSubmission: z.object({ submissionId: nonEmptyString }),
+  declineSubmission: z.object({ submissionId: nonEmptyString }),
+  commentSubmission: z.object({ submissionId: nonEmptyString, body: nonEmptyString, anchor: z.object({ side: z.enum(['base', 'head']), lineStart: z.number(), lineEnd: z.number() }).optional() }),
+  uploadAsset: z.object({ kind: assetKindSchema, filename: nonEmptyString, mimeType: nonEmptyString, base64: nonEmptyString }),
+  attachAsset: z.object({ assetId: nonEmptyString, entityType: attachmentEntitySchema, entityId: nonEmptyString, role: nonEmptyString, order: z.number().optional() }),
+  detachAsset: z.object({ attachmentId: nonEmptyString }),
+  updateMemberRole: z.object({ userId: nonEmptyString, role: roleSchema }),
+  removeMember: z.object({ userId: nonEmptyString }),
+  createInvite: z.object({ username: optionalString, email: optionalString, role: roleSchema.default('VIEWER') }).refine((input) => Boolean(input.username || input.email), { message: 'username or email is required' }),
+  revokeInvite: z.object({ inviteId: nonEmptyString }),
+  acceptInvite: z.object({ token: nonEmptyString }),
+  createBetaShareLink: z.object({ label: optionalString, expiresAt: nullableString, allowComments: z.boolean().optional(), chapterIds: stringArray.optional() }),
+  updateBetaShareLink: withAtLeastOne(z.object({ shareLinkId: nonEmptyString, label: nullableString, expiresAt: nullableString, allowComments: z.boolean().optional(), chapterIds: stringArray.optional() }), ['label', 'expiresAt', 'allowComments', 'chapterIds']),
+  revokeBetaShareLink: z.object({ shareLinkId: nonEmptyString }),
+  postBetaShareComment: z.object({ token: nonEmptyString, visitorName: nonEmptyString, body: nonEmptyString, chapterId: nullableString, lineStart: z.number().optional(), lineEnd: z.number().optional() })
+} satisfies Record<MutatingToolName, z.ZodTypeAny>;
+
+const mutationToolDescriptions = {
+  updateProject: 'Update project metadata. Include at least one metadata field to change.',
+  updateProjectAiSettings: 'Update project AI settings. Include at least one setting to change.',
+  createAct: 'Create an act. Requires title.',
+  updateAct: 'Update an act. Requires actId and at least title or chapterIds.',
+  deleteAct: 'Delete an act. Requires actId.',
+  updateCharacter: 'Update a character. Requires characterId and at least one character field to change.',
+  createCharacter: 'Create a character. Requires name.',
+  deleteCharacter: 'Delete a character. Requires characterId.',
+  createCharacterRelationship: 'Create a relationship between two existing characters. Requires fromCharacterId, toCharacterId, and type; note is optional.',
+  deleteCharacterRelationship: 'Delete a character relationship. Requires fromCharacterId and relationshipId.',
+  createLocation: 'Create a location. Requires name.',
+  updateLocation: 'Update a location. Requires locationId and at least one location field to change.',
+  deleteLocation: 'Delete a location. Requires locationId.',
+  updateChapter: 'Update a chapter. Requires chapterId and at least one field or contentEdit.',
+  createChapter: 'Create a chapter. Requires title.',
+  deleteChapter: 'Delete a chapter. Requires chapterId.',
+  restoreTrashChapter: 'Restore a trashed chapter. Requires chapterId.',
+  purgeTrashChapter: 'Permanently delete a trashed chapter. Requires chapterId.',
+  createScene: 'Create a scene in a chapter. Requires chapterId.',
+  updateScene: 'Update a scene. Requires sceneId and at least one scene field or contentEdit.',
+  deleteScene: 'Delete a scene. Requires sceneId.',
+  updateStoryStructure: 'Update story structure fields. Include at least one field to change.',
+  createObstacle: 'Create an obstacle. Requires title and type.',
+  updateObstacle: 'Update an obstacle. Requires obstacleId and at least one obstacle field to change.',
+  deleteObstacle: 'Delete an obstacle. Requires obstacleId.',
+  createProjectDoc: 'Create a project document. Requires title.',
+  updateProjectDoc: 'Update a project document. Requires docId and at least title, kind, or contentEdit.',
+  deleteProjectDoc: 'Delete a project document. Requires docId.',
+  createSubmission: 'Create a draft submission. Requires title and body.',
+  mergeSubmission: 'Merge a submission. Requires submissionId.',
+  declineSubmission: 'Decline a submission. Requires submissionId.',
+  commentSubmission: 'Comment on a submission. Requires submissionId and body.',
+  uploadAsset: 'Upload an asset from base64 data. Requires kind, filename, mimeType, and base64.',
+  attachAsset: 'Attach an existing asset. Requires assetId, entityType, entityId, and role.',
+  detachAsset: 'Detach an asset attachment. Requires attachmentId.',
+  updateMemberRole: 'Update a project member role. Requires userId and role.',
+  removeMember: 'Remove a project member. Requires userId.',
+  createInvite: 'Create a project invite. Requires username or email; role defaults to VIEWER.',
+  revokeInvite: 'Revoke an invite. Requires inviteId.',
+  acceptInvite: 'Accept an invite. Requires token.',
+  createBetaShareLink: 'Create a beta share link. All fields are optional.',
+  updateBetaShareLink: 'Update a beta share link. Requires shareLinkId and at least one field to change.',
+  revokeBetaShareLink: 'Revoke a beta share link. Requires shareLinkId.',
+  postBetaShareComment: 'Post a beta-reader comment. Requires token, visitorName, and body.'
+} satisfies Record<MutatingToolName, string>;
+
 export interface ApprovalHandler {
   handleApproval(toolName: MutatingToolName, input: unknown, execute: () => Promise<unknown>): Promise<unknown>;
 }
@@ -130,84 +290,56 @@ export function mutationTools(
     updateCharacter: approvalTool({
       description:
         'Update an existing character. Only `characterId` is required; include only fields to change. The user will approve/reject the proposal in the UI.',
-      inputSchema: z.object({
-        characterId: z.string().describe('ID of the character to update'),
-        name: z.string().optional().describe('New name for the character'),
-        role: z.string().optional().describe('Character role'),
-        age: z.string().optional().describe('Character age'),
-        occupation: z.string().optional().describe('Character occupation'),
-        traits: z.array(z.string()).optional().describe('List of personality traits'),
-        description: z.string().optional().describe('Character description/backstory'),
-        appearance: z.string().optional().describe('Physical appearance'),
-        motivation: z.string().optional().describe('What drives this character'),
-        arc: z.string().optional().describe('Character arc across the story')
-      }),
-      execute: async (input) => approval.handleApproval('updateCharacter', input, () => updateCharacter(prisma, context, input))
+      inputSchema: mutationToolSchemas.updateCharacter,
+      execute: async (input) => {
+        const validated = validateMutationInput('updateCharacter', input);
+        return approval.handleApproval('updateCharacter', validated, () => updateCharacter(prisma, context, validated));
+      }
     }),
     createCharacter: approvalTool({
       description:
         'Create a new character. Only `name` is required. The user will approve/reject the proposal in the UI.',
-      inputSchema: z.object({
-        name: z.string().describe('Character name (required)'),
-        role: z.string().optional().describe('Character role'),
-        age: z.string().optional().describe('Character age'),
-        occupation: z.string().optional().describe('Character occupation'),
-        traits: z.array(z.string()).optional().describe('List of personality traits'),
-        description: z.string().optional().describe('Character description/backstory'),
-        appearance: z.string().optional().describe('Physical appearance'),
-        motivation: z.string().optional().describe('What drives this character'),
-        arc: z.string().optional().describe('Character arc across the story')
-      }),
-      execute: async (input) => approval.handleApproval('createCharacter', input, () => createCharacter(prisma, context, input))
+      inputSchema: mutationToolSchemas.createCharacter,
+      execute: async (input) => {
+        const validated = validateMutationInput('createCharacter', input);
+        return approval.handleApproval('createCharacter', validated, () => createCharacter(prisma, context, validated));
+      }
     }),
     updateChapter: approvalTool({
       description:
         'Update chapter metadata and/or content by exact replacement. Use oldString/newString for manuscript edits instead of sending full content.',
-      inputSchema: z.object({
-        chapterId: z.string().describe('ID of the chapter to update'),
-        title: z.string().optional().describe('New chapter title'),
-        summary: z.string().optional().describe('Chapter summary'),
-        status: z.enum(['draft', 'in-progress', 'review', 'final']).optional().describe('Chapter status'),
-        povCharacterId: z.string().optional().describe('ID of the POV character'),
-        locationId: z.string().optional().describe('ID of the primary location'),
-        contentEdit: editContentInputSchema.optional().describe('Exact manuscript content replacement')
-      }),
-      execute: async (input) => approval.handleApproval('updateChapter', input, () => updateChapter(prisma, context, input))
+      inputSchema: mutationToolSchemas.updateChapter,
+      execute: async (input) => {
+        const validated = validateMutationInput('updateChapter', input);
+        return approval.handleApproval('updateChapter', validated, () => updateChapter(prisma, context, validated));
+      }
     }),
     createChapter: approvalTool({
       description:
         'Create a new chapter. Only `title` is required; everything else is optional. The user will approve/reject the proposal in the UI.',
-      inputSchema: z.object({
-        title: z.string().describe('Chapter title (required)'),
-        actId: z.string().optional().describe('ID of the act this chapter belongs to'),
-        summary: z.string().optional().describe('Chapter summary'),
-        content: z.string().optional().describe('Chapter manuscript content in markdown'),
-        status: z.enum(['draft', 'in-progress', 'review', 'final']).optional().describe('Chapter status'),
-        povCharacterId: z.string().optional().describe('ID of the POV character'),
-        locationId: z.string().optional().describe('ID of the primary location')
-      }),
-      execute: async (input) => approval.handleApproval('createChapter', input, () => createChapter(prisma, context, input))
+      inputSchema: mutationToolSchemas.createChapter,
+      execute: async (input) => {
+        const validated = validateMutationInput('createChapter', input);
+        return approval.handleApproval('createChapter', validated, () => createChapter(prisma, context, validated));
+      }
     }),
     createProjectDoc: approvalTool({
       description:
         'Create a new project document (note, brainstorm, instruction, or reference). Only `title` is required. The user will approve/reject the proposal in the UI.',
-      inputSchema: z.object({
-        title: z.string().describe('Document title (required)'),
-        kind: z.enum(['note', 'brainstorm', 'instructions', 'reference', 'other']).optional().describe('Document kind'),
-        content: z.string().optional().describe('Document body in markdown')
-      }),
-      execute: async (input) => approval.handleApproval('createProjectDoc', input, () => createProjectDoc(prisma, context, input))
+      inputSchema: mutationToolSchemas.createProjectDoc,
+      execute: async (input) => {
+        const validated = validateMutationInput('createProjectDoc', input);
+        return approval.handleApproval('createProjectDoc', validated, () => createProjectDoc(prisma, context, validated));
+      }
     }),
     updateProjectDoc: approvalTool({
       description:
         'Update document metadata and/or content by exact replacement. Use oldString/newString for body edits instead of sending full content.',
-      inputSchema: z.object({
-        docId: z.string().describe('ID of the document to update'),
-        title: z.string().optional().describe('New document title'),
-        kind: z.enum(['note', 'brainstorm', 'instructions', 'reference', 'other']).optional().describe('Document kind'),
-        contentEdit: editContentInputSchema.optional().describe('Exact document body replacement')
-      }),
-      execute: async (input) => approval.handleApproval('updateProjectDoc', input, () => updateProjectDoc(prisma, context, input))
+      inputSchema: mutationToolSchemas.updateProjectDoc,
+      execute: async (input) => {
+        const validated = validateMutationInput('updateProjectDoc', input);
+        return approval.handleApproval('updateProjectDoc', validated, () => updateProjectDoc(prisma, context, validated));
+      }
     })
   } as Record<MutatingToolName, Tool<any, any>>;
 }
@@ -221,12 +353,29 @@ function genericMutationTools(
     mutatingToolNames.map((name) => [
       name,
       approvalTool({
-        description: `${name}: approval-gated project mutation. Include the ids and fields required by the matching backend operation.`,
-        inputSchema: z.object({}).passthrough(),
-        execute: async (input) => approval.handleApproval(name, input, () => executeMutationTool(prisma, context, name, input))
+        description: `${name}: ${mutationToolDescriptions[name]} The user will approve/reject the proposal in the UI.`,
+        inputSchema: mutationToolSchemas[name],
+        execute: async (input) => {
+          const validated = validateMutationInput(name, input);
+          return approval.handleApproval(name, validated, () => executeMutationTool(prisma, context, name, validated));
+        }
       })
     ])
   ) as Record<MutatingToolName, Tool<any, any>>;
+}
+
+function validateMutationInput(toolName: MutatingToolName, input: unknown): Record<string, unknown> {
+  if (toolName === 'createBetaShareLink' && (input === undefined || input === null)) return {};
+  const parsed = mutationToolSchemas[toolName].safeParse(input);
+  if (!parsed.success) {
+    const message = parsed.error.issues.map((issue) => {
+      const path = issue.path.length ? `${issue.path.join('.')}: ` : '';
+      return `${path}${issue.message}`;
+    }).join('; ');
+    throw new HttpError(400, `${toolName} input is invalid: ${message}`);
+  }
+  if (!parsed.data || typeof parsed.data !== 'object' || Array.isArray(parsed.data)) return {};
+  return parsed.data as Record<string, unknown>;
 }
 
 function approvalTool(config: ApprovalToolConfig): Tool<any, any> {
