@@ -5,6 +5,7 @@ import type {
   CollaborationEdit,
   CollaborationEditInput,
   CollaborationEvent,
+  CollaborationLeaveInput,
   CollaborationLocation,
   CollaborationPresence,
   CollaborationPresenceInput,
@@ -25,6 +26,7 @@ type RuntimeDocument = {
 };
 
 const MAX_HISTORY = 500;
+const SSE_HEARTBEAT_MS = 15_000;
 const documents = new Map<string, RuntimeDocument>();
 const projectClients = new Map<string, Set<Response>>();
 
@@ -63,17 +65,23 @@ export class CollaborationUseCase {
     res.setHeader('connection', 'keep-alive');
     res.flushHeaders?.();
 
+    const existingClient = doc.clients.get(clientId);
+    if (existingClient && existingClient !== res) existingClient.end();
     doc.clients.set(clientId, res);
     writeEvent(res, { type: 'snapshot', snapshot: toSnapshot(doc) });
     this.broadcast(doc, { type: 'presence', presence }, clientId);
     this.broadcastProject(projectId);
 
-    res.on('close', () => {
+    const cleanup = () => {
+      clearInterval(heartbeat);
+      if (doc.clients.get(clientId) !== res) return;
       doc.clients.delete(clientId);
       doc.presence.delete(clientId);
       this.broadcast(doc, { type: 'leave', clientId }, clientId);
       this.broadcastProject(projectId);
-    });
+    };
+    const heartbeat = keepEventStreamAlive(res, cleanup);
+    res.on('close', cleanup);
   }
 
   async subscribeProject(userId: string, projectId: string, res: Response): Promise<void> {
@@ -86,7 +94,23 @@ export class CollaborationUseCase {
     const clients = getProjectClients(projectId);
     clients.add(res);
     writeEvent(res, this.projectPresenceEvent(projectId));
-    res.on('close', () => clients.delete(res));
+    const cleanup = () => {
+      clearInterval(heartbeat);
+      clients.delete(res);
+    };
+    const heartbeat = keepEventStreamAlive(res, cleanup);
+    res.on('close', cleanup);
+  }
+
+  async leaveProject(
+    userId: string,
+    projectId: string,
+    input: CollaborationLeaveInput
+  ): Promise<CollaborationEvent> {
+    await this.access.assertProjectAccess(userId, projectId);
+    if (!input.clientId) throw new HttpError(400, 'clientId is required');
+    this.removeProjectClient(projectId, input.clientId);
+    return this.projectPresenceEvent(projectId);
   }
 
   async applyEdit(
@@ -207,14 +231,35 @@ export class CollaborationUseCase {
     for (const client of getProjectClients(projectId)) writeEvent(client, event);
   }
 
-  private projectPresenceEvent(projectId: string): CollaborationEvent {
-    const collaborators: CollaborationPresence[] = [];
+  private removeProjectClient(projectId: string, clientId: string): void {
     const prefix = `${projectId}:`;
     for (const [key, doc] of documents) {
       if (!key.startsWith(prefix)) continue;
-      collaborators.push(...doc.presence.values());
+      const client = doc.clients.get(clientId);
+      if (client) {
+        doc.clients.delete(clientId);
+        client.end();
+      }
+      if (doc.presence.delete(clientId)) {
+        this.broadcast(doc, { type: 'leave', clientId }, clientId);
+      }
     }
-    return { type: 'project-presence', collaborators };
+    this.broadcastProject(projectId);
+  }
+
+  private projectPresenceEvent(projectId: string): CollaborationEvent {
+    const collaborators = new Map<string, CollaborationPresence>();
+    const prefix = `${projectId}:`;
+    for (const [key, doc] of documents) {
+      if (!key.startsWith(prefix)) continue;
+      for (const presence of doc.presence.values()) {
+        const existing = collaborators.get(presence.clientId);
+        if (!existing || shouldReplaceProjectPresence(existing, presence)) {
+          collaborators.set(presence.clientId, presence);
+        }
+      }
+    }
+    return { type: 'project-presence', collaborators: Array.from(collaborators.values()) };
   }
 
   private async getUser(userId: string): Promise<CollaborationUser> {
@@ -358,6 +403,15 @@ function toSnapshot(doc: RuntimeDocument): CollaborationSnapshot {
   };
 }
 
+function shouldReplaceProjectPresence(
+  existing: CollaborationPresence,
+  candidate: CollaborationPresence
+): boolean {
+  if (candidate.focused !== existing.focused) return candidate.focused;
+  if (Boolean(candidate.location) !== Boolean(existing.location)) return Boolean(candidate.location);
+  return candidate.updatedAt > existing.updatedAt;
+}
+
 function transformChanges(
   changes: CollaborationTextChange[],
   history: CollaborationEdit[],
@@ -419,6 +473,22 @@ function currentBody(writing: {
 
 function writeEvent(res: Response, event: CollaborationEvent): void {
   res.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+function keepEventStreamAlive(res: Response, cleanup: () => void): NodeJS.Timeout {
+  return setInterval(() => {
+    if (res.destroyed || res.writableEnded) {
+      cleanup();
+      return;
+    }
+    try {
+      res.write(': heartbeat\n\n', (error) => {
+        if (error) cleanup();
+      });
+    } catch {
+      cleanup();
+    }
+  }, SSE_HEARTBEAT_MS);
 }
 
 function getProjectClients(projectId: string): Set<Response> {

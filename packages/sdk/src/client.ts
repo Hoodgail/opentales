@@ -40,6 +40,7 @@ import type {
   CollaborationDocumentRef,
   CollaborationEditInput,
   CollaborationEvent,
+  CollaborationLeaveInput,
   CollaborationPresenceInput,
   ListProjectDocsInput,
   PaginatedProjectDocs,
@@ -92,7 +93,7 @@ export interface OpenTalesClientOptions {
 
 export class OpenTalesClient {
   private token?: string;
-  private readonly baseUrl: string;
+  readonly baseUrl: string;
   private readonly fetcher: typeof fetch;
 
   constructor(options: OpenTalesClientOptions) {
@@ -716,6 +717,13 @@ export class OpenTalesClient {
       `/projects/${projectId}/collaboration/documents/${encodeURIComponent(document.kind)}/${encodeURIComponent(document.entityId)}/${encodeURIComponent(document.field)}/presence`,
       { method: 'POST', body: input }
     );
+  }
+
+  leaveProjectCollaboration(projectId: string, input: CollaborationLeaveInput): Promise<CollaborationEvent> {
+    return this.request<CollaborationEvent>(`/projects/${projectId}/collaboration/leave`, {
+      method: 'POST',
+      body: input
+    });
   }
 
   async streamProjectCollaboration(

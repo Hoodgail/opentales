@@ -178,6 +178,10 @@ export interface CollaborationPresenceInput {
   location?: CollaborationLocation | null;
 }
 
+export interface CollaborationLeaveInput {
+  clientId: string;
+}
+
 export interface CollaborationLocation {
   tabType: 'chapter' | 'character' | 'location' | 'structure' | 'outline' | 'submission' | 'doc' | 'ai-approval';
   refId: string;

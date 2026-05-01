@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import type {
   CollaborationDocumentRef,
   CollaborationEditInput,
+  CollaborationLeaveInput,
   CollaborationPresenceInput
 } from '@opentales/sdk';
 import { prisma } from '../config/prisma.js';
@@ -27,6 +28,16 @@ export class CollaborationController {
 
   projectEvents = async (req: Request, res: Response) => {
     await this.useCase.subscribeProject(this.userId(req), req.params.projectId, res);
+  };
+
+  leave = async (req: Request, res: Response) => {
+    res.json(
+      await this.useCase.leaveProject(
+        this.userId(req),
+        req.params.projectId,
+        req.body as CollaborationLeaveInput
+      )
+    );
   };
 
   edit = async (req: Request, res: Response) => {

@@ -31,6 +31,7 @@ projectRoutes.get(
   '/:projectId/collaboration/documents/:kind/:entityId/:field/events',
   asyncHandler(collaboration.events)
 );
+projectRoutes.post('/:projectId/collaboration/leave', asyncHandler(collaboration.leave));
 projectRoutes.post(
   '/:projectId/collaboration/documents/:kind/:entityId/:field/presence',
   asyncHandler(collaboration.presence)

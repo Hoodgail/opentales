@@ -29,9 +29,15 @@ export function syncCollaborationToken(token: string | undefined) {
   api.setToken(token);
 }
 
+let tabClientId: string | null = null;
+
 export function createCollaborationClientId(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
-  return `client-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  if (tabClientId) return tabClientId;
+  tabClientId =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `client-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return tabClientId;
 }
 
 function createStore() {
@@ -39,13 +45,16 @@ function createStore() {
   let followedClientId = $state<string | null>(null);
   let projectId = $state<string | null>(null);
   let abort: AbortController | null = null;
+  let pagehideCleanup: (() => void) | null = null;
 
   function connect(nextProjectId: string | null) {
     if (!browser || projectId === nextProjectId) return;
+    leaveProject();
     abort?.abort();
     projectId = nextProjectId;
     collaborators.splice(0, collaborators.length);
     if (!nextProjectId) return;
+    registerPagehideCleanup(nextProjectId);
 
     abort = new AbortController();
     void api
@@ -65,6 +74,36 @@ function createStore() {
         if (abort?.signal.aborted) return;
         console.warn('Project collaboration stream failed', error);
       });
+  }
+
+  function leaveProject() {
+    pagehideCleanup?.();
+    pagehideCleanup = null;
+    if (!projectId) return;
+    void api
+      .leaveProjectCollaboration(projectId, { clientId: createCollaborationClientId() })
+      .catch((error) => console.warn('Project collaboration leave failed', error));
+  }
+
+  function registerPagehideCleanup(nextProjectId: string) {
+    const clientId = createCollaborationClientId();
+    const token = browserLocalStorage().getItem('opentales.token');
+    const leave = () => {
+      const body = JSON.stringify({ clientId });
+      const url = `${api.baseUrl}/projects/${nextProjectId}/collaboration/leave`;
+      void fetch(url, {
+        method: 'POST',
+        headers: {
+          accept: 'application/json',
+          authorization: token ? `Bearer ${token}` : '',
+          'content-type': 'application/json'
+        },
+        body,
+        keepalive: true
+      });
+    };
+    window.addEventListener('pagehide', leave, { once: true });
+    pagehideCleanup = () => window.removeEventListener('pagehide', leave);
   }
 
   function currentLocation(field?: string): CollaborationLocation | null {
