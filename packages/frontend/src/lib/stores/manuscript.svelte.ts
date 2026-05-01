@@ -30,6 +30,7 @@ import {
   type UpdateProjectInput
 } from '@opentales/sdk';
 import { syncAiToken } from '$lib/stores/ai.svelte';
+import { syncCollaborationToken } from '$lib/stores/collaboration.svelte';
 import type {
   Act,
   ActivityView,
@@ -229,6 +230,7 @@ function createStore() {
       const session = await api.login({ emailOrUsername, password });
       browserLocalStorage().setItem('opentales.token', session.token);
       syncAiToken(session.token);
+      syncCollaborationToken(session.token);
       authenticated = true;
       await loadProject();
     } catch (caught) {
@@ -254,6 +256,7 @@ function createStore() {
       const session = await api.register(input);
       browserLocalStorage().setItem('opentales.token', session.token);
       syncAiToken(session.token);
+      syncCollaborationToken(session.token);
       authenticated = true;
       await loadProject();
     } catch (caught) {
@@ -269,6 +272,7 @@ function createStore() {
   async function logout() {
     api.setToken(undefined);
     syncAiToken(undefined);
+    syncCollaborationToken(undefined);
     browserLocalStorage().removeItem('opentales.token');
     authenticated = false;
     error = null;

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Activity, Calendar, FileText, Hash, Target } from 'lucide-svelte';
+  import { liveTextField } from '$lib/actions/liveTextField';
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import type { Chapter, ChapterStatus } from '$lib/data/manuscript-types';
   import InspectorGroup from './InspectorGroup.svelte';
@@ -64,6 +65,11 @@
         <input
           id="chapter-title-{chapter.id}"
           value={chapter.title}
+          use:liveTextField={{
+            document: { kind: 'chapter', entityId: chapter.id, field: 'title' },
+            getValue: () => chapter.title,
+            onRemoteValue: (value) => manuscript.updateChapter(chapter.id, { title: value })
+          }}
           onchange={setTitle}
           class="w-full rounded border border-border bg-background px-2 py-1 text-sm text-foreground outline-none focus:border-accent/60"
         />
@@ -152,6 +158,11 @@
       <div class="px-3 py-2">
         <textarea
           value={chapter.summary}
+          use:liveTextField={{
+            document: { kind: 'chapter', entityId: chapter.id, field: 'summary' },
+            getValue: () => chapter.summary,
+            onRemoteValue: (value) => manuscript.updateChapter(chapter.id, { summary: value })
+          }}
           oninput={setSummary}
           rows={5}
           placeholder="A short synopsis of this chapter…"

@@ -1,6 +1,13 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { browser } from '$app/environment';
+  import { manuscript } from '$lib/stores/manuscript.svelte';
+  import {
+    collaboration as collaborationStore,
+    collaborationApi,
+    createCollaborationClientId,
+    type CollaborationDocumentRef
+  } from '$lib/stores/collaboration.svelte';
   import { preferences } from '$lib/stores/preferences.svelte';
   import { editorTheme, editorThemes, type EditorThemeId } from '$lib/stores/editorTheme.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
@@ -12,11 +19,19 @@
     value: string;
     onChange: (next: string) => void;
     onSelectionChange?: (selectedText: string) => void;
+    collaboration?: CollaborationDocumentRef;
     language?: string;
     compact?: boolean;
   }
 
-  let { value, onChange, onSelectionChange, language = 'markdown', compact = false }: Props = $props();
+  let {
+    value,
+    onChange,
+    onSelectionChange,
+    collaboration,
+    language = 'markdown',
+    compact = false
+  }: Props = $props();
 
   function monacoThemeFor(id: EditorThemeId): string {
     return editorThemes.find((t) => t.id === id)?.monacoTheme ?? 'manuscript-dark';
@@ -142,7 +157,13 @@
   let monaco = $state<Monaco | null>(null);
   let disposing = false;
   let suppressNext = false;
+  let suppressCollaboration = false;
+  let collaborationAbort: AbortController | null = null;
+  let collaborationRevision = 0;
+  let collaborationClientId = '';
+  let collaborationKey: string | null = null;
   let focusDecorations: import('monaco-editor').editor.IEditorDecorationsCollection | null = null;
+  let remoteCursorDecorations: import('monaco-editor').editor.IEditorDecorationsCollection | null = null;
 
   onMount(() => {
     if (!browser) return;
@@ -222,18 +243,21 @@
       });
 
       focusDecorations = editor.createDecorationsCollection([]);
+      remoteCursorDecorations = editor.createDecorationsCollection([]);
 
-      editor.onDidChangeModelContent(() => {
+      editor.onDidChangeModelContent((event) => {
         if (suppressNext) {
           suppressNext = false;
           return;
         }
         if (!editor || disposing) return;
         onChange(editor.getValue());
+        if (!suppressCollaboration) sendCollaborationEdit(event);
         updateFocusDecorations();
       });
 
       editor.onDidChangeCursorPosition(() => updateFocusDecorations());
+      editor.onDidChangeCursorPosition(() => sendCollaborationPresence(true));
 
       // Track text selection changes and report to parent
       editor.onDidChangeCursorSelection(() => {
@@ -261,8 +285,92 @@
     if (!editor) return;
     if (editor.getValue() === value) return;
     suppressNext = true;
-    editor.setValue(value);
+    suppressCollaboration = true;
+    try {
+      editor.setValue(value);
+    } finally {
+      suppressCollaboration = false;
+    }
     updateFocusDecorations();
+  });
+
+  $effect(() => {
+    if (!editor || !browser || !collaboration || !manuscript.projectId) return;
+    const nextKey = collaborationDocumentKey(manuscript.projectId, collaboration);
+    if (nextKey === collaborationKey) return;
+    collaborationKey = nextKey;
+    collaborationRevision = 0;
+    collaborationClientId = createCollaborationClientId();
+    collaborationAbort?.abort();
+    collaborationAbort = new AbortController();
+
+    void collaborationApi.streamCollaborationDocument(
+      manuscript.projectId,
+      collaboration,
+      collaborationClientId,
+      (event) => {
+        if (!editor) return;
+        if (event.type === 'snapshot') {
+          collaborationRevision = event.snapshot.revision;
+          updateRemoteCursors();
+          if (event.snapshot.content !== editor.getValue()) {
+            suppressNext = true;
+            suppressCollaboration = true;
+            try {
+              editor.setValue(event.snapshot.content);
+            } finally {
+              suppressCollaboration = false;
+            }
+            onChange(event.snapshot.content);
+          }
+          return;
+        }
+        if (event.type === 'presence') {
+          updateRemoteCursors();
+          return;
+        }
+        if (event.type === 'leave') {
+          updateRemoteCursors();
+          return;
+        }
+        if (event.type !== 'edit') return;
+        if (event.edit.clientId === collaborationClientId) {
+          collaborationRevision = Math.max(collaborationRevision, event.edit.revision);
+          updateRemoteCursors();
+          return;
+        }
+        const model = editor.getModel();
+        if (!model || !monaco) return;
+        suppressNext = true;
+        suppressCollaboration = true;
+        try {
+          editor.executeEdits(
+            'opentales-collaboration',
+            event.edit.changes.map((change) => ({
+              range: rangeFromOffsets(model, change.rangeOffset, change.rangeLength),
+              text: change.text,
+              forceMoveMarkers: true
+            }))
+          );
+        } finally {
+          suppressCollaboration = false;
+        }
+        collaborationRevision = Math.max(collaborationRevision, event.edit.revision);
+        onChange(editor.getValue());
+        updateRemoteCursors();
+        updateFocusDecorations();
+      },
+      { signal: collaborationAbort.signal }
+    ).catch((error) => {
+      if (collaborationAbort?.signal.aborted) return;
+      console.warn('Collaboration stream failed', error);
+    });
+
+    return () => {
+      sendCollaborationPresence(false);
+      collaborationAbort?.abort();
+      collaborationAbort = null;
+    };
   });
 
   // Apply preferences live as the user toggles them.
@@ -328,6 +436,30 @@
     focusDecorations.set(decorations);
   }
 
+  function updateRemoteCursors() {
+    if (!editor || !monaco || !remoteCursorDecorations || !collaboration) return;
+    const decorations = collaborationStore.collaborators
+      .filter(
+        (presence) =>
+          presence.clientId !== collaborationClientId &&
+          sameDocument(presence.document, collaboration) &&
+          presence.selection
+      )
+      .map((presence, index) => ({
+        range: new monaco!.Range(
+          presence.selection!.lineNumber,
+          presence.selection!.column,
+          presence.selection!.lineNumber,
+          presence.selection!.column
+        ),
+        options: {
+          className: `opentales-remote-cursor opentales-remote-cursor-${index % 6}`,
+          hoverMessage: { value: presence.user.name ?? presence.user.username }
+        }
+      }));
+    remoteCursorDecorations.set(decorations);
+  }
+
   // Reactively switch Monaco's theme when the user picks a new one.
   $effect(() => {
     const themeId = editorTheme.current;
@@ -337,9 +469,64 @@
 
   onDestroy(() => {
     disposing = true;
+    sendCollaborationPresence(false);
+    collaborationAbort?.abort();
     editor?.dispose();
     editor = null;
   });
+
+  function collaborationDocumentKey(projectId: string, document: CollaborationDocumentRef): string {
+    return `${projectId}:${document.kind}:${document.entityId}:${document.field}`;
+  }
+
+  function rangeFromOffsets(
+    model: import('monaco-editor').editor.ITextModel,
+    rangeOffset: number,
+    rangeLength: number
+  ) {
+    const start = model.getPositionAt(Math.min(rangeOffset, model.getValueLength()));
+    const end = model.getPositionAt(Math.min(rangeOffset + rangeLength, model.getValueLength()));
+    return new monaco!.Range(start.lineNumber, start.column, end.lineNumber, end.column);
+  }
+
+  function sendCollaborationEdit(event: import('monaco-editor').editor.IModelContentChangedEvent) {
+    if (!collaboration || !manuscript.projectId || !collaborationClientId) return;
+    const selection = editor?.getPosition();
+    void collaborationApi
+      .applyCollaborationEdit(manuscript.projectId, collaboration, {
+        clientId: collaborationClientId,
+        baseRevision: collaborationRevision,
+        changes: event.changes.map((change) => ({
+          rangeOffset: change.rangeOffset,
+          rangeLength: change.rangeLength,
+          text: change.text
+        })),
+        selection: selection ? { lineNumber: selection.lineNumber, column: selection.column } : null,
+        focused: true,
+        location: collaborationStore.currentLocation(collaboration.field)
+      })
+      .then((response) => {
+        if (response.type === 'edit') collaborationRevision = response.edit.revision;
+      })
+      .catch((error) => console.warn('Collaboration edit failed', error));
+  }
+
+  function sendCollaborationPresence(focused: boolean) {
+    if (!collaboration || !manuscript.projectId || !collaborationClientId) return;
+    const selection = editor?.getPosition();
+    void collaborationApi
+      .updateCollaborationPresence(manuscript.projectId, collaboration, {
+        clientId: collaborationClientId,
+        selection: selection ? { lineNumber: selection.lineNumber, column: selection.column } : null,
+        focused,
+        location: focused ? collaborationStore.currentLocation(collaboration.field) : null
+      })
+      .catch((error) => console.warn('Collaboration presence failed', error));
+  }
+
+  function sameDocument(a: CollaborationDocumentRef, b: CollaborationDocumentRef): boolean {
+    return a.kind === b.kind && a.entityId === b.entityId && a.field === b.field;
+  }
 </script>
 
 <div bind:this={container} class="h-full w-full"></div>
@@ -349,4 +536,15 @@
     opacity: 0.35;
     transition: opacity 120ms ease-out;
   }
+
+  :global(.opentales-remote-cursor) {
+    border-left: 2px solid #34d399;
+    margin-left: -1px;
+  }
+
+  :global(.opentales-remote-cursor-1) { border-left-color: #60a5fa; }
+  :global(.opentales-remote-cursor-2) { border-left-color: #f472b6; }
+  :global(.opentales-remote-cursor-3) { border-left-color: #fbbf24; }
+  :global(.opentales-remote-cursor-4) { border-left-color: #a78bfa; }
+  :global(.opentales-remote-cursor-5) { border-left-color: #fb7185; }
 </style>

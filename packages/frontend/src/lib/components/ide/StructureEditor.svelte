@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Compass, Eye, MountainSnow, Plus, ShieldAlert, Tag, Trash2, Volume2, Zap } from 'lucide-svelte';
   import type { ObstacleType } from '@opentales/sdk';
+  import { liveTextField } from '$lib/actions/liveTextField';
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import { cn } from '$lib/utils';
   import ExpandableMarkdownEditor from './ExpandableMarkdownEditor.svelte';
@@ -38,6 +39,11 @@
       <div class="mb-6">
         <input
           value={manuscript.structure.title}
+          use:liveTextField={{
+            document: { kind: 'structure', entityId: manuscript.projectId ?? 'structure', field: 'title' },
+            getValue: () => manuscript.structure.title,
+            onRemoteValue: (value) => manuscript.updateStructure({ title: value })
+          }}
           oninput={(e) =>
             void manuscript.updateStructure({
               title: (e.currentTarget as HTMLInputElement).value
@@ -59,6 +65,7 @@
         icon={Tag}
         contextLabel={manuscript.structure.title}
         height="h-28"
+        collaboration={{ kind: 'structure', entityId: manuscript.projectId ?? 'structure', field: 'logline' }}
       />
 
       <!-- Voice & POV grid -->
@@ -70,6 +77,7 @@
           icon={Eye}
           contextLabel={manuscript.structure.title}
           height="h-28"
+          collaboration={{ kind: 'structure', entityId: manuscript.projectId ?? 'structure', field: 'perspective' }}
         />
 
         <ExpandableMarkdownEditor
@@ -79,6 +87,7 @@
           icon={Eye}
           contextLabel={manuscript.structure.title}
           height="h-28"
+          collaboration={{ kind: 'structure', entityId: manuscript.projectId ?? 'structure', field: 'pov' }}
         />
 
         <ExpandableMarkdownEditor
@@ -88,6 +97,7 @@
           icon={Volume2}
           contextLabel={manuscript.structure.title}
           height="h-28"
+          collaboration={{ kind: 'structure', entityId: manuscript.projectId ?? 'structure', field: 'voice' }}
         />
 
         <ExpandableMarkdownEditor
@@ -97,6 +107,7 @@
           icon={Volume2}
           contextLabel={manuscript.structure.title}
           height="h-28"
+          collaboration={{ kind: 'structure', entityId: manuscript.projectId ?? 'structure', field: 'tone' }}
         />
       </div>
 
@@ -109,6 +120,7 @@
         contextLabel={manuscript.structure.title}
         height="h-32"
         class="mt-4"
+        collaboration={{ kind: 'structure', entityId: manuscript.projectId ?? 'structure', field: 'themes' }}
       />
 
       <!-- Outline -->
@@ -120,6 +132,7 @@
         contextLabel={manuscript.structure.title}
         height="h-80"
         class="mt-4"
+        collaboration={{ kind: 'structure', entityId: manuscript.projectId ?? 'structure', field: 'outline' }}
       />
 
       <!-- Obstacles -->
@@ -169,6 +182,11 @@
                   </select>
                   <input
                     value={o.title}
+                    use:liveTextField={{
+                      document: { kind: 'obstacle', entityId: o.id, field: 'title' },
+                      getValue: () => o.title,
+                      onRemoteValue: (value) => manuscript.updateObstacle(o.id, { title: value })
+                    }}
                     onchange={(e) =>
                       void manuscript.updateObstacle(o.id, {
                         title: (e.currentTarget as HTMLInputElement).value
@@ -194,6 +212,7 @@
                     contextLabel={o.title}
                     height="h-20"
                     class="border-0"
+                    collaboration={{ kind: 'obstacle', entityId: o.id, field: 'description' }}
                   />
                 </div>
                 <div
@@ -209,6 +228,7 @@
                       contextLabel={o.title}
                       height="h-20"
                       class="border-0"
+                      collaboration={{ kind: 'obstacle', entityId: o.id, field: 'resolution' }}
                     />
                   </div>
                 </div>
@@ -227,6 +247,7 @@
         contextLabel={manuscript.structure.title}
         height="h-52"
         class="mt-4"
+        collaboration={{ kind: 'structure', entityId: manuscript.projectId ?? 'structure', field: 'climax' }}
       />
     </div>
   </div>

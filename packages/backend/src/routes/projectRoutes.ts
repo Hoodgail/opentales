@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { AiController } from '../controllers/AiController.js';
+import { CollaborationController } from '../controllers/CollaborationController.js';
 import { ProjectDocController } from '../controllers/ProjectDocController.js';
 import { ProjectController } from '../controllers/ProjectController.js';
 import { StatsController } from '../controllers/StatsController.js';
@@ -9,6 +10,7 @@ import { requireAuth } from '../middleware/authMiddleware.js';
 
 const controller = new ProjectController();
 const ai = new AiController();
+const collaboration = new CollaborationController();
 const docs = new ProjectDocController();
 const trash = new TrashController();
 const stats = new StatsController();
@@ -19,6 +21,24 @@ projectRoutes.get('/', asyncHandler(controller.list));
 projectRoutes.post('/', asyncHandler(controller.create));
 projectRoutes.get('/:projectId', asyncHandler(controller.get));
 projectRoutes.patch('/:projectId', asyncHandler(controller.update));
+
+projectRoutes.get(
+  '/:projectId/collaboration/documents/:kind/:entityId/:field',
+  asyncHandler(collaboration.snapshot)
+);
+projectRoutes.get('/:projectId/collaboration/events', asyncHandler(collaboration.projectEvents));
+projectRoutes.get(
+  '/:projectId/collaboration/documents/:kind/:entityId/:field/events',
+  asyncHandler(collaboration.events)
+);
+projectRoutes.post(
+  '/:projectId/collaboration/documents/:kind/:entityId/:field/presence',
+  asyncHandler(collaboration.presence)
+);
+projectRoutes.post(
+  '/:projectId/collaboration/documents/:kind/:entityId/:field/edits',
+  asyncHandler(collaboration.edit)
+);
 
 projectRoutes.get('/:projectId/ai-settings', asyncHandler(ai.getSettings));
 projectRoutes.patch('/:projectId/ai-settings', asyncHandler(ai.updateSettings));

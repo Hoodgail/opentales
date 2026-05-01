@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Loader2 } from 'lucide-svelte';
   import type { ProjectDoc, ProjectDocKind } from '@opentales/sdk';
+  import { liveTextField } from '$lib/actions/liveTextField';
   import { ai } from '$lib/stores/ai.svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import MonacoMarkdownEditor from './MonacoMarkdownEditor.svelte';
@@ -96,6 +97,15 @@
       <input
         type="text"
         value={doc.title}
+        use:liveTextField={{
+          document: { kind: 'doc', entityId: doc.id, field: 'title' },
+          getValue: () => doc?.title ?? '',
+          onRemoteValue: (value) => {
+            if (!doc || !projectId) return;
+            doc.title = value;
+            void ai.updateDoc(projectId, doc.id, { title: value });
+          }
+        }}
         onblur={updateTitle}
         class="min-w-0 flex-1 bg-transparent text-foreground outline-none focus:border-b focus:border-accent"
       />
@@ -117,7 +127,11 @@
 
     <!-- Editor -->
     <div class="min-h-0 flex-1">
-      <MonacoMarkdownEditor value={localContent} onChange={handleChange} />
+      <MonacoMarkdownEditor
+        value={localContent}
+        onChange={handleChange}
+        collaboration={{ kind: 'doc', entityId: doc.id, field: 'content' }}
+      />
     </div>
   </div>
 {/if}

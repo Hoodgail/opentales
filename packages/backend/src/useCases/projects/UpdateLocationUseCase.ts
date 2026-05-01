@@ -19,7 +19,7 @@ export class UpdateLocationUseCase {
     locationId: string,
     input: UpdateLocationInput
   ): Promise<Location> {
-    await this.access.assertProjectAccess(userId, projectId);
+    await this.access.assertPermission(userId, projectId, 'project:write');
 
     await this.prisma.$transaction(async (tx) => {
       const location = await tx.location.findFirst({

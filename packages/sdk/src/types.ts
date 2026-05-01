@@ -7,6 +7,13 @@ export type ProjectVisibility = 'private' | 'public';
 export type AiProviderKind = 'gateway' | 'openai-compatible';
 export type AiRewriteMode = 'tighter' | 'softer' | 'more-visceral' | 'more-lyrical';
 export type ProjectDocKind = 'note' | 'brainstorm' | 'instructions' | 'reference' | 'other';
+export type CollaborationDocumentKind =
+  | 'chapter'
+  | 'character'
+  | 'location'
+  | 'structure'
+  | 'obstacle'
+  | 'doc';
 
 export interface AuthUser {
   id: string;
@@ -114,6 +121,83 @@ export interface ProjectDoc {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface CollaborationDocumentRef {
+  kind: CollaborationDocumentKind;
+  entityId: string;
+  field: string;
+}
+
+export interface CollaborationUser {
+  id: string;
+  username: string;
+  name: string | null;
+}
+
+export interface CollaborationTextChange {
+  rangeOffset: number;
+  rangeLength: number;
+  text: string;
+}
+
+export interface CollaborationEditInput {
+  clientId: string;
+  baseRevision: number;
+  changes: CollaborationTextChange[];
+  selection?: {
+    lineNumber: number;
+    column: number;
+  } | null;
+  focused?: boolean;
+  location?: CollaborationLocation | null;
+}
+
+export interface CollaborationEdit {
+  id: string;
+  clientId: string;
+  revision: number;
+  user: CollaborationUser;
+  changes: CollaborationTextChange[];
+  selection: CollaborationEditInput['selection'];
+}
+
+export interface CollaborationPresence {
+  clientId: string;
+  user: CollaborationUser;
+  selection: CollaborationEditInput['selection'];
+  document: CollaborationDocumentRef;
+  focused: boolean;
+  location: CollaborationLocation | null;
+  updatedAt: string;
+}
+
+export interface CollaborationPresenceInput {
+  clientId: string;
+  selection?: CollaborationEditInput['selection'];
+  focused?: boolean;
+  location?: CollaborationLocation | null;
+}
+
+export interface CollaborationLocation {
+  tabType: 'chapter' | 'character' | 'location' | 'structure' | 'outline' | 'submission' | 'doc' | 'ai-approval';
+  refId: string;
+  title: string;
+  field?: string;
+}
+
+export interface CollaborationSnapshot {
+  document: CollaborationDocumentRef;
+  revision: number;
+  content: string;
+  collaborators: CollaborationPresence[];
+}
+
+export type CollaborationEvent =
+  | { type: 'snapshot'; snapshot: CollaborationSnapshot }
+  | { type: 'edit'; edit: CollaborationEdit }
+  | { type: 'presence'; presence: CollaborationPresence }
+  | { type: 'leave'; clientId: string }
+  | { type: 'project-presence'; collaborators: CollaborationPresence[] };
 
 export interface PaginatedProjectDocs {
   items: ProjectDoc[];

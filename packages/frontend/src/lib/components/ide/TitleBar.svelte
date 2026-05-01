@@ -7,10 +7,12 @@
     Minimize2,
     Minus,
     PanelRight,
+    Radio,
     X
   } from 'lucide-svelte';
   import { onDestroy, onMount } from 'svelte';
   import Logo from '$lib/components/Logo.svelte';
+  import { collaboration } from '$lib/stores/collaboration.svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import { ui } from '$lib/stores/ui.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
@@ -20,6 +22,7 @@
 
   let projectMenuOpen = $state(false);
   let creatingProject = $state(false);
+  let collaboratorsOpen = $state(false);
   let newProjectTitle = $state('');
   let isMaximized = $state(false);
   let unsubscribe: (() => void) | undefined;
@@ -27,6 +30,16 @@
   const activeProject = $derived(
     manuscript.projects.find((p) => p.id === manuscript.projectId) ?? null
   );
+  const activeCollaborators = $derived(
+    collaboration.collaborators.filter(
+      (presence, index, all) =>
+        all.findIndex((candidate) => candidate.clientId === presence.clientId) === index
+    )
+  );
+
+  $effect(() => {
+    collaboration.connect(manuscript.projectId);
+  });
 
   onMount(() => {
     if (!api.isElectron) return;
@@ -66,6 +79,7 @@
 
   function handleBackdrop() {
     projectMenuOpen = false;
+    collaboratorsOpen = false;
     creatingProject = false;
     newProjectTitle = '';
   }
@@ -78,6 +92,10 @@
   }
   function close() {
     void api.window.close();
+  }
+
+  function initials(name: string | null, username: string): string {
+    return (name ?? username).slice(0, 2).toUpperCase();
   }
 </script>
 
@@ -138,6 +156,29 @@
       >
         <PanelRight class="size-4" />
       </button>
+    {/if}
+    {#if activeCollaborators.length > 0}
+      <div class="relative">
+        <button
+          type="button"
+          onclick={() => (collaboratorsOpen = !collaboratorsOpen)}
+          class="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
+          title="Active collaborators"
+        >
+          <Radio class="size-3 text-emerald-400" />
+          <div class="flex -space-x-1">
+            {#each activeCollaborators.slice(0, 3) as presence (presence.clientId)}
+              <span
+                class="flex size-5 items-center justify-center rounded-full border border-sidebar bg-accent text-[9px] font-semibold text-accent-foreground"
+                title={presence.user.name ?? presence.user.username}
+              >
+                {initials(presence.user.name, presence.user.username)}
+              </span>
+            {/each}
+          </div>
+          <span class="font-mono text-[10px]">{activeCollaborators.length}</span>
+        </button>
+      </div>
     {/if}
     {#if api.isElectron}
       <button
@@ -234,6 +275,66 @@
             New project…
           </button>
         {/if}
+      </div>
+    </div>
+  {/if}
+
+  {#if collaboratorsOpen}
+    <button
+      type="button"
+      onclick={handleBackdrop}
+      aria-label="Close collaborators menu"
+      tabindex="-1"
+      class="fixed inset-0 z-30 cursor-default bg-transparent"
+      style="-webkit-app-region: no-drag;"
+    ></button>
+    <div
+      class="absolute right-2 top-[var(--app-titlebar-height)] z-40 w-80 overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-lg"
+      style="-webkit-app-region: no-drag;"
+    >
+      <div class="border-b border-border px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Live Connections
+      </div>
+      <div class="max-h-80 overflow-y-auto py-1">
+        {#each activeCollaborators as presence (presence.clientId)}
+          <div class="border-b border-border/60 px-3 py-2 last:border-0">
+            <div class="flex items-center gap-2">
+              <span class="flex size-7 items-center justify-center rounded-full bg-accent text-[10px] font-semibold text-accent-foreground">
+                {initials(presence.user.name, presence.user.username)}
+              </span>
+              <div class="min-w-0 flex-1">
+                <div class="truncate text-xs font-medium text-foreground">
+                  {presence.user.name ?? presence.user.username}
+                </div>
+                <div class="truncate font-mono text-[10px] text-muted-foreground">
+                  @{presence.user.username}
+                </div>
+              </div>
+            </div>
+            <div class="mt-2 truncate text-[11px] text-muted-foreground">
+              {presence.location?.title ?? presence.document.kind} {presence.location?.field ? `· ${presence.location.field}` : ''}
+            </div>
+            <div class="mt-2 flex gap-1.5">
+              <button
+                type="button"
+                disabled={!presence.location}
+                onclick={() => {
+                  if (presence.location) collaboration.goToLocation(presence.location);
+                }}
+                class="rounded border border-border px-2 py-1 text-[11px] text-foreground hover:border-accent/60 disabled:opacity-50"
+              >
+                Go to location
+              </button>
+              <button
+                type="button"
+                onclick={() => collaboration.follow(presence.clientId)}
+                class="rounded border border-border px-2 py-1 text-[11px] text-foreground hover:border-accent/60"
+              >
+                {collaboration.followedClientId === presence.clientId ? 'Unfollow' : 'Follow'}
+              </button>
+            </div>
+          </div>
+        {/each}
       </div>
     </div>
   {/if}

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Expand, Eye, X } from 'lucide-svelte';
+  import type { CollaborationDocumentRef } from '$lib/stores/collaboration.svelte';
   import { cn } from '$lib/utils';
   import MarkdownPreview from './MarkdownPreview.svelte';
   import MonacoMarkdownEditor from './MonacoMarkdownEditor.svelte';
@@ -12,6 +13,7 @@
     contextLabel?: string;
     height?: string;
     embedded?: boolean;
+    collaboration?: CollaborationDocumentRef;
     class?: string;
   }
 
@@ -23,6 +25,7 @@
     contextLabel,
     height = 'h-36',
     embedded = false,
+    collaboration,
     class: className
   }: Props = $props();
 
@@ -69,7 +72,7 @@
     </div>
   {/if}
   <div class={cn('min-h-0', height)}>
-    <MonacoMarkdownEditor {value} {onChange} compact />
+    <MonacoMarkdownEditor {value} {onChange} {collaboration} compact />
   </div>
 </section>
 
@@ -118,7 +121,7 @@
 
       <div class="flex min-h-0 flex-1">
         <div class={cn('min-h-0', preview ? 'w-1/2 border-r border-border' : 'w-full')}>
-          <MonacoMarkdownEditor {value} {onChange} />
+          <MonacoMarkdownEditor {value} {onChange} {collaboration} />
         </div>
         {#if preview}
           <div class="w-1/2 overflow-y-auto bg-background px-10 py-8">
