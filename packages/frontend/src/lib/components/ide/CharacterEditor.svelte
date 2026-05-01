@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Camera, Heart, ImagePlus, Plus, ShieldAlert, Sparkles, Target, User, X } from 'lucide-svelte';
+  import { liveTextField } from '$lib/actions/liveTextField';
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import type { Character } from '$lib/data/manuscript-types';
   import ExpandableMarkdownEditor from './ExpandableMarkdownEditor.svelte';
@@ -133,6 +134,11 @@
         <div class="flex-1">
           <input
             value={character.name}
+            use:liveTextField={{
+              document: { kind: 'character', entityId: character.id, field: 'name' },
+              getValue: () => character.name,
+              onRemoteValue: (value) => manuscript.updateCharacter(character.id, { name: value })
+            }}
             oninput={(e) =>
               void manuscript.updateCharacter(character.id, {
                 name: (e.currentTarget as HTMLInputElement).value
@@ -149,6 +155,11 @@
               <div class="mt-0.5">
                 <input
                   value={character.role}
+                  use:liveTextField={{
+                    document: { kind: 'character', entityId: character.id, field: 'role' },
+                    getValue: () => character.role,
+                    onRemoteValue: (value) => manuscript.updateCharacter(character.id, { role: value })
+                  }}
                   oninput={(e) =>
                     void manuscript.updateCharacter(character.id, {
                       role: (e.currentTarget as HTMLInputElement).value
@@ -166,6 +177,11 @@
               <div class="mt-0.5">
                 <input
                   value={character.age}
+                  use:liveTextField={{
+                    document: { kind: 'character', entityId: character.id, field: 'age' },
+                    getValue: () => character.age,
+                    onRemoteValue: (value) => manuscript.updateCharacter(character.id, { age: value })
+                  }}
                   oninput={(e) =>
                     void manuscript.updateCharacter(character.id, {
                       age: (e.currentTarget as HTMLInputElement).value
@@ -183,6 +199,11 @@
               <div class="mt-0.5">
                 <input
                   value={character.occupation}
+                  use:liveTextField={{
+                    document: { kind: 'character', entityId: character.id, field: 'occupation' },
+                    getValue: () => character.occupation,
+                    onRemoteValue: (value) => manuscript.updateCharacter(character.id, { occupation: value })
+                  }}
                   oninput={(e) =>
                     void manuscript.updateCharacter(character.id, {
                       occupation: (e.currentTarget as HTMLInputElement).value
@@ -283,6 +304,7 @@
             icon={field.icon}
             contextLabel={character.name}
             height={field.height}
+            collaboration={{ kind: 'character', entityId: character.id, field: field.key }}
           />
         {/each}
 

@@ -13,7 +13,7 @@ export class UpdateStructureUseCase {
   }
 
   async execute(userId: string, projectId: string, input: UpdateStructureInput): Promise<StoryStructure> {
-    await this.access.assertProjectAccess(userId, projectId);
+    await this.access.assertPermission(userId, projectId, 'project:write');
 
     await this.prisma.$transaction(async (tx) => {
       await tx.project.update({

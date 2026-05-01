@@ -37,6 +37,10 @@ import type {
   CreateAiAgentSessionInput,
   CreateAiOutlineExpansionInput,
   CreateAiRewriteSuggestionInput,
+  CollaborationDocumentRef,
+  CollaborationEditInput,
+  CollaborationEvent,
+  CollaborationPresenceInput,
   ListProjectDocsInput,
   PaginatedProjectDocs,
   QueueAiAgentPromptInput,
@@ -680,8 +684,97 @@ export class OpenTalesClient {
       const payload = text ? JSON.parse(text) : null;
       throw new ApiError(payload?.message ?? 'Request failed', response.status, payload);
     }
+    await this.readEventStream(response, onEvent);
+  }
+
+  getCollaborationSnapshot(
+    projectId: string,
+    document: CollaborationDocumentRef
+  ): Promise<CollaborationEvent> {
+    return this.request<CollaborationEvent>(
+      `/projects/${projectId}/collaboration/documents/${encodeURIComponent(document.kind)}/${encodeURIComponent(document.entityId)}/${encodeURIComponent(document.field)}`
+    );
+  }
+
+  applyCollaborationEdit(
+    projectId: string,
+    document: CollaborationDocumentRef,
+    input: CollaborationEditInput
+  ): Promise<CollaborationEvent> {
+    return this.request<CollaborationEvent>(
+      `/projects/${projectId}/collaboration/documents/${encodeURIComponent(document.kind)}/${encodeURIComponent(document.entityId)}/${encodeURIComponent(document.field)}/edits`,
+      { method: 'POST', body: input }
+    );
+  }
+
+  updateCollaborationPresence(
+    projectId: string,
+    document: CollaborationDocumentRef,
+    input: CollaborationPresenceInput
+  ): Promise<CollaborationEvent> {
+    return this.request<CollaborationEvent>(
+      `/projects/${projectId}/collaboration/documents/${encodeURIComponent(document.kind)}/${encodeURIComponent(document.entityId)}/${encodeURIComponent(document.field)}/presence`,
+      { method: 'POST', body: input }
+    );
+  }
+
+  async streamProjectCollaboration(
+    projectId: string,
+    onEvent: (event: CollaborationEvent) => void,
+    options: { signal?: AbortSignal } = {}
+  ): Promise<void> {
+    const headers = new Headers();
+    headers.set('accept', 'text/event-stream');
+    if (this.token) headers.set('authorization', `Bearer ${this.token}`);
+
+    const response = await this.fetcher(`${this.baseUrl}/projects/${projectId}/collaboration/events`, {
+      method: 'GET',
+      headers,
+      signal: options.signal
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      const payload = text ? JSON.parse(text) : null;
+      throw new ApiError(payload?.message ?? 'Request failed', response.status, payload);
+    }
     if (!response.body) return;
 
+    await this.readEventStream(response, onEvent);
+  }
+
+  async streamCollaborationDocument(
+    projectId: string,
+    document: CollaborationDocumentRef,
+    clientId: string,
+    onEvent: (event: CollaborationEvent) => void,
+    options: { signal?: AbortSignal } = {}
+  ): Promise<void> {
+    const headers = new Headers();
+    headers.set('accept', 'text/event-stream');
+    if (this.token) headers.set('authorization', `Bearer ${this.token}`);
+
+    const response = await this.fetcher(
+      `${this.baseUrl}/projects/${projectId}/collaboration/documents/${encodeURIComponent(document.kind)}/${encodeURIComponent(document.entityId)}/${encodeURIComponent(document.field)}/events?clientId=${encodeURIComponent(clientId)}`,
+      {
+        method: 'GET',
+        headers,
+        signal: options.signal
+      }
+    );
+
+    if (!response.ok) {
+      const text = await response.text();
+      const payload = text ? JSON.parse(text) : null;
+      throw new ApiError(payload?.message ?? 'Request failed', response.status, payload);
+    }
+    if (!response.body) return;
+
+    await this.readEventStream(response, onEvent);
+  }
+
+  private async readEventStream<T>(response: Response, onEvent: (event: T) => void): Promise<void> {
+    if (!response.body) return;
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -698,7 +791,7 @@ export class OpenTalesClient {
           .filter((line) => line.startsWith('data:'))
           .map((line) => line.slice(5).trimStart())
           .join('\n');
-        if (data) onEvent(JSON.parse(data) as AiAgentSessionEvent);
+        if (data) onEvent(JSON.parse(data) as T);
       }
     }
   }

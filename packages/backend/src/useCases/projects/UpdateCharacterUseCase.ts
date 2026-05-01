@@ -19,7 +19,7 @@ export class UpdateCharacterUseCase {
     characterId: string,
     input: UpdateCharacterInput
   ): Promise<Character> {
-    await this.access.assertProjectAccess(userId, projectId);
+    await this.access.assertPermission(userId, projectId, 'project:write');
 
     await this.prisma.$transaction(async (tx) => {
       const character = await tx.character.findFirst({

@@ -26,7 +26,7 @@ export class UpdateChapterUseCase {
     chapterId: string,
     input: UpdateChapterInput
   ): Promise<Chapter> {
-    await this.access.assertProjectAccess(userId, projectId);
+    await this.access.assertPermission(userId, projectId, 'project:write');
 
     await this.prisma.$transaction(async (tx) => {
       const chapter = await tx.chapter.findFirst({

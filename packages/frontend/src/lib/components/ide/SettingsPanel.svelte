@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Eye, EyeOff, Image as ImageIcon, Keyboard } from 'lucide-svelte';
   import type { CoverOrientation, ProjectVisibility } from '@opentales/sdk';
+  import { liveTextField } from '$lib/actions/liveTextField';
   import { commandPalette } from '$lib/stores/commandPalette.svelte';
   import { editorTheme, type EditorThemeId } from '$lib/stores/editorTheme.svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
@@ -256,6 +257,14 @@
           <input
             type="text"
             bind:value={title}
+            use:liveTextField={{
+              document: { kind: 'structure', entityId: manuscript.projectId ?? 'project', field: 'title' },
+              getValue: () => title,
+              onRemoteValue: (value) => {
+                title = value;
+                void manuscript.updateProject({ title: value });
+              }
+            }}
             disabled={!canEdit()}
             class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-foreground outline-none focus:border-accent disabled:opacity-60"
           />
@@ -265,6 +274,14 @@
           <input
             type="text"
             bind:value={slug}
+            use:liveTextField={{
+              document: { kind: 'structure', entityId: manuscript.projectId ?? 'project', field: 'slug' },
+              getValue: () => slug,
+              onRemoteValue: (value) => {
+                slug = value;
+                void manuscript.updateProject({ slug: value || undefined });
+              }
+            }}
             disabled={!canEdit()}
             placeholder="my-project"
             class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-foreground outline-none focus:border-accent disabled:opacity-60"
@@ -274,6 +291,14 @@
           <span class="mb-1 block text-[10px] uppercase tracking-wide text-muted-foreground">Description</span>
           <textarea
             bind:value={description}
+            use:liveTextField={{
+              document: { kind: 'structure', entityId: manuscript.projectId ?? 'project', field: 'description' },
+              getValue: () => description,
+              onRemoteValue: (value) => {
+                description = value;
+                void manuscript.updateProject({ description: value || null });
+              }
+            }}
             disabled={!canEdit()}
             rows="3"
             class="w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 text-foreground outline-none focus:border-accent disabled:opacity-60"
@@ -286,6 +311,14 @@
             <input
               type="text"
               bind:value={genre}
+              use:liveTextField={{
+                document: { kind: 'structure', entityId: manuscript.projectId ?? 'project', field: 'genre' },
+                getValue: () => genre,
+                onRemoteValue: (value) => {
+                  genre = value;
+                  void manuscript.updateProject({ genre: value || null });
+                }
+              }}
               disabled={!canEdit()}
               class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-foreground outline-none focus:border-accent disabled:opacity-60"
             />
@@ -295,6 +328,14 @@
             <input
               type="text"
               bind:value={perspective}
+              use:liveTextField={{
+                document: { kind: 'structure', entityId: manuscript.projectId ?? 'project', field: 'perspective' },
+                getValue: () => perspective,
+                onRemoteValue: (value) => {
+                  perspective = value;
+                  void manuscript.updateProject({ perspective: value || null });
+                }
+              }}
               disabled={!canEdit()}
               class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-foreground outline-none focus:border-accent disabled:opacity-60"
             />
@@ -304,6 +345,14 @@
             <input
               type="text"
               bind:value={pov}
+              use:liveTextField={{
+                document: { kind: 'structure', entityId: manuscript.projectId ?? 'project', field: 'pov' },
+                getValue: () => pov,
+                onRemoteValue: (value) => {
+                  pov = value;
+                  void manuscript.updateProject({ pov: value || null });
+                }
+              }}
               disabled={!canEdit()}
               class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-foreground outline-none focus:border-accent disabled:opacity-60"
             />
@@ -313,6 +362,14 @@
             <input
               type="text"
               bind:value={voice}
+              use:liveTextField={{
+                document: { kind: 'structure', entityId: manuscript.projectId ?? 'project', field: 'voice' },
+                getValue: () => voice,
+                onRemoteValue: (value) => {
+                  voice = value;
+                  void manuscript.updateProject({ voice: value || null });
+                }
+              }}
               disabled={!canEdit()}
               class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-foreground outline-none focus:border-accent disabled:opacity-60"
             />
@@ -322,6 +379,14 @@
             <input
               type="text"
               bind:value={tone}
+              use:liveTextField={{
+                document: { kind: 'structure', entityId: manuscript.projectId ?? 'project', field: 'tone' },
+                getValue: () => tone,
+                onRemoteValue: (value) => {
+                  tone = value;
+                  void manuscript.updateProject({ tone: value || null });
+                }
+              }}
               disabled={!canEdit()}
               class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-foreground outline-none focus:border-accent disabled:opacity-60"
             />
@@ -333,6 +398,16 @@
             <input
               type="text"
               bind:value={themesText}
+              use:liveTextField={{
+                document: { kind: 'structure', entityId: manuscript.projectId ?? 'project', field: 'themesText' },
+                getValue: () => themesText,
+                onRemoteValue: (value) => {
+                  themesText = value;
+                  void manuscript.updateProject({
+                    themes: value.split(',').map((s) => s.trim()).filter(Boolean)
+                  });
+                }
+              }}
               disabled={!canEdit()}
               class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-foreground outline-none focus:border-accent disabled:opacity-60"
             />

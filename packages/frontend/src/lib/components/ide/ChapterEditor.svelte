@@ -200,7 +200,12 @@
   <!-- Editor + preview -->
   <div class="flex min-h-0 flex-1">
     <div class={cn('min-h-0', splitView ? 'w-1/2 border-r border-border' : 'w-full')}>
-      <MonacoMarkdownEditor value={localContent} onChange={handleChange} onSelectionChange={handleSelection} />
+      <MonacoMarkdownEditor
+        value={localContent}
+        onChange={handleChange}
+        onSelectionChange={handleSelection}
+        collaboration={{ kind: 'chapter', entityId: chapter.id, field: 'content' }}
+      />
     </div>
     {#if splitView}
       <div class="w-1/2 overflow-y-auto bg-background px-10 py-8">

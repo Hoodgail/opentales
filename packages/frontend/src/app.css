@@ -238,3 +238,8 @@
     background: oklch(0.4 0 0);
   }
 }
+input.opentales-live-locked,
+textarea.opentales-live-locked {
+  border-color: color-mix(in oklab, var(--accent) 70%, transparent) !important;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 45%, transparent);
+}

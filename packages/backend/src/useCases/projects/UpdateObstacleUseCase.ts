@@ -24,7 +24,7 @@ export class UpdateObstacleUseCase {
     obstacleId: string,
     input: UpdateObstacleInput
   ): Promise<Obstacle> {
-    await this.access.assertProjectAccess(userId, projectId);
+    await this.access.assertPermission(userId, projectId, 'project:write');
 
     await this.prisma.$transaction(async (tx) => {
       const obstacle = await tx.obstacle.findFirst({

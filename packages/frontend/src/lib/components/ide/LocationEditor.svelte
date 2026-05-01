@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Eye, Image as ImageIcon, MapPin, Sparkles, Upload } from 'lucide-svelte';
+  import { liveTextField } from '$lib/actions/liveTextField';
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import type { Location } from '$lib/data/manuscript-types';
   import ExpandableMarkdownEditor from './ExpandableMarkdownEditor.svelte';
@@ -82,6 +83,11 @@
         <div class="absolute bottom-4 left-6 right-6">
           <input
             value={location.name}
+            use:liveTextField={{
+              document: { kind: 'location', entityId: location.id, field: 'name' },
+              getValue: () => location.name,
+              onRemoteValue: (value) => manuscript.updateLocation(location.id, { name: value })
+            }}
             oninput={(e) =>
               void manuscript.updateLocation(location.id, {
                 name: (e.currentTarget as HTMLInputElement).value
@@ -90,6 +96,11 @@
           />
           <input
             value={location.type}
+            use:liveTextField={{
+              document: { kind: 'location', entityId: location.id, field: 'type' },
+              getValue: () => location.type,
+              onRemoteValue: (value) => manuscript.updateLocation(location.id, { type: value })
+            }}
             oninput={(e) =>
               void manuscript.updateLocation(location.id, {
                 type: (e.currentTarget as HTMLInputElement).value
@@ -124,6 +135,7 @@
             icon={field.icon}
             contextLabel={location.name}
             height={field.height}
+            collaboration={{ kind: 'location', entityId: location.id, field: field.key }}
           />
         {/each}
       </div>
