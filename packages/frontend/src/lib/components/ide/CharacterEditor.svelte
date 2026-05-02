@@ -97,12 +97,12 @@
   </div>
 
   <div class="flex-1 overflow-y-auto">
-    <div class="mx-auto max-w-4xl p-8">
+    <div class="mx-auto max-w-4xl p-4 sm:p-8">
       <!-- Header -->
-      <div class="mb-8 flex items-start gap-6">
+      <div class="mb-8 flex flex-col items-center gap-4 sm:flex-row sm:items-start sm:gap-6">
         <div class="relative shrink-0">
           <div
-            class="size-32 overflow-hidden rounded-md border border-border bg-muted"
+            class="size-24 overflow-hidden rounded-md border border-border bg-muted sm:size-32"
           >
             {#if character.avatar}
               <img src={character.avatar} alt={character.name} class="size-full object-cover" />
@@ -131,7 +131,7 @@
           />
         </div>
 
-        <div class="flex-1">
+        <div class="w-full min-w-0 flex-1">
           <input
             value={character.name}
             use:liveTextField={{
@@ -143,9 +143,9 @@
               void manuscript.updateCharacter(character.id, {
                 name: (e.currentTarget as HTMLInputElement).value
               })}
-            class="w-full bg-transparent font-serif text-3xl font-semibold tracking-tight text-foreground outline-none focus:border-b focus:border-accent"
+            class="!min-h-0 w-full bg-transparent text-center font-serif text-2xl font-semibold tracking-tight text-foreground outline-none focus:border-b focus:border-accent sm:text-left sm:text-3xl"
           />
-          <div class="mt-2 grid grid-cols-3 gap-3 text-xs">
+          <div class="mt-3 grid grid-cols-1 gap-2 text-xs sm:mt-2 sm:grid-cols-3 sm:gap-3">
             <div class="rounded border border-border bg-card px-2 py-1.5">
               <div
                 class="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground"
@@ -164,7 +164,7 @@
                     void manuscript.updateCharacter(character.id, {
                       role: (e.currentTarget as HTMLInputElement).value
                     })}
-                  class="w-full bg-transparent text-foreground outline-none"
+                  class="!min-h-0 w-full bg-transparent text-foreground outline-none"
                 />
               </div>
             </div>
@@ -186,7 +186,7 @@
                     void manuscript.updateCharacter(character.id, {
                       age: (e.currentTarget as HTMLInputElement).value
                     })}
-                  class="w-full bg-transparent text-foreground outline-none"
+                  class="!min-h-0 w-full bg-transparent text-foreground outline-none"
                 />
               </div>
             </div>
@@ -208,12 +208,12 @@
                     void manuscript.updateCharacter(character.id, {
                       occupation: (e.currentTarget as HTMLInputElement).value
                     })}
-                  class="w-full bg-transparent text-foreground outline-none"
+                  class="!min-h-0 w-full bg-transparent text-foreground outline-none"
                 />
               </div>
             </div>
           </div>
-          <div class="mt-3 flex flex-wrap gap-1.5">
+          <div class="mt-3 flex flex-wrap justify-center gap-1.5 sm:justify-start">
             {#each character.traits as t, index (`${t}-${index}`)}
               <span
                 class="rounded border border-border bg-card px-2 py-0.5 text-[11px] text-foreground/80"
@@ -328,7 +328,7 @@
                 {@const other = manuscript.characters.find((c) => c.id === r.characterId)}
                 {#if other}
                   <div
-                    class="group relative flex items-center gap-3 rounded-md border border-border bg-card p-3 transition-colors hover:border-accent/40 hover:bg-muted/40"
+                    class="group relative flex min-w-0 items-center gap-3 rounded-md border border-border bg-card p-3 transition-colors hover:border-accent/40 hover:bg-muted/40"
                   >
                     <button
                       type="button"
@@ -339,7 +339,7 @@
                           refId: other.id,
                           title: other.name
                         })}
-                      class="flex flex-1 items-center gap-3 text-left"
+                      class="flex min-w-0 flex-1 items-center gap-3 text-left"
                     >
                       <div
                         class="size-10 shrink-0 overflow-hidden rounded-full border border-border bg-muted"
@@ -349,17 +349,23 @@
                         {/if}
                       </div>
                       <div class="min-w-0 flex-1">
-                        <div class="flex items-center gap-2">
-                          <span class="truncate text-sm font-medium text-foreground">
+                        <div class="flex min-w-0 items-center gap-1.5">
+                          <span class="min-w-0 truncate text-sm font-medium text-foreground">
                             {other.name}
                           </span>
                           <span
-                            class="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground"
+                            class="min-w-0 max-w-[45%] shrink truncate rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground"
+                            title={r.type}
                           >
                             {r.type}
                           </span>
                         </div>
-                        <div class="truncate text-xs text-muted-foreground">{r.note}</div>
+                        <div
+                          class="mt-1 line-clamp-2 break-words text-xs text-muted-foreground"
+                          title={r.note}
+                        >
+                          {r.note}
+                        </div>
                       </div>
                     </button>
                     <button
