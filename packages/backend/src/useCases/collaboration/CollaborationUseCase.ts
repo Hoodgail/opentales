@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import type { Response } from 'express';
 import type {
+  CollaborationDocumentEvent,
   CollaborationDocumentRef,
   CollaborationEdit,
   CollaborationEditInput,
@@ -69,7 +70,7 @@ export class CollaborationUseCase {
     if (existingClient && existingClient !== res) existingClient.end();
     doc.clients.set(clientId, res);
     writeEvent(res, { type: 'snapshot', snapshot: toSnapshot(doc) });
-    this.broadcast(doc, { type: 'presence', presence }, clientId);
+    this.broadcastDocument(projectId, doc, { type: 'presence', presence }, clientId);
     this.broadcastProject(projectId);
 
     const cleanup = () => {
@@ -77,7 +78,7 @@ export class CollaborationUseCase {
       if (doc.clients.get(clientId) !== res) return;
       doc.clients.delete(clientId);
       doc.presence.delete(clientId);
-      this.broadcast(doc, { type: 'leave', clientId }, clientId);
+      this.broadcastDocument(projectId, doc, { type: 'leave', clientId }, clientId);
       this.broadcastProject(projectId);
     };
     const heartbeat = keepEventStreamAlive(res, cleanup);
@@ -152,8 +153,8 @@ export class CollaborationUseCase {
       location: input.location ?? null
     });
     const event = { type: 'edit', edit } satisfies CollaborationEvent;
-    this.broadcast(doc, event);
-    this.broadcast(doc, { type: 'presence', presence }, input.clientId);
+    this.broadcastDocument(projectId, doc, event);
+    this.broadcastDocument(projectId, doc, { type: 'presence', presence }, input.clientId);
     this.broadcastProject(projectId);
     return event;
   }
@@ -174,7 +175,7 @@ export class CollaborationUseCase {
       location: input.location ?? null
     });
     const event = { type: 'presence', presence } satisfies CollaborationEvent;
-    this.broadcast(doc, event, input.clientId);
+    this.broadcastDocument(projectId, doc, event, input.clientId);
     this.broadcastProject(projectId);
     return event;
   }
@@ -226,6 +227,18 @@ export class CollaborationUseCase {
     }
   }
 
+  private broadcastDocument(
+    projectId: string,
+    doc: RuntimeDocument,
+    event: CollaborationDocumentEvent,
+    exceptClientId?: string
+  ): void {
+    this.broadcast(doc, event, exceptClientId);
+    for (const client of getProjectClients(projectId)) {
+      writeEvent(client, { type: 'document-event', document: doc.ref, event });
+    }
+  }
+
   private broadcastProject(projectId: string): void {
     const event = this.projectPresenceEvent(projectId);
     for (const client of getProjectClients(projectId)) writeEvent(client, event);
@@ -241,7 +254,7 @@ export class CollaborationUseCase {
         client.end();
       }
       if (doc.presence.delete(clientId)) {
-        this.broadcast(doc, { type: 'leave', clientId }, clientId);
+        this.broadcastDocument(projectId, doc, { type: 'leave', clientId }, clientId);
       }
     }
     this.broadcastProject(projectId);

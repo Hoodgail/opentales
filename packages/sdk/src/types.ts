@@ -196,12 +196,16 @@ export interface CollaborationSnapshot {
   collaborators: CollaborationPresence[];
 }
 
-export type CollaborationEvent =
+export type CollaborationDocumentEvent =
   | { type: 'snapshot'; snapshot: CollaborationSnapshot }
   | { type: 'edit'; edit: CollaborationEdit }
   | { type: 'presence'; presence: CollaborationPresence }
-  | { type: 'leave'; clientId: string }
-  | { type: 'project-presence'; collaborators: CollaborationPresence[] };
+  | { type: 'leave'; clientId: string };
+
+export type CollaborationEvent =
+  | CollaborationDocumentEvent
+  | { type: 'project-presence'; collaborators: CollaborationPresence[] }
+  | { type: 'document-event'; document: CollaborationDocumentRef; event: CollaborationDocumentEvent };
 
 export interface PaginatedProjectDocs {
   items: ProjectDoc[];

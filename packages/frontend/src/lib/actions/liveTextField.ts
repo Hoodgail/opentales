@@ -2,6 +2,7 @@ import {
   collaboration,
   collaborationApi,
   createCollaborationClientId,
+  type CollaborationDocumentEvent,
   type CollaborationDocumentRef,
   type CollaborationPresence
 } from '$lib/stores/collaboration.svelte';
@@ -21,48 +22,43 @@ export function liveTextField(node: TextNode, params: Params) {
   let revision = 0;
   let focused = false;
   let lockedBy: CollaborationPresence | null = null;
-  let abort: AbortController | null = null;
+  let unsubscribe: (() => void) | null = null;
   let localValue = params.getValue();
 
-  function connect() {
+  async function connect() {
     if (!manuscript.projectId) return;
-    abort?.abort();
-    abort = new AbortController();
-    void collaborationApi
-      .streamCollaborationDocument(
-        manuscript.projectId,
-        current.document,
-        clientId,
-        (event) => {
-          if (event.type === 'snapshot') {
-            revision = event.snapshot.revision;
-            localValue = event.snapshot.content;
-            if (event.snapshot.content !== node.value) {
-              node.value = event.snapshot.content;
-              current.onRemoteValue(event.snapshot.content);
-            }
-            updateLock();
-            return;
-          }
-          if (event.type === 'edit') {
-            revision = Math.max(revision, event.edit.revision);
-            if (event.edit.clientId !== clientId) {
-              const next = applyChanges(localValue, event.edit.changes);
-              localValue = next;
-              node.value = next;
-              current.onRemoteValue(next);
-            }
-            updateLock();
-            return;
-          }
-          if (event.type === 'presence' || event.type === 'leave') updateLock();
-        },
-        { signal: abort.signal }
-      )
-      .catch((error) => {
-        if (abort?.signal.aborted) return;
-        console.warn('Live text field stream failed', error);
-      });
+    unsubscribe?.();
+    unsubscribe = collaboration.subscribeDocument(current.document, handleEvent);
+    try {
+      handleEvent(await collaborationApi.getCollaborationSnapshot(manuscript.projectId, current.document));
+    } catch (error) {
+      console.warn('Live text field snapshot failed', error);
+    }
+  }
+
+  function handleEvent(event: CollaborationDocumentEvent) {
+    if (event.type === 'snapshot') {
+      revision = event.snapshot.revision;
+      localValue = event.snapshot.content;
+      if (event.snapshot.content !== node.value) {
+        node.value = event.snapshot.content;
+        current.onRemoteValue(event.snapshot.content);
+      }
+      updateLock();
+      return;
+    }
+    if (event.type === 'edit') {
+      revision = Math.max(revision, event.edit.revision);
+      if (event.edit.clientId !== clientId) {
+        const next = applyChanges(localValue, event.edit.changes);
+        localValue = next;
+        node.value = next;
+        current.onRemoteValue(next);
+      }
+      updateLock();
+      return;
+    }
+    if (event.type === 'presence' || event.type === 'leave') updateLock();
   }
 
   function sendEdit() {
@@ -143,7 +139,7 @@ export function liveTextField(node: TextNode, params: Params) {
     },
     destroy() {
       sendPresence(false);
-      abort?.abort();
+      unsubscribe?.();
       node.removeEventListener('focus', handleFocus);
       node.removeEventListener('blur', handleBlur);
       node.removeEventListener('input', handleInput);

@@ -37,6 +37,7 @@ import type {
   CreateAiAgentSessionInput,
   CreateAiOutlineExpansionInput,
   CreateAiRewriteSuggestionInput,
+  CollaborationDocumentEvent,
   CollaborationDocumentRef,
   CollaborationEditInput,
   CollaborationEvent,
@@ -691,8 +692,8 @@ export class OpenTalesClient {
   getCollaborationSnapshot(
     projectId: string,
     document: CollaborationDocumentRef
-  ): Promise<CollaborationEvent> {
-    return this.request<CollaborationEvent>(
+  ): Promise<CollaborationDocumentEvent> {
+    return this.request<CollaborationDocumentEvent>(
       `/projects/${projectId}/collaboration/documents/${encodeURIComponent(document.kind)}/${encodeURIComponent(document.entityId)}/${encodeURIComponent(document.field)}`
     );
   }

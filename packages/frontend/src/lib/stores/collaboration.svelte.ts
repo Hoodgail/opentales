@@ -1,5 +1,6 @@
 import {
   OpenTalesClient,
+  type CollaborationDocumentEvent,
   type CollaborationDocumentRef,
   type CollaborationEditInput,
   type CollaborationLocation,
@@ -42,6 +43,10 @@ export function createCollaborationClientId(): string {
 
 function createStore() {
   const collaborators = $state<CollaborationPresence[]>([]);
+  const documentSubscribers = new Map<
+    string,
+    Set<(event: CollaborationDocumentEvent) => void>
+  >();
   let followedClientId = $state<string | null>(null);
   let projectId = $state<string | null>(null);
   let abort: AbortController | null = null;
@@ -61,12 +66,17 @@ function createStore() {
       .streamProjectCollaboration(
         nextProjectId,
         (event) => {
-          if (event.type !== 'project-presence') return;
-          collaborators.splice(0, collaborators.length, ...event.collaborators);
-          const followed = followedClientId
-            ? event.collaborators.find((presence) => presence.clientId === followedClientId)
-            : null;
-          if (followed?.location) goToLocation(followed.location);
+          if (event.type === 'project-presence') {
+            collaborators.splice(0, collaborators.length, ...event.collaborators);
+            const followed = followedClientId
+              ? event.collaborators.find((presence) => presence.clientId === followedClientId)
+              : null;
+            if (followed?.location) goToLocation(followed.location);
+            return;
+          }
+          if (event.type === 'document-event') {
+            notifyDocumentSubscribers(event.document, event.event);
+          }
         },
         { signal: abort.signal }
       )
@@ -134,6 +144,29 @@ function createStore() {
     followedClientId = null;
   }
 
+  function subscribeDocument(
+    document: CollaborationDocumentRef,
+    onEvent: (event: CollaborationDocumentEvent) => void
+  ) {
+    const key = documentKey(document);
+    const subscribers = documentSubscribers.get(key) ?? new Set();
+    subscribers.add(onEvent);
+    documentSubscribers.set(key, subscribers);
+    return () => {
+      subscribers.delete(onEvent);
+      if (subscribers.size === 0) documentSubscribers.delete(key);
+    };
+  }
+
+  function notifyDocumentSubscribers(
+    document: CollaborationDocumentRef,
+    event: CollaborationDocumentEvent
+  ) {
+    const subscribers = documentSubscribers.get(documentKey(document));
+    if (!subscribers) return;
+    for (const subscriber of subscribers) subscriber(event);
+  }
+
   return {
     get collaborators() {
       return collaborators;
@@ -142,11 +175,16 @@ function createStore() {
       return followedClientId;
     },
     connect,
+    subscribeDocument,
     currentLocation,
     goToLocation,
     follow,
     unfollow
   };
+}
+
+function documentKey(document: CollaborationDocumentRef): string {
+  return `${document.kind}:${document.entityId}:${document.field}`;
 }
 
 function tabIdFor(location: CollaborationLocation): string {
@@ -159,6 +197,7 @@ export const collaboration = createStore();
 
 export type {
   CollaborationDocumentRef,
+  CollaborationDocumentEvent,
   CollaborationEditInput,
   CollaborationLocation,
   CollaborationPresence

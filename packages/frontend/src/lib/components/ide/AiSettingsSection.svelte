@@ -66,11 +66,14 @@
     }
     // Otherwise omit apiKey to keep existing
 
-    await ai.updateSettings(projectId, input);
-    saving = false;
-    keyDirty = false;
-    clearKey = false;
-    apiKeyInput = '';
+    try {
+      await ai.updateSettings(projectId, input);
+      keyDirty = false;
+      clearKey = false;
+      apiKeyInput = '';
+    } finally {
+      saving = false;
+    }
   }
 </script>
 

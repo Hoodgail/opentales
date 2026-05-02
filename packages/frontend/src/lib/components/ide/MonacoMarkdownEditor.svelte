@@ -6,6 +6,7 @@
     collaboration as collaborationStore,
     collaborationApi,
     createCollaborationClientId,
+    type CollaborationDocumentEvent,
     type CollaborationDocumentRef
   } from '$lib/stores/collaboration.svelte';
   import { preferences } from '$lib/stores/preferences.svelte';
@@ -158,7 +159,7 @@
   let disposing = false;
   let suppressNext = false;
   let suppressCollaboration = false;
-  let collaborationAbort: AbortController | null = null;
+  let unsubscribeCollaboration: (() => void) | null = null;
   let collaborationRevision = 0;
   let collaborationClientId = '';
   let collaborationKey: string | null = null;
@@ -301,77 +302,71 @@
     collaborationKey = nextKey;
     collaborationRevision = 0;
     collaborationClientId = createCollaborationClientId();
-    collaborationAbort?.abort();
-    collaborationAbort = new AbortController();
-
-    void collaborationApi.streamCollaborationDocument(
-      manuscript.projectId,
-      collaboration,
-      collaborationClientId,
-      (event) => {
-        if (!editor) return;
-        if (event.type === 'snapshot') {
-          collaborationRevision = event.snapshot.revision;
-          updateRemoteCursors();
-          if (event.snapshot.content !== editor.getValue()) {
-            suppressNext = true;
-            suppressCollaboration = true;
-            try {
-              editor.setValue(event.snapshot.content);
-            } finally {
-              suppressCollaboration = false;
-            }
-            onChange(event.snapshot.content);
-          }
-          return;
-        }
-        if (event.type === 'presence') {
-          updateRemoteCursors();
-          return;
-        }
-        if (event.type === 'leave') {
-          updateRemoteCursors();
-          return;
-        }
-        if (event.type !== 'edit') return;
-        if (event.edit.clientId === collaborationClientId) {
-          collaborationRevision = Math.max(collaborationRevision, event.edit.revision);
-          updateRemoteCursors();
-          return;
-        }
-        const model = editor.getModel();
-        if (!model || !monaco) return;
-        suppressNext = true;
-        suppressCollaboration = true;
-        try {
-          editor.executeEdits(
-            'opentales-collaboration',
-            event.edit.changes.map((change) => ({
-              range: rangeFromOffsets(model, change.rangeOffset, change.rangeLength),
-              text: change.text,
-              forceMoveMarkers: true
-            }))
-          );
-        } finally {
-          suppressCollaboration = false;
-        }
-        collaborationRevision = Math.max(collaborationRevision, event.edit.revision);
-        onChange(editor.getValue());
-        updateRemoteCursors();
-        updateFocusDecorations();
-      },
-      { signal: collaborationAbort.signal }
-    ).catch((error) => {
-      if (collaborationAbort?.signal.aborted) return;
-      console.warn('Collaboration stream failed', error);
-    });
+    unsubscribeCollaboration?.();
+    unsubscribeCollaboration = collaborationStore.subscribeDocument(collaboration, handleCollaborationEvent);
+    void collaborationApi
+      .getCollaborationSnapshot(manuscript.projectId, collaboration)
+      .then(handleCollaborationEvent)
+      .catch((error) => console.warn('Collaboration snapshot failed', error));
 
     return () => {
       sendCollaborationPresence(false);
-      collaborationAbort?.abort();
-      collaborationAbort = null;
+      unsubscribeCollaboration?.();
+      unsubscribeCollaboration = null;
     };
   });
+
+  function handleCollaborationEvent(event: CollaborationDocumentEvent) {
+    if (!editor) return;
+    if (event.type === 'snapshot') {
+      collaborationRevision = event.snapshot.revision;
+      updateRemoteCursors();
+      if (event.snapshot.content !== editor.getValue()) {
+        suppressNext = true;
+        suppressCollaboration = true;
+        try {
+          editor.setValue(event.snapshot.content);
+        } finally {
+          suppressCollaboration = false;
+        }
+        onChange(event.snapshot.content);
+      }
+      return;
+    }
+    if (event.type === 'presence') {
+      updateRemoteCursors();
+      return;
+    }
+    if (event.type === 'leave') {
+      updateRemoteCursors();
+      return;
+    }
+    if (event.edit.clientId === collaborationClientId) {
+      collaborationRevision = Math.max(collaborationRevision, event.edit.revision);
+      updateRemoteCursors();
+      return;
+    }
+    const model = editor.getModel();
+    if (!model || !monaco) return;
+    suppressNext = true;
+    suppressCollaboration = true;
+    try {
+      editor.executeEdits(
+        'opentales-collaboration',
+        event.edit.changes.map((change) => ({
+          range: rangeFromOffsets(model, change.rangeOffset, change.rangeLength),
+          text: change.text,
+          forceMoveMarkers: true
+        }))
+      );
+    } finally {
+      suppressCollaboration = false;
+    }
+    collaborationRevision = Math.max(collaborationRevision, event.edit.revision);
+    onChange(editor.getValue());
+    updateRemoteCursors();
+    updateFocusDecorations();
+  }
 
   // Apply preferences live as the user toggles them.
   $effect(() => {
@@ -470,7 +465,7 @@
   onDestroy(() => {
     disposing = true;
     sendCollaborationPresence(false);
-    collaborationAbort?.abort();
+    unsubscribeCollaboration?.();
     editor?.dispose();
     editor = null;
   });
