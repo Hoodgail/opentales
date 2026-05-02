@@ -253,6 +253,7 @@ model Project {
   betaShareLinks BetaShareLink[]
   aiSettings    ProjectAiSettings?
   docs          ProjectDoc[]
+  folders       ProjectFolder[]
   aiAgentSessions ProjectAiAgentSession[]
 
   @@unique([orgId, slug])
@@ -326,6 +327,7 @@ model AiAgentToolCall {
 model ProjectDoc {
   id            String         @id @default(cuid())
   projectId     String
+  folderId      String?
   title         String
   kind          ProjectDocKind @default(NOTE)
   bodyWritingId String
@@ -334,10 +336,33 @@ model ProjectDoc {
   updatedAt     DateTime       @updatedAt
 
   project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  folder      ProjectFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
   bodyWriting Writing @relation("ProjectDocBodyWriting", fields: [bodyWritingId], references: [id], onDelete: Restrict)
 
+  @@index([folderId, order])
   @@index([projectId, order])
   @@index([projectId, kind])
+}
+
+model ProjectFolder {
+  id             String   @id @default(cuid())
+  projectId      String
+  parentFolderId String?
+  name           String
+  path           String
+  order          Int
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  project      Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parentFolder ProjectFolder? @relation("ProjectFolderTree", fields: [parentFolderId], references: [id], onDelete: Cascade)
+  childFolders ProjectFolder[] @relation("ProjectFolderTree")
+  docs         ProjectDoc[]
+  assets       Asset[]
+
+  @@unique([projectId, path])
+  @@index([projectId, parentFolderId, order])
+  @@index([parentFolderId])
 }
 
 model ProjectAiSettings {
@@ -635,6 +660,9 @@ model WritingVersion {
 model Asset {
   id           String    @id @default(cuid())
   projectId    String?
+  folderId     String?
+  name         String?
+  order        Int?
   kind         AssetKind
   s3Bucket     String
   s3Key        String    @unique
@@ -648,6 +676,7 @@ model Asset {
   createdAt    DateTime  @default(now())
 
   project       Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  folder        ProjectFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
   uploadedBy    User?    @relation("UploadedAssets", fields: [uploadedById], references: [id], onDelete: SetNull)
   attachments   AssetAttachment[]
   projectCovers Project[] @relation("ProjectCover")
@@ -656,6 +685,7 @@ model Asset {
   locationImages Location[] @relation("LocationImage")
   writingVersionBodies WritingVersion[] @relation("WritingVersionBodyAsset")
 
+  @@index([folderId, order])
   @@index([projectId, kind])
 }
 

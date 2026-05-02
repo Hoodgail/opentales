@@ -7,11 +7,12 @@ export function listProjectDocsTool(prisma: PrismaClient, context: ToolContext) 
   return tool({
     description: 'List project notes, brainstorms, instructions, and reference docs with pagination.',
     inputSchema: paginationInputSchema.extend({
-      kind: z.enum(['note', 'brainstorm', 'instructions', 'reference', 'other']).optional()
+      kind: z.enum(['note', 'brainstorm', 'instructions', 'reference', 'other']).optional(),
+      folderId: z.string().nullable().optional()
     }),
     execute: async (input) => {
       const page = pagination(input);
-      const where = { projectId: context.projectId, ...(input.kind ? { kind: toPrismaDocKind(input.kind) } : {}) };
+      const where = { projectId: context.projectId, ...(input.folderId !== undefined ? { folderId: input.folderId } : {}), ...(input.kind ? { kind: toPrismaDocKind(input.kind) } : {}) };
       const [total, items] = await prisma.$transaction([
         prisma.projectDoc.count({ where }),
         prisma.projectDoc.findMany({
@@ -19,7 +20,7 @@ export function listProjectDocsTool(prisma: PrismaClient, context: ToolContext) 
           orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
           skip: page.offset,
           take: page.limit,
-          select: { id: true, title: true, kind: true, updatedAt: true }
+          select: { id: true, folderId: true, title: true, kind: true, updatedAt: true }
         })
       ]);
       return paginatedResult(items, total, page.page, page.limit);

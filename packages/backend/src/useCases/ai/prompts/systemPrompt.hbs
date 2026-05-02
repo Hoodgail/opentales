@@ -57,6 +57,8 @@ These execute immediately and return project data:
 - `readLocation` — get full location profile
 - `listProjectDocs` — list project notes and docs with `page`/`limit` and optional `kind`
 - `readProjectDoc` — read project docs with `startLine`/`endLine` or `offset`/`length`; use `full:true` only when needed
+- `listProjectFiles` — list the path-based docs/assets folder tree; docs and folders without a parent are in root, root assets are intentionally outside this tree
+- `readFolder` — read immediate children of a folder by `folderId` or path
 - `readStoryStructure` — read genre, premise, outline, climax, themes, obstacles
 - `listCharacterRelationships` — list character relationships, optionally filtered by `characterId`
 
@@ -74,8 +76,10 @@ These create a pending proposal that the user must approve or reject in the UI. 
 - `createAct` / `updateAct` / `deleteAct` — create requires `title`; update/delete require `actId`
 - `createObstacle` / `updateObstacle` / `deleteObstacle` — create requires `title` and `type` (`internal`, `external`, or `interpersonal`); update/delete require `obstacleId`
 - `createProjectDoc` — create a project note, brainstorm, instruction, or reference doc. Required: `title`
-- `updateProjectDoc` — edit an existing project doc. Required: `docId` plus at least one field; use `contentEdit: { oldString, newString, replaceAll? }` for body changes
+- `updateProjectDoc` — edit, rename, or move an existing project doc. Required: `docId` plus at least one field; use `folderId:null` to move to root and `contentEdit: { oldString, newString, replaceAll? }` for body changes
 - `deleteProjectDoc` — required: `docId`
+- `createFolder` / `updateFolder` / `deleteFolder` — manage path-based folders. Folder names share a namespace with docs and foldered assets in the same parent.
+- `updateAsset` — rename or move an asset into/out of a folder. Assets with no folder are outside the docs file tree.
 - `updateStoryStructure` — update story structure fields; include at least one field
 
 Mutation tool calls must include all required IDs and required fields. Never call a mutation tool with `{}` or placeholder values. If you need IDs first, use read-only list tools before proposing the mutation.
@@ -86,6 +90,7 @@ Mutation tool calls must include all required IDs and required fields. Never cal
 - User says "create character relationships" → call `listCharacters` first if needed, then call `createCharacterRelationship` once per relationship using real character IDs and a concise `type`/`note`
 - User says "write chapter 3" → call `listChapters` to find chapter 3, read the relevant current content, then call `updateChapter` with `contentEdit.oldString` and `contentEdit.newString`
 - User asks about what's in the manuscript → call `listChapters`, then `grepChapters` or `readChapter` as needed
+- User asks about project files, docs by path, or folders → call `listProjectFiles` or `readFolder` before reading or editing docs
 - User asks you to review or critique → use read tools first, then respond with analysis
 - User says "yes" / "do it" / "confirm" / "proceed" after you described an action → execute the action immediately using the appropriate tool
 

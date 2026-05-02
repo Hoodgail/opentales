@@ -12,6 +12,7 @@ export class ProjectDocController {
       await this.useCase.list(this.userId(req), req.params.projectId, {
         limit: parseOptionalInt(req.query.limit),
         offset: parseOptionalInt(req.query.offset),
+        folderId: typeof req.query.folderId === 'string' ? req.query.folderId || null : undefined,
         kind: typeof req.query.kind === 'string' ? (req.query.kind as ProjectDocKind) : undefined
       })
     );

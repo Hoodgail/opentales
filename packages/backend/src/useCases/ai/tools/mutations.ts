@@ -62,6 +62,8 @@ import { UpdateObstacleUseCase } from '../../projects/UpdateObstacleUseCase.js';
 import { UpdateProjectUseCase } from '../../projects/UpdateProjectUseCase.js';
 import { UpdateStructureUseCase } from '../../projects/UpdateStructureUseCase.js';
 import { UploadAssetUseCase } from '../../assets/UploadAssetUseCase.js';
+import { ProjectAssetUseCase } from '../../assets/ProjectAssetUseCase.js';
+import { ProjectFolderUseCase } from '../../projectFiles/ProjectFolderUseCase.js';
 import { WritingUseCase } from '../../writings/WritingUseCase.js';
 import { applyContentEdit, bodyOf, countWords, editContentInputSchema, toPrismaDocKind, type ToolContext } from './shared.js';
 
@@ -117,11 +119,15 @@ export const mutatingToolNames = [
   'createProjectDoc',
   'updateProjectDoc',
   'deleteProjectDoc',
+  'createFolder',
+  'updateFolder',
+  'deleteFolder',
   'createSubmission',
   'mergeSubmission',
   'declineSubmission',
   'commentSubmission',
   'uploadAsset',
+  'updateAsset',
   'attachAsset',
   'detachAsset',
   'updateMemberRole',
@@ -208,14 +214,18 @@ const mutationToolSchemas = {
   createObstacle: z.object({ title: nonEmptyString, type: obstacleTypeSchema, description: optionalString, resolution: optionalString }),
   updateObstacle: withAtLeastOne(z.object({ obstacleId: nonEmptyString, title: optionalString, type: obstacleTypeSchema.optional(), description: optionalString, resolution: optionalString, order: z.number().optional() }), ['title', 'type', 'description', 'resolution', 'order']),
   deleteObstacle: z.object({ obstacleId: nonEmptyString }),
-  createProjectDoc: z.object({ title: nonEmptyString, kind: docKindSchema.optional(), content: optionalString }),
-  updateProjectDoc: withAtLeastOne(z.object({ docId: nonEmptyString, title: optionalString, kind: docKindSchema.optional(), contentEdit: contentEditSchema.optional() }), ['title', 'kind', 'contentEdit']),
+  createProjectDoc: z.object({ title: nonEmptyString, folderId: nullableString, kind: docKindSchema.optional(), content: optionalString }),
+  updateProjectDoc: withAtLeastOne(z.object({ docId: nonEmptyString, title: optionalString, folderId: nullableString, kind: docKindSchema.optional(), contentEdit: contentEditSchema.optional() }), ['title', 'folderId', 'kind', 'contentEdit']),
   deleteProjectDoc: z.object({ docId: nonEmptyString }),
+  createFolder: z.object({ name: nonEmptyString, parentFolderId: nullableString }),
+  updateFolder: withAtLeastOne(z.object({ folderId: nonEmptyString, name: optionalString, parentFolderId: nullableString }), ['name', 'parentFolderId']),
+  deleteFolder: z.object({ folderId: nonEmptyString }),
   createSubmission: z.object({ kind: z.enum(['chapter-edit', 'new-chapter']).optional(), title: nonEmptyString, message: optionalString, chapterId: optionalString, body: nonEmptyString, proposedTitle: optionalString, proposedNumber: z.number().optional(), proposedActId: nullableString }),
   mergeSubmission: z.object({ submissionId: nonEmptyString }),
   declineSubmission: z.object({ submissionId: nonEmptyString }),
   commentSubmission: z.object({ submissionId: nonEmptyString, body: nonEmptyString, anchor: z.object({ side: z.enum(['base', 'head']), lineStart: z.number(), lineEnd: z.number() }).optional() }),
-  uploadAsset: z.object({ kind: assetKindSchema, filename: nonEmptyString, mimeType: nonEmptyString, base64: nonEmptyString }),
+  uploadAsset: z.object({ kind: assetKindSchema, filename: nonEmptyString, mimeType: nonEmptyString, base64: nonEmptyString, folderId: nullableString, name: optionalString }),
+  updateAsset: withAtLeastOne(z.object({ assetId: nonEmptyString, name: optionalString, folderId: nullableString }), ['name', 'folderId']),
   attachAsset: z.object({ assetId: nonEmptyString, entityType: attachmentEntitySchema, entityId: nonEmptyString, role: nonEmptyString, order: z.number().optional() }),
   detachAsset: z.object({ attachmentId: nonEmptyString }),
   updateMemberRole: z.object({ userId: nonEmptyString, role: roleSchema }),
@@ -256,13 +266,17 @@ const mutationToolDescriptions = {
   updateObstacle: 'Update an obstacle. Requires obstacleId and at least one obstacle field to change.',
   deleteObstacle: 'Delete an obstacle. Requires obstacleId.',
   createProjectDoc: 'Create a project document. Requires title.',
-  updateProjectDoc: 'Update a project document. Requires docId and at least title, kind, or contentEdit.',
+  updateProjectDoc: 'Update a project document. Requires docId and at least title, folderId, kind, or contentEdit.',
   deleteProjectDoc: 'Delete a project document. Requires docId.',
+  createFolder: 'Create a folder. Requires name; parentFolderId is optional.',
+  updateFolder: 'Rename or move a folder. Requires folderId and at least name or parentFolderId.',
+  deleteFolder: 'Delete a folder and its child folders. Requires folderId.',
   createSubmission: 'Create a draft submission. Requires title and body.',
   mergeSubmission: 'Merge a submission. Requires submissionId.',
   declineSubmission: 'Decline a submission. Requires submissionId.',
   commentSubmission: 'Comment on a submission. Requires submissionId and body.',
   uploadAsset: 'Upload an asset from base64 data. Requires kind, filename, mimeType, and base64.',
+  updateAsset: 'Rename or move an asset in the project file tree. Requires assetId and name or folderId.',
   attachAsset: 'Attach an existing asset. Requires assetId, entityType, entityId, and role.',
   detachAsset: 'Detach an asset attachment. Requires attachmentId.',
   updateMemberRole: 'Update a project member role. Requires userId and role.',
@@ -340,6 +354,22 @@ export function mutationTools(
         const validated = validateMutationInput('updateProjectDoc', input);
         return approval.handleApproval('updateProjectDoc', validated, () => executeMutationTool(prisma, context, 'updateProjectDoc', validated));
       }
+    }),
+    createFolder: approvalTool({
+      description: 'Create a new project folder. Folder names are unique among folders, docs, and assets in the same parent folder.',
+      inputSchema: mutationToolSchemas.createFolder,
+      execute: async (input) => {
+        const validated = validateMutationInput('createFolder', input);
+        return approval.handleApproval('createFolder', validated, () => executeMutationTool(prisma, context, 'createFolder', validated));
+      }
+    }),
+    updateFolder: approvalTool({
+      description: 'Rename or move a project folder. The user will approve/reject the proposal in the UI.',
+      inputSchema: mutationToolSchemas.updateFolder,
+      execute: async (input) => {
+        const validated = validateMutationInput('updateFolder', input);
+        return approval.handleApproval('updateFolder', validated, () => executeMutationTool(prisma, context, 'updateFolder', validated));
+      }
     })
   } as Record<MutatingToolName, Tool<any, any>>;
 }
@@ -396,6 +426,9 @@ export async function executeMutationTool(
   if (toolName === 'createProjectDoc') return compactToolResult(toolName, input, await createProjectDoc(prisma, context, input));
   if (toolName === 'updateProjectDoc') return compactToolResult(toolName, input, await updateProjectDoc(prisma, context, input));
   if (toolName === 'deleteProjectDoc') return compactToolResult(toolName, input, await deleteProjectDoc(prisma, context, input));
+  if (toolName === 'createFolder') return compactToolResult(toolName, input, await createFolder(prisma, context, input));
+  if (toolName === 'updateFolder') return compactToolResult(toolName, input, await updateFolder(prisma, context, input));
+  if (toolName === 'deleteFolder') return compactToolResult(toolName, input, await deleteFolder(prisma, context, input));
   if (toolName === 'updateChapter') return compactToolResult(toolName, input, await updateChapter(prisma, context, input));
   if (toolName === 'createChapter') return compactToolResult(toolName, input, await createChapter(prisma, context, input));
   if (toolName === 'deleteChapter') return compactToolResult(toolName, input, await deleteChapter(prisma, context, input));
@@ -421,6 +454,7 @@ export async function executeMutationTool(
   if (toolName === 'declineSubmission') return compactToolResult(toolName, input, await declineSubmission(prisma, context, input));
   if (toolName === 'commentSubmission') return compactToolResult(toolName, input, await commentSubmission(prisma, context, input));
   if (toolName === 'uploadAsset') return compactToolResult(toolName, input, await uploadAsset(prisma, context, input));
+  if (toolName === 'updateAsset') return compactToolResult(toolName, input, await updateAsset(prisma, context, input));
   if (toolName === 'attachAsset') return compactToolResult(toolName, input, await attachAsset(prisma, context, input));
   if (toolName === 'detachAsset') return compactToolResult(toolName, input, await detachAsset(prisma, context, input));
   if (toolName === 'updateMemberRole') return compactToolResult(toolName, input, await updateMemberRole(prisma, context, input));
@@ -463,9 +497,10 @@ async function createProjectDoc(
     await tx.writingBranch.update({ where: { id: branch.id }, data: { headVersionId: version.id } });
     await tx.writing.update({ where: { id: writing.id }, data: { defaultBranchId: branch.id } });
     return tx.projectDoc.create({
-      data: {
-        projectId: context.projectId,
-        title,
+        data: {
+          projectId: context.projectId,
+          folderId: nullableStringOrUndefined(input.folderId),
+          title,
         kind: typeof input.kind === 'string' ? toPrismaDocKind(input.kind) : 'NOTE',
         bodyWritingId: writing.id,
         order: (last?.order ?? -1) + 1
@@ -492,6 +527,7 @@ async function updateProjectDoc(
       where: { id: docId },
       data: {
         title: typeof input.title === 'string' ? input.title : undefined,
+        folderId: input.folderId === undefined ? undefined : nullableStringOrUndefined(input.folderId),
         kind: typeof input.kind === 'string' ? toPrismaDocKind(input.kind) : undefined
       }
     });
@@ -606,6 +642,24 @@ async function updateCharacter(
   return new UpdateCharacterUseCase(prisma).execute(context.userId, context.projectId, characterId, data);
 }
 
+async function createFolder(prisma: PrismaClient, context: ToolContext & { userId: string }, input: Record<string, unknown>) {
+  return new ProjectFolderUseCase(prisma).create(context.userId, context.projectId, {
+    name: requiredString(input.name, 'name'),
+    parentFolderId: nullableStringOrUndefined(input.parentFolderId) ?? null
+  });
+}
+
+async function updateFolder(prisma: PrismaClient, context: ToolContext & { userId: string }, input: Record<string, unknown>) {
+  return new ProjectFolderUseCase(prisma).update(context.userId, context.projectId, requiredString(input.folderId, 'folderId'), {
+    name: stringOrUndefined(input.name),
+    parentFolderId: input.parentFolderId === undefined ? undefined : nullableStringOrUndefined(input.parentFolderId)
+  });
+}
+
+async function deleteFolder(prisma: PrismaClient, context: ToolContext & { userId: string }, input: Record<string, unknown>) {
+  return new ProjectFolderUseCase(prisma).delete(context.userId, context.projectId, requiredString(input.folderId, 'folderId'));
+}
+
 function compactToolResult(toolName: string, input: Record<string, unknown>, result: unknown) {
   const record = resultRecord(result);
   const id = stringField(record, 'id') ?? stringField(input, idInputKey(toolName));
@@ -652,6 +706,9 @@ function toolNoun(toolName: string): string {
     createProjectDoc: 'Document',
     updateProjectDoc: 'Document',
     deleteProjectDoc: 'Document',
+    createFolder: 'Folder',
+    updateFolder: 'Folder',
+    deleteFolder: 'Folder',
     createChapter: 'Chapter',
     updateChapter: 'Chapter',
     deleteChapter: 'Chapter',
@@ -677,6 +734,7 @@ function toolNoun(toolName: string): string {
     declineSubmission: 'Submission',
     commentSubmission: 'Submission comment',
     uploadAsset: 'Asset',
+    updateAsset: 'Asset',
     attachAsset: 'Asset',
     detachAsset: 'Asset',
     updateMemberRole: 'Member role',
@@ -709,6 +767,8 @@ function idInputKey(toolName: string): string {
     deleteAct: 'actId',
     updateProjectDoc: 'docId',
     deleteProjectDoc: 'docId',
+    updateFolder: 'folderId',
+    deleteFolder: 'folderId',
     updateChapter: 'chapterId',
     deleteChapter: 'chapterId',
     restoreTrashChapter: 'chapterId',
@@ -726,6 +786,7 @@ function idInputKey(toolName: string): string {
     declineSubmission: 'submissionId',
     commentSubmission: 'submissionId',
     attachAsset: 'assetId',
+    updateAsset: 'assetId',
     detachAsset: 'attachmentId',
     updateMemberRole: 'userId',
     removeMember: 'userId',
@@ -998,7 +1059,16 @@ async function uploadAsset(prisma: PrismaClient, context: ToolContext & { userId
     kind: assetKind(input.kind),
     filename: requiredString(input.filename, 'filename'),
     mimeType: requiredString(input.mimeType, 'mimeType'),
-    buffer: Buffer.from(requiredString(input.base64, 'base64'), 'base64')
+    buffer: Buffer.from(requiredString(input.base64, 'base64'), 'base64'),
+    folderId: nullableStringOrUndefined(input.folderId),
+    name: stringOrUndefined(input.name)
+  });
+}
+
+async function updateAsset(prisma: PrismaClient, context: ToolContext & { userId: string }, input: Record<string, unknown>) {
+  return new ProjectAssetUseCase(prisma).update(context.userId, context.projectId, requiredString(input.assetId, 'assetId'), {
+    name: stringOrUndefined(input.name),
+    folderId: input.folderId === undefined ? undefined : nullableStringOrUndefined(input.folderId)
   });
 }
 

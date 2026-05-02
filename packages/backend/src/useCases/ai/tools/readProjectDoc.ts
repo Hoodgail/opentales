@@ -13,6 +13,7 @@ export function readProjectDocTool(prisma: PrismaClient, context: ToolContext) {
       const doc = await prisma.projectDoc.findFirst({
         where: { id: input.docId, projectId: context.projectId },
         include: {
+          folder: true,
           bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } }
         }
       });
@@ -20,7 +21,9 @@ export function readProjectDocTool(prisma: PrismaClient, context: ToolContext) {
       const range = readTextRange(bodyOf(doc.bodyWriting), input);
       return {
         id: doc.id,
+        folderId: doc.folderId,
         title: doc.title,
+        path: doc.folder ? `${doc.folder.path}/${doc.title}` : doc.title,
         kind: doc.kind,
         range: range.range,
         content: range.content,

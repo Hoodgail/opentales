@@ -2,8 +2,10 @@ import { Router } from 'express';
 import { AiController } from '../controllers/AiController.js';
 import { CollaborationController } from '../controllers/CollaborationController.js';
 import { ProjectDocController } from '../controllers/ProjectDocController.js';
+import { ProjectFolderController } from '../controllers/ProjectFolderController.js';
 import { ProjectController } from '../controllers/ProjectController.js';
 import { StatsController } from '../controllers/StatsController.js';
+import { StorageController } from '../controllers/StorageController.js';
 import { TrashController } from '../controllers/TrashController.js';
 import { asyncHandler } from '../http/asyncHandler.js';
 import { requireAuth } from '../middleware/authMiddleware.js';
@@ -12,8 +14,10 @@ const controller = new ProjectController();
 const ai = new AiController();
 const collaboration = new CollaborationController();
 const docs = new ProjectDocController();
+const folders = new ProjectFolderController();
 const trash = new TrashController();
 const stats = new StatsController();
+const storage = new StorageController();
 export const projectRoutes = Router();
 
 projectRoutes.use(requireAuth);
@@ -76,10 +80,15 @@ projectRoutes.post('/:projectId/ai/character-dialogue', asyncHandler(ai.characte
 projectRoutes.post('/:projectId/ai/outline-expansions', asyncHandler(ai.outlineExpansion));
 
 projectRoutes.get('/:projectId/docs', asyncHandler(docs.list));
+projectRoutes.get('/:projectId/docs/tree', asyncHandler(folders.tree));
 projectRoutes.post('/:projectId/docs', asyncHandler(docs.create));
 projectRoutes.get('/:projectId/docs/:docId', asyncHandler(docs.get));
 projectRoutes.patch('/:projectId/docs/:docId', asyncHandler(docs.update));
 projectRoutes.delete('/:projectId/docs/:docId', asyncHandler(docs.delete));
+
+projectRoutes.post('/:projectId/folders', asyncHandler(folders.create));
+projectRoutes.patch('/:projectId/folders/:folderId', asyncHandler(folders.update));
+projectRoutes.delete('/:projectId/folders/:folderId', asyncHandler(folders.delete));
 
 projectRoutes.post('/:projectId/acts', asyncHandler(controller.createAct));
 projectRoutes.patch('/:projectId/acts/:actId', asyncHandler(controller.updateAct));
@@ -130,3 +139,4 @@ projectRoutes.delete(
 );
 
 projectRoutes.get('/:projectId/stats', asyncHandler(stats.get));
+projectRoutes.get('/:projectId/storage', asyncHandler(storage.get));

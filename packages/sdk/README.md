@@ -62,6 +62,9 @@ Important DTOs:
 - `AuthUser`
 - `ProjectSummary`
 - `ManuscriptProject`
+- `ProjectFolder`
+- `ProjectFileTree`
+- `ProjectStorageUsage`
 - `Character`
 - `Location`
 - `Chapter`
@@ -88,3 +91,11 @@ Important DTOs:
 | `detachCharacterAsset(projectId, characterId, attachmentId)` | `DELETE /projects/:projectId/characters/:characterId/assets/:attachmentId` |
 | `updateLocation(projectId, locationId, input)` | `PATCH /projects/:projectId/locations/:locationId` |
 | `updateStructure(projectId, input)` | `PATCH /projects/:projectId/structure` |
+| `getProjectFileTree(projectId)` | `GET /projects/:projectId/docs/tree` |
+| `createProjectFolder(projectId, input)` | `POST /projects/:projectId/folders` |
+| `updateProjectFolder(projectId, folderId, input)` | `PATCH /projects/:projectId/folders/:folderId` |
+| `deleteProjectFolder(projectId, folderId)` | `DELETE /projects/:projectId/folders/:folderId` |
+| `updateProjectAsset(projectId, assetId, input)` | `PATCH /projects/:projectId/assets/:assetId` |
+| `getProjectStorage(projectId)` | `GET /projects/:projectId/storage` |
+
+Project docs are path-based through folders. `ProjectDoc.kind` is only metadata for filtering and AI behavior; use `folderId` to place docs in the tree. Assets appear in the tree only when they have a `folderId`.

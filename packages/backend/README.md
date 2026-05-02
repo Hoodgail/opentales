@@ -9,6 +9,8 @@ Express API for OpenTales. It uses Prisma with PostgreSQL and keeps business log
 - Org and membership based project access
 - Project manuscript reads
 - Chapter, character, location, project, and story structure updates
+- Path-based project docs, nested folders, and foldered assets
+- Project storage usage accounting across assets and writing content
 - Versioned prose through `Writing`, `WritingBranch`, and `WritingVersion`
 - Demo seed data converted from the current frontend manuscript fixture
 
@@ -84,6 +86,14 @@ Project routes require `Authorization: Bearer <token>`.
 | `DELETE` | `/projects/:projectId/characters/:characterId/assets/:attachmentId` | Remove a character asset attachment |
 | `PATCH` | `/projects/:projectId/locations/:locationId` | Update location fields and prose |
 | `PATCH` | `/projects/:projectId/structure` | Update project structure prose and metadata |
+| `GET` | `/projects/:projectId/docs/tree` | Load the folder tree of docs and foldered assets |
+| `POST` | `/projects/:projectId/folders` | Create a project folder |
+| `PATCH` | `/projects/:projectId/folders/:folderId` | Rename, move, or reorder a folder |
+| `DELETE` | `/projects/:projectId/folders/:folderId` | Delete a folder subtree |
+| `PATCH` | `/projects/:projectId/assets/:assetId` | Rename or move an asset into/out of folders |
+| `GET` | `/projects/:projectId/storage` | Calculate total project storage usage |
+
+Folders use Linux-like case-sensitive names. A folder cannot contain two child items with the same name across folders, docs, and foldered assets. The backend enforces this in transactions with PostgreSQL advisory locks scoped to the project and parent folder, so cross-table sibling checks do not race.
 
 ## Structure
 

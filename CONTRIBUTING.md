@@ -92,6 +92,7 @@ If your PR touches the schema, also include the Prisma migration (don't hand-edi
 - TypeScript everywhere. No `any` unless you're genuinely interfacing with something untyped — and even then, narrow it down.
 - Frontend: Svelte 5 runes (`$state`, `$derived`, `$effect`). No legacy stores in new code unless there's a reason.
 - Backend: clean architecture (controller → use case → repository). Don't reach into Prisma from controllers.
+- Folder tree mutations must use the shared project file helpers so cross-table sibling-name checks stay transaction-safe and expandable to new item types.
 - Tailwind v4 utility classes, no inline styles unless dynamic.
 - Comments are sparing. Names should carry the meaning; comments should explain *why*, not *what*.
 

@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import type { ProjectDoc, ProjectDocKind } from '@opentales/sdk';
 
 export const projectDocInclude = {
+  folder: true,
   bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } }
 } satisfies Prisma.ProjectDocInclude;
 
@@ -33,10 +34,13 @@ export function toProjectDoc(doc: ProjectDocWithBody): ProjectDoc {
   return {
     id: doc.id,
     projectId: doc.projectId,
+    folderId: doc.folderId,
     title: doc.title,
+    path: doc.folder ? `${doc.folder.path}/${doc.title}` : doc.title,
     kind: KIND_MAP[doc.kind] as ProjectDocKind,
     content: head?.body ?? '',
     wordCount: head?.wordCount ?? 0,
+    order: doc.order,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString()
   };

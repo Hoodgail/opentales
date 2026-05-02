@@ -15,6 +15,14 @@ import {
   toPrismaProjectDocKind,
   toProjectDoc
 } from './projectDocMapper.js';
+import {
+  assertFolderInProject,
+  assertSiblingNamesAvailable,
+  lockFolderSiblings,
+  nextFolderOrder,
+  validateFolderItemName,
+  withFolderSiblingLock
+} from '../projectFiles/folderLocks.js';
 
 const PROJECT_DOC_KINDS = new Set<ProjectDocKind>([
   'note',
@@ -40,8 +48,9 @@ export class ProjectDocUseCase {
     await this.access.assertProjectAccess(userId, projectId);
     const limit = clampInt(input.limit, 1, 100, 50);
     const offset = clampInt(input.offset, 0, Number.MAX_SAFE_INTEGER, 0);
-    const where = {
+      const where = {
       projectId,
+      ...(input.folderId !== undefined ? { folderId: input.folderId } : {}),
       ...(input.kind ? { kind: toPrismaProjectDocKind(validateKind(input.kind)) } : {})
     };
     const [total, docs] = await this.prisma.$transaction([
@@ -80,16 +89,13 @@ export class ProjectDocUseCase {
     input: CreateProjectDocInput
   ): Promise<ProjectDoc> {
     await this.access.assertPermission(userId, projectId, 'project:write');
-    const title = input.title?.trim();
-    if (!title) throw new HttpError(400, 'Document title is required');
+    const title = validateFolderItemName(input.title ?? '', 'Document title');
     const kind = validateKind(input.kind ?? 'note');
+    const folderId = input.folderId ?? null;
 
-    const docId = await this.prisma.$transaction(async (tx) => {
-      const last = await tx.projectDoc.findFirst({
-        where: { projectId },
-        orderBy: { order: 'desc' },
-        select: { order: true }
-      });
+    const docId = await withFolderSiblingLock(this.prisma, projectId, folderId, async (tx) => {
+      await assertFolderInProject(tx, projectId, folderId);
+      await assertSiblingNamesAvailable(tx, projectId, folderId, [{ type: 'doc', name: title }]);
       const bodyWritingId = await this.writingUseCase.createWriting(tx, {
         projectId,
         kind: 'NOTE',
@@ -100,10 +106,11 @@ export class ProjectDocUseCase {
       const doc = await tx.projectDoc.create({
         data: {
           projectId,
+          folderId,
           title,
           kind: toPrismaProjectDocKind(kind),
           bodyWritingId,
-          order: (last?.order ?? -1) + 1
+          order: input.order ?? await nextFolderOrder(tx, projectId, folderId)
         },
         select: { id: true }
       });
@@ -122,16 +129,26 @@ export class ProjectDocUseCase {
     await this.access.assertPermission(userId, projectId, 'project:write');
     const existing = await this.prisma.projectDoc.findFirst({
       where: { id: docId, projectId },
-      select: { id: true, bodyWritingId: true }
+      select: { id: true, folderId: true, title: true, bodyWritingId: true }
     });
     if (!existing) throw new HttpError(404, 'Project document not found');
 
+    const targetFolderId = input.folderId === undefined ? existing.folderId : input.folderId;
+    const lockIds = Array.from(new Set([existing.folderId ?? null, targetFolderId ?? null]));
     await this.prisma.$transaction(async (tx) => {
-      const data: { title?: string; kind?: ReturnType<typeof toPrismaProjectDocKind> } = {};
+      for (const id of lockIds.sort((a, b) => String(a).localeCompare(String(b)))) await lockFolderSiblings(tx, projectId, id);
+      const data: { title?: string; folderId?: string | null; order?: number; kind?: ReturnType<typeof toPrismaProjectDocKind> } = {};
       if (input.title !== undefined) {
-        const title = input.title.trim();
-        if (!title) throw new HttpError(400, 'Document title cannot be empty');
+        const title = validateFolderItemName(input.title, 'Document title');
         data.title = title;
+      }
+      if (input.folderId !== undefined) {
+        await assertFolderInProject(tx, projectId, input.folderId);
+        data.folderId = input.folderId;
+      }
+      if (input.order !== undefined) data.order = input.order;
+      if (data.title !== undefined || data.folderId !== undefined) {
+        await assertSiblingNamesAvailable(tx, projectId, targetFolderId ?? null, [{ type: 'doc', id: docId, name: data.title ?? existing.title }]);
       }
       if (input.kind !== undefined) data.kind = toPrismaProjectDocKind(validateKind(input.kind));
 

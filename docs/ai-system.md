@@ -28,7 +28,7 @@ The AI data model lives in `packages/backend/prisma/schema.prisma`.
 
 `AiAgentToolCall` stores model tool calls, including approval-required mutations. Tool calls move through statuses such as `PENDING_APPROVAL`, `EXECUTED`, `REJECTED`, and `ERROR`.
 
-Project docs are separate from chat state. `ProjectDoc` uses the versioned `Writing` system and can be read by the agent. Docs with kind `INSTRUCTIONS` are automatically injected into the agent prompt as standing project guidance.
+Project docs are separate from chat state. `ProjectDoc` uses the versioned `Writing` system and can be read by the agent. Docs are organized by path-based folders; `kind` is metadata for filtering and internal behavior, not hierarchy. Docs with kind `INSTRUCTIONS` are automatically injected into the agent prompt as standing project guidance regardless of their folder.
 
 ## Provider configuration
 
@@ -100,6 +100,11 @@ Read-only tools include:
 - `readLocation`
 - `listProjectDocs`
 - `readProjectDoc`
+- `listProjectFiles`
+- `readFolder`
+- `listAssets`
+- `readAssetMetadata`
+- `readAssetContent`
 - `readStoryStructure`
 
 The prompt tells the model to prefer summaries, grep, bounded reads, and lists before requesting full chapter text. This keeps the agent useful without loading the whole manuscript by default.
@@ -116,6 +121,12 @@ Approval-required tools include:
 - `updateChapter`
 - `createProjectDoc`
 - `updateProjectDoc`
+- `createFolder`
+- `updateFolder`
+- `deleteFolder`
+- `updateAsset`
+
+Folder and path mutations are approval-gated. A parent folder cannot contain duplicate child names across folders, docs, and foldered assets. Root docs and root folders appear in the file tree; root assets remain outside the tree unless moved into a folder.
 
 The frontend renders pending calls in `AiAgentPanel.svelte`. Opening a pending call creates an in-memory approval document and opens `AiApprovalEditor.svelte`, which renders separate Monaco diff panes for fields such as chapter metadata, summary, manuscript content, character basics, character description, and document body.
 

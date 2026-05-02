@@ -40,6 +40,7 @@ A novel is a codebase of human meaning — characters, places, plot threads, and
 
 - **Monaco-powered editor.** The same editor that powers VS Code, tuned for prose. Markdown highlighting, multi-cursor, find-and-replace.
 - **Living characters.** Every character is a first-class document — portraits, traits, voice samples, and relationships.
+- **Path-based project docs.** Notes, references, AI instructions, and foldered assets live in a VS Code-like tree with nested custom folders.
 - **Settings with atmosphere.** Upload reference imagery for every location.
 - **Plot, voice, and obstacles.** Premise, theme, POV, climax, and obstacles live in their own structured panels.
 - **Episodic chapters.** Acts, chapters, and scene beats organized like a project tree.
@@ -130,6 +131,8 @@ prisma.md       Data-model design notes
 | **[Contributing](CONTRIBUTING.md)** | How to set up a working copy and submit your first PR. |
 | **[Backend README](packages/backend/README.md)** | Backend-specific notes. |
 | **[SDK README](packages/sdk/README.md)** | SDK usage and shape. |
+
+Project docs are organized by folders and paths, not by `kind`. The `kind` field remains metadata for filtering and internal AI behavior, especially `instructions` docs that are injected into agent prompts.
 
 ## Roadmap highlights
 

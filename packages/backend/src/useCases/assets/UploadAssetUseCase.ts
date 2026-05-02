@@ -5,6 +5,7 @@ import { HttpError } from '../../http/HttpError.js';
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
 import { LocalAssetStorage } from '../../repositories/AssetStorage.js';
 import { env } from '../../config/env.js';
+import { assertFolderInProject, assertSiblingNamesAvailable, itemNameFromAsset, nextFolderOrder, withFolderSiblingLock } from '../projectFiles/folderLocks.js';
 
 const SDK_TO_PRISMA: Record<SdkAssetKind, AssetKind> = {
   image: AssetKind.IMAGE,
@@ -33,6 +34,8 @@ export interface UploadAssetInput {
   filename: string;
   mimeType: string;
   buffer: Buffer;
+  folderId?: string | null;
+  name?: string;
 }
 
 export class UploadAssetUseCase {
@@ -58,17 +61,27 @@ export class UploadAssetUseCase {
 
     const ext = path.extname(input.filename).replace(/^\./, '').toLowerCase();
 
-    // Pre-allocate id so the storage key is stable.
-    const created = await this.prisma.asset.create({
-      data: {
-        projectId,
-        kind: prismaKind,
-        s3Bucket: LocalAssetStorage.bucket,
-        s3Key: `pending/${cryptoRandom()}`,
-        mimeType: input.mimeType,
-        sizeBytes: BigInt(input.buffer.length),
-        uploadedById: userId
-      }
+    const folderId = input.folderId ?? null;
+    const name = input.name !== undefined || folderId ? itemNameFromAsset(input.name ?? input.filename, '') : null;
+
+    const created = await withFolderSiblingLock(this.prisma, projectId, folderId, async (tx) => {
+      await assertFolderInProject(tx, projectId, folderId);
+      if (folderId && name) await assertSiblingNamesAvailable(tx, projectId, folderId, [{ type: 'asset', name }]);
+      // Pre-allocate id so the storage key is stable.
+      return tx.asset.create({
+        data: {
+          projectId,
+          folderId,
+          name,
+          order: folderId ? await nextFolderOrder(tx, projectId, folderId) : null,
+          kind: prismaKind,
+          s3Bucket: LocalAssetStorage.bucket,
+          s3Key: `pending/${cryptoRandom()}`,
+          mimeType: input.mimeType,
+          sizeBytes: BigInt(input.buffer.length),
+          uploadedById: userId
+        }
+      });
     });
 
     const stored = await this.storage.write(projectId, created.id, ext, input.buffer);
@@ -84,6 +97,8 @@ export class UploadAssetUseCase {
     return {
       id: finalAsset.id,
       projectId: finalAsset.projectId,
+      folderId: finalAsset.folderId,
+      name: finalAsset.name,
       kind: fromPrismaKind(finalAsset.kind),
       mimeType: finalAsset.mimeType,
       sizeBytes: Number(finalAsset.sizeBytes),

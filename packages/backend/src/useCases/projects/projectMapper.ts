@@ -103,6 +103,7 @@ const projectInclude = {
   docs: {
     orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
     include: {
+      folder: true,
       bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } }
     }
   }
@@ -247,10 +248,13 @@ function toProjectDoc(doc: ProjectWithManuscript['docs'][number]): ProjectDoc {
   return {
     id: doc.id,
     projectId: doc.projectId,
+    folderId: doc.folderId,
     title: doc.title,
+    path: doc.folder ? `${doc.folder.path}/${doc.title}` : doc.title,
     kind: kindMap[doc.kind],
     content: head?.body ?? '',
     wordCount: head?.wordCount ?? 0,
+    order: doc.order,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString()
   };

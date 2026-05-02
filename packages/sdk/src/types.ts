@@ -91,6 +91,8 @@ export interface Location {
 export interface Asset {
   id: string;
   projectId: string | null;
+  folderId?: string | null;
+  name?: string | null;
   kind: AssetKind;
   mimeType: string;
   sizeBytes: number;
@@ -114,12 +116,39 @@ export interface Chapter {
 export interface ProjectDoc {
   id: string;
   projectId: string;
+  folderId?: string | null;
   title: string;
+  path?: string;
   kind: ProjectDocKind;
   content: string;
   wordCount: number;
+  order?: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ProjectFolder {
+  id: string;
+  projectId: string;
+  parentFolderId: string | null;
+  name: string;
+  path: string;
+  order: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectTreeAsset extends Asset {
+  folderId: string | null;
+  name: string;
+  path: string;
+  order: number;
+}
+
+export interface ProjectFileTree {
+  folders: ProjectFolder[];
+  docs: ProjectDoc[];
+  assets: ProjectTreeAsset[];
 }
 
 export interface CollaborationDocumentRef {
@@ -218,19 +247,42 @@ export interface PaginatedProjectDocs {
 export interface ListProjectDocsInput {
   limit?: number;
   offset?: number;
+  folderId?: string | null;
   kind?: ProjectDocKind;
 }
 
 export interface CreateProjectDocInput {
   title: string;
+  folderId?: string | null;
   kind?: ProjectDocKind;
   content?: string;
+  order?: number;
 }
 
 export interface UpdateProjectDocInput {
   title?: string;
+  folderId?: string | null;
   kind?: ProjectDocKind;
   content?: string;
+  order?: number;
+}
+
+export interface CreateProjectFolderInput {
+  name: string;
+  parentFolderId?: string | null;
+  order?: number;
+}
+
+export interface UpdateProjectFolderInput {
+  name?: string;
+  parentFolderId?: string | null;
+  order?: number;
+}
+
+export interface UpdateProjectAssetInput {
+  name?: string;
+  folderId?: string | null;
+  order?: number;
 }
 
 export interface Act {
@@ -353,6 +405,17 @@ export interface ProjectStats {
   currentStreakDays: number;
   windowDays: number;
   days: ProjectStatsDay[];
+}
+
+export interface ProjectStorageUsage {
+  projectId: string;
+  assetBytes: number;
+  writingContentBytes: number;
+  writingBodyAssetBytes: number;
+  totalBytes: number;
+  assetCount: number;
+  writingVersionCount: number;
+  writingBodyAssetCount: number;
 }
 
 export interface ProjectAiSettings {

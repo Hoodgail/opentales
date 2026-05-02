@@ -5,6 +5,7 @@ import { listCharactersTool } from './listCharacters.js';
 import { listLocationsTool } from './listLocations.js';
 import { listProjectDocsTool } from './listProjectDocs.js';
 import { mutationTools, type ApprovalHandler } from './mutations.js';
+import { listProjectFilesTool, readFolderTool } from './projectFiles.js';
 import { readChapterTool } from './readChapter.js';
 import { readCharacterTool } from './readCharacter.js';
 import { readLocationTool } from './readLocation.js';
@@ -45,6 +46,8 @@ export function buildAgentTools(
 ) {
   return {
     readProject: readProjectTool(prisma, context),
+    listProjectFiles: listProjectFilesTool(prisma, context),
+    readFolder: readFolderTool(prisma, context),
     listCharacters: listCharactersTool(prisma, context),
     readCharacter: readCharacterTool(prisma, context),
     listCharacterRelationships: listCharacterRelationshipsTool(prisma, context),

@@ -13,12 +13,17 @@ import {
   type AiRewriteMode,
   type AiRewriteSuggestion,
   type AiToolManifest,
+  type CreateProjectFolderInput,
   type CreateProjectDocInput,
   type PaginatedProjectDocs,
   type ProjectAiSettings,
   type ProjectDoc,
+  type ProjectFileTree,
+  type ProjectFolder,
   type ProjectDocKind,
   type UpdateProjectAiSettingsInput,
+  type UpdateProjectAssetInput,
+  type UpdateProjectFolderInput,
   type UpdateProjectDocInput
 } from '@opentales/sdk';
 
@@ -73,6 +78,7 @@ function createAiStore() {
 
   // ── Project docs ─────────────────────────────────────────────────────
   let docs = $state<ProjectDoc[]>([]);
+  let fileTree = $state<ProjectFileTree>({ folders: [], docs: [], assets: [] });
   let docsTotal = $state(0);
   let docsLoading = $state(false);
   let docsError = $state<string | null>(null);
@@ -83,6 +89,7 @@ function createAiStore() {
     try {
       const result: PaginatedProjectDocs = await api.listProjectDocs(projectId, opts);
       docs.splice(0, docs.length, ...result.items);
+      fileTree.docs = result.items;
       docsTotal = result.total;
     } catch (err) {
       docsError = err instanceof Error ? err.message : 'Failed to load docs';
@@ -96,6 +103,7 @@ function createAiStore() {
     try {
       const doc = await api.createProjectDoc(projectId, input);
       docs.push(doc);
+      fileTree.docs.push(doc);
       docsTotal += 1;
       return doc;
     } catch (err) {
@@ -119,6 +127,8 @@ function createAiStore() {
       const updated = await api.updateProjectDoc(projectId, docId, input);
       const idx = docs.findIndex((d) => d.id === docId);
       if (idx >= 0) docs[idx] = updated;
+      const treeIdx = fileTree.docs.findIndex((d) => d.id === docId);
+      if (treeIdx >= 0) fileTree.docs[treeIdx] = updated;
       return updated;
     } catch (err) {
       docsError = err instanceof Error ? err.message : 'Failed to update doc';
@@ -135,8 +145,68 @@ function createAiStore() {
         docs.splice(idx, 1);
         docsTotal -= 1;
       }
+      const treeIdx = fileTree.docs.findIndex((d) => d.id === docId);
+      if (treeIdx >= 0) fileTree.docs.splice(treeIdx, 1);
     } catch (err) {
       docsError = err instanceof Error ? err.message : 'Failed to delete doc';
+    }
+  }
+
+  async function createFolder(projectId: string, input: CreateProjectFolderInput): Promise<ProjectFolder | null> {
+    docsError = null;
+    try {
+      const folder = await api.createProjectFolder(projectId, input);
+      fileTree.folders.push(folder);
+      return folder;
+    } catch (err) {
+      docsError = err instanceof Error ? err.message : 'Failed to create folder';
+      return null;
+    }
+  }
+
+  async function updateFolder(projectId: string, folderId: string, input: UpdateProjectFolderInput): Promise<ProjectFolder | null> {
+    docsError = null;
+    try {
+      const folder = await api.updateProjectFolder(projectId, folderId, input);
+      const idx = fileTree.folders.findIndex((f) => f.id === folderId);
+      if (idx >= 0) fileTree.folders[idx] = folder;
+      await loadFileTree(projectId);
+      return folder;
+    } catch (err) {
+      docsError = err instanceof Error ? err.message : 'Failed to update folder';
+      return null;
+    }
+  }
+
+  async function deleteFolder(projectId: string, folderId: string) {
+    docsError = null;
+    try {
+      await api.deleteProjectFolder(projectId, folderId);
+      await loadFileTree(projectId);
+    } catch (err) {
+      docsError = err instanceof Error ? err.message : 'Failed to delete folder';
+    }
+  }
+
+  async function updateAsset(projectId: string, assetId: string, input: UpdateProjectAssetInput): Promise<Asset | null> {
+    docsError = null;
+    try {
+      const asset = await api.updateProjectAsset(projectId, assetId, input);
+      await loadFileTree(projectId);
+      return asset;
+    } catch (err) {
+      docsError = err instanceof Error ? err.message : 'Failed to update asset';
+      return null;
+    }
+  }
+
+  async function deleteAsset(projectId: string, assetId: string) {
+    docsError = null;
+    try {
+      await api.deleteProjectAsset(projectId, assetId);
+      await loadFileTree(projectId);
+    } catch (err) {
+      docsError = err instanceof Error ? err.message : 'Failed to delete asset';
     }
   }
 
@@ -320,6 +390,21 @@ function createAiStore() {
     }
   }
 
+  async function loadFileTree(projectId: string) {
+    docsLoading = true;
+    docsError = null;
+    try {
+      const result = await api.getProjectFileTree(projectId);
+      fileTree = result;
+      docs.splice(0, docs.length, ...result.docs);
+      docsTotal = result.docs.length;
+    } catch (err) {
+      docsError = err instanceof Error ? err.message : 'Failed to load docs';
+    } finally {
+      docsLoading = false;
+    }
+  }
+
   async function uploadAttachment(projectId: string, file: Blob, options: { kind?: AssetKind; filename?: string } = {}): Promise<Asset | null> {
     sessionError = null;
     try {
@@ -440,6 +525,7 @@ function createAiStore() {
     settings = null;
     settingsError = null;
     docs.splice(0, docs.length);
+    fileTree = { folders: [], docs: [], assets: [] };
     docsTotal = 0;
     docsError = null;
     stopStream();
@@ -462,14 +548,21 @@ function createAiStore() {
 
     // docs
     get docs() { return docs; },
+    get fileTree() { return fileTree; },
     get docsTotal() { return docsTotal; },
     get docsLoading() { return docsLoading; },
     get docsError() { return docsError; },
     loadDocs,
+    loadFileTree,
     createDoc,
     getDoc,
     updateDoc,
     deleteDoc,
+    createFolder,
+    updateFolder,
+    deleteFolder,
+    updateAsset,
+    deleteAsset,
 
     // agent session
     get session() { return session; },

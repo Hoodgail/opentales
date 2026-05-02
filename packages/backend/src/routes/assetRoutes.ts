@@ -19,6 +19,8 @@ assetUploadRoutes.post(
   upload.single('file'),
   asyncHandler(controller.upload)
 );
+assetUploadRoutes.patch('/:projectId/assets/:assetId', asyncHandler(controller.update));
+assetUploadRoutes.delete('/:projectId/assets/:assetId', asyncHandler(controller.delete));
 
 // Public read: served unauthenticated so <img src> tags work in the browser.
 // Anyone with a valid asset id (cuid, ~25 chars of entropy) can fetch the bytes.

@@ -16,6 +16,7 @@ import type {
   CreateInviteInput,
   CreateLocationInput,
   CreateObstacleInput,
+  CreateProjectFolderInput,
   CreateProjectDocInput,
   CreateProjectInput,
   LoginInput,
@@ -54,7 +55,10 @@ import type {
   ProjectInvite,
   ProjectAiSettings,
   ProjectDoc,
+  ProjectFileTree,
+  ProjectFolder,
   ProjectStats,
+  ProjectStorageUsage,
   ProjectSummary,
   PublicProject,
   RegisterInput,
@@ -69,7 +73,9 @@ import type {
   UpdateCharacterInput,
   UpdateLocationInput,
   UpdateObstacleInput,
+  UpdateProjectAssetInput,
   UpdateProjectDocInput,
+  UpdateProjectFolderInput,
   UpdateProjectAiSettingsInput,
   UpdateProjectInput,
   UpdateStructureInput
@@ -403,6 +409,7 @@ export class OpenTalesClient {
     const params = new URLSearchParams();
     if (input.limit !== undefined) params.set('limit', String(input.limit));
     if (input.offset !== undefined) params.set('offset', String(input.offset));
+    if (input.folderId !== undefined) params.set('folderId', input.folderId ?? '');
     if (input.kind !== undefined) params.set('kind', input.kind);
     const qs = params.toString() ? `?${params.toString()}` : '';
     return this.request<PaginatedProjectDocs>(`/projects/${projectId}/docs${qs}`);
@@ -432,6 +439,30 @@ export class OpenTalesClient {
 
   deleteProjectDoc(projectId: string, docId: string): Promise<{ id: string; deleted: true }> {
     return this.request<{ id: string; deleted: true }>(`/projects/${projectId}/docs/${docId}`, {
+      method: 'DELETE'
+    });
+  }
+
+  getProjectFileTree(projectId: string): Promise<ProjectFileTree> {
+    return this.request<ProjectFileTree>(`/projects/${projectId}/docs/tree`);
+  }
+
+  createProjectFolder(projectId: string, input: CreateProjectFolderInput): Promise<ProjectFolder> {
+    return this.request<ProjectFolder>(`/projects/${projectId}/folders`, {
+      method: 'POST',
+      body: input
+    });
+  }
+
+  updateProjectFolder(projectId: string, folderId: string, input: UpdateProjectFolderInput): Promise<ProjectFolder> {
+    return this.request<ProjectFolder>(`/projects/${projectId}/folders/${folderId}`, {
+      method: 'PATCH',
+      body: input
+    });
+  }
+
+  deleteProjectFolder(projectId: string, folderId: string): Promise<{ id: string; deleted: true }> {
+    return this.request<{ id: string; deleted: true }>(`/projects/${projectId}/folders/${folderId}`, {
       method: 'DELETE'
     });
   }
@@ -485,12 +516,14 @@ export class OpenTalesClient {
   async uploadAsset(
     projectId: string,
     file: Blob,
-    options: { kind?: AssetKind; filename?: string } = {}
+    options: { kind?: AssetKind; filename?: string; folderId?: string | null; name?: string } = {}
   ): Promise<Asset> {
     const form = new FormData();
     const filename =
       options.filename ?? (file instanceof File ? file.name : `upload-${Date.now()}`);
     form.append('kind', options.kind ?? 'image');
+    if (options.folderId !== undefined && options.folderId !== null) form.append('folderId', options.folderId);
+    if (options.name !== undefined) form.append('name', options.name);
     form.append('file', file, filename);
 
     const headers = new Headers();
@@ -509,6 +542,19 @@ export class OpenTalesClient {
       throw new ApiError(payload?.message ?? 'Upload failed', response.status, payload);
     }
     return payload as Asset;
+  }
+
+  updateProjectAsset(projectId: string, assetId: string, input: UpdateProjectAssetInput): Promise<Asset> {
+    return this.request<Asset>(`/projects/${projectId}/assets/${assetId}`, {
+      method: 'PATCH',
+      body: input
+    });
+  }
+
+  deleteProjectAsset(projectId: string, assetId: string): Promise<{ id: string; deleted: true }> {
+    return this.request<{ id: string; deleted: true }>(`/projects/${projectId}/assets/${assetId}`, {
+      method: 'DELETE'
+    });
   }
 
   listTrash(projectId: string): Promise<TrashItem[]> {
@@ -532,6 +578,10 @@ export class OpenTalesClient {
   getProjectStats(projectId: string, days?: number): Promise<ProjectStats> {
     const qs = days ? `?days=${days}` : '';
     return this.request<ProjectStats>(`/projects/${projectId}/stats${qs}`);
+  }
+
+  getProjectStorage(projectId: string): Promise<ProjectStorageUsage> {
+    return this.request<ProjectStorageUsage>(`/projects/${projectId}/storage`);
   }
 
   getProjectAiSettings(projectId: string): Promise<ProjectAiSettings> {
