@@ -128,12 +128,25 @@ Read-only tools include:
 
 The prompt tells the model to prefer summaries, grep, bounded reads, and lists before requesting full chapter text. This keeps the agent useful without loading the whole manuscript by default.
 
+## Agent questions
+
+When the agent genuinely needs clarification, it can call `askUser` with one or more questions, concise answer options, and optional recommended choices. The call is persisted as a pending tool call, streamed to `AiAgentPanel.svelte`, and the model run waits until the user submits answers or dismisses the question.
+
+The frontend renders each question with selectable choices plus a custom-answer field by default. Submitted answers are posted through:
+
+```ts
+client.answerAiQuestion(projectId, toolCallId, { answers }, sessionId)
+```
+
+Answers resolve the waiting tool call and are returned to the model as tool output so it can continue the same turn with the user's response in mind.
+
 ## Approval-gated mutations
 
 Mutating tools do not directly edit the project during model generation. They create pending tool calls that the frontend must approve or reject.
 
 Approval-required tools include:
 
+- `askUser`
 - `createCharacter`
 - `updateCharacter`
 - `createChapter`

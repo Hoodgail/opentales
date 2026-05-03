@@ -450,6 +450,17 @@ function createAiStore() {
     }
   }
 
+  async function answerQuestion(projectId: string, toolCallId: string, answers: string[][], sessionId = activeSessionId ?? undefined) {
+    sessionError = null;
+    try {
+      session = await api.answerAiQuestion(projectId, toolCallId, { answers }, sessionId);
+      activeSessionId = session.id;
+      upsertSessionSummary(session);
+    } catch (err) {
+      sessionError = err instanceof Error ? err.message : 'Failed to answer question';
+    }
+  }
+
   async function loadFileTree(projectId: string) {
     docsLoading = true;
     docsError = null;
@@ -653,6 +664,7 @@ function createAiStore() {
     cancelSession,
     approveToolCall,
     approveToolCalls,
+    answerQuestion,
     uploadAttachment,
 
     // tool manifest

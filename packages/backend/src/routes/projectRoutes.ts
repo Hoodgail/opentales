@@ -66,6 +66,10 @@ projectRoutes.post(
   '/:projectId/ai/agent-sessions/:sessionId/tool-calls/:toolCallId/approval',
   asyncHandler(ai.approveToolCall)
 );
+projectRoutes.post(
+  '/:projectId/ai/agent-sessions/:sessionId/tool-calls/:toolCallId/answer',
+  asyncHandler(ai.answerQuestion)
+);
 projectRoutes.get('/:projectId/ai/agent-session', asyncHandler(ai.agentSession));
 projectRoutes.get('/:projectId/ai/agent-session/events', asyncHandler(ai.agentSessionEvents));
 projectRoutes.post('/:projectId/ai/agent-session/prompts', asyncHandler(ai.queueAgentPrompt));
@@ -77,6 +81,10 @@ projectRoutes.post(
 projectRoutes.post(
   '/:projectId/ai/agent-session/tool-calls/:toolCallId/approval',
   asyncHandler(ai.approveToolCall)
+);
+projectRoutes.post(
+  '/:projectId/ai/agent-session/tool-calls/:toolCallId/answer',
+  asyncHandler(ai.answerQuestion)
 );
 projectRoutes.post('/:projectId/ai/continuity-reviews', asyncHandler(ai.continuityReview));
 projectRoutes.post('/:projectId/ai/rewrite-suggestions', asyncHandler(ai.rewriteSuggestion));

@@ -102,5 +102,6 @@ Important DTOs:
 | `createProjectAiSkill(projectId, input)` | `POST /projects/:projectId/ai/skills` |
 | `updateProjectAiSkill(projectId, skillId, input)` | `PATCH /projects/:projectId/ai/skills/:skillId` |
 | `deleteProjectAiSkill(projectId, skillId)` | `DELETE /projects/:projectId/ai/skills/:skillId` |
+| `answerAiQuestion(projectId, toolCallId, input, sessionId?)` | `POST /projects/:projectId/ai/agent-session/tool-calls/:toolCallId/answer` |
 
 Project docs are path-based through folders. `ProjectDoc.kind` is only metadata for filtering and AI behavior; use `folderId` to place docs in the tree. Assets appear in the tree only when they have a `folderId`.

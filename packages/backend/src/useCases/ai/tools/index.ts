@@ -4,7 +4,7 @@ import { listChaptersTool } from './listChapters.js';
 import { listCharactersTool } from './listCharacters.js';
 import { listLocationsTool } from './listLocations.js';
 import { listProjectDocsTool } from './listProjectDocs.js';
-import { mutationTools, type ApprovalHandler } from './mutations.js';
+import { mutationTools, type ApprovalHandler, type QuestionHandler } from './mutations.js';
 import { listProjectFilesTool, readFolderTool } from './projectFiles.js';
 import { readChapterTool } from './readChapter.js';
 import { readCharacterTool } from './readCharacter.js';
@@ -44,7 +44,8 @@ import type { ToolContext } from './shared.js';
 export function buildAgentTools(
   prisma: PrismaClient,
   context: ToolContext & { userId: string },
-  approval: ApprovalHandler
+  approval: ApprovalHandler,
+  question: QuestionHandler
 ) {
   return {
     readProject: readProjectTool(prisma, context),
@@ -86,9 +87,9 @@ export function buildAgentTools(
     listWritingVersions: listWritingVersionsTool(prisma, context),
     readWritingVersion: readWritingVersionTool(prisma, context),
     grepProject: grepProjectTool(prisma, context),
-    ...mutationTools(prisma, context, approval)
+    ...mutationTools(prisma, context, approval, question)
   };
 }
 
-export { executeMutationTool, mutatingToolNames, type MutatingToolName } from './mutations.js';
+export { executeMutationTool, mutatingToolNames, type MutatingToolName, type QuestionHandler } from './mutations.js';
 export { bodyOf } from './shared.js';

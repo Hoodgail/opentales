@@ -24,6 +24,7 @@ import type {
   ManuscriptProject,
   MembersAndInvites,
   AddSubmissionCommentInput,
+  AnswerAiQuestionInput,
   ApproveAiToolCallInput,
   ApproveAiToolCallsInput,
   AiAgentSessionEvent,
@@ -744,6 +745,22 @@ export class OpenTalesClient {
       method: 'POST',
       body: input
     });
+  }
+
+  answerAiQuestion(
+    projectId: string,
+    toolCallId: string,
+    input: AnswerAiQuestionInput,
+    sessionId?: string
+  ): Promise<AiAgentSession> {
+    const suffix = sessionId ? `/agent-sessions/${sessionId}` : '/agent-session';
+    return this.request<AiAgentSession>(
+      `/projects/${projectId}/ai${suffix}/tool-calls/${toolCallId}/answer`,
+      {
+        method: 'POST',
+        body: input
+      }
+    );
   }
 
   async streamAiAgentSession(

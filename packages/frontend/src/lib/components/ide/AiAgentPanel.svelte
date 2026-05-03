@@ -27,6 +27,7 @@
   import { ai } from "$lib/stores/ai.svelte";
   import { manuscript } from "$lib/stores/manuscript.svelte";
   import AiAgentMessages from "./AiAgentMessages.svelte";
+  import AiAgentQuestions from "./AiAgentQuestions.svelte";
   import PanelHeader from "./PanelHeader.svelte";
 
   let prompt = $state("");
@@ -51,7 +52,12 @@
   const showThinking = $derived(isRunning && !activeAssistantMessage?.content);
   const pendingToolCalls = $derived(
     session?.pendingToolCalls?.filter(
-      (tc) => tc.status === "pending-approval",
+      (tc) => tc.status === "pending-approval" && tc.toolName !== "askUser",
+    ) ?? [],
+  );
+  const pendingQuestionCalls = $derived(
+    session?.pendingToolCalls?.filter(
+      (tc) => tc.status === "pending-approval" && tc.toolName === "askUser",
     ) ?? [],
   );
 
@@ -153,6 +159,11 @@
   function reject(toolCallId: string) {
     if (!projectId) return;
     void ai.approveToolCall(projectId, toolCallId, false);
+  }
+
+  function submitQuestion(tc: AiAgentToolCall, answers: string[][]) {
+    if (!projectId) return;
+    void ai.answerQuestion(projectId, tc.id, answers);
   }
 
   function handleKey(e: KeyboardEvent) {
@@ -266,6 +277,7 @@
       readStoryStructure: "Read story structure",
       updateProject: "Update project",
       updateProjectAiSettings: "Update AI settings",
+      askUser: "Ask user",
       createAct: "Create act",
       updateAct: "Update act",
       deleteAct: "Delete act",
@@ -923,6 +935,13 @@
         {showThinking}
         {toolLabel}
         {toolStatusLabel}
+      />
+
+      <!-- Pending questions (agent is waiting for user input) -->
+      <AiAgentQuestions
+        questions={pendingQuestionCalls}
+        onSubmit={submitQuestion}
+        onDismiss={reject}
       />
 
       <!-- Pending tool calls (need approval) -->

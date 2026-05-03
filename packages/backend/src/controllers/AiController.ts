@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import type {
   ApproveAiToolCallInput,
   ApproveAiToolCallsInput,
+  AnswerAiQuestionInput,
   CreateAiAgentSessionInput,
   CreateAiCharacterDialogueInput,
   CreateAiOutlineExpansionInput,
@@ -185,6 +186,18 @@ export class AiController {
         this.userId(req),
         req.params.projectId,
         req.body as ApproveAiToolCallsInput,
+        req.params.sessionId
+      )
+    );
+  };
+
+  answerQuestion = async (req: Request, res: Response) => {
+    res.json(
+      await this.agentSessionUseCase.answerQuestion(
+        this.userId(req),
+        req.params.projectId,
+        req.params.toolCallId,
+        req.body as AnswerAiQuestionInput,
         req.params.sessionId
       )
     );

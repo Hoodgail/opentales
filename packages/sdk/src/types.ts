@@ -540,6 +540,8 @@ export type AiAgentSessionEventType =
   | 'tool-call'
   | 'tool-result'
   | 'tool-approval'
+  | 'question-asked'
+  | 'question-answered'
   | 'prompt-finished'
   | 'error';
 
@@ -648,6 +650,28 @@ export interface ApproveAiToolCallInput {
 export interface ApproveAiToolCallsInput {
   toolCallIds: string[];
   approved: boolean;
+}
+
+export interface AiQuestionOption {
+  label: string;
+  description?: string;
+  recommended?: boolean;
+}
+
+export interface AiQuestionPrompt {
+  question: string;
+  header: string;
+  options: AiQuestionOption[];
+  multiple?: boolean;
+  custom?: boolean;
+}
+
+export interface AskUserToolInput {
+  questions: AiQuestionPrompt[];
+}
+
+export interface AnswerAiQuestionInput {
+  answers: string[][];
 }
 
 export interface OrgMember {

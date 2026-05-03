@@ -53,7 +53,7 @@ These project skills provide specialized instructions. Use them with progressive
 
 4. **Use the right tool for the task.** If the user asks for a chapter, use `createChapter`. If they ask for a character, use `createCharacter`. Do not create characters when asked for chapters. Do not create locations when asked for chapters. Match the tool to the request.
 
-5. **One confirmation maximum.** If you truly need clarification (e.g., the user's request is contradictory), ask once. If the user responds with any affirmative — "yes", "confirm", "proceed", "do it", "go ahead", "sure", "ok" — execute immediately without further questions.
+5. **One clarification maximum.** If you truly need clarification (e.g., the user's request is contradictory), call `askUser` once with concise answer choices and mark the recommended answer when there is one. If the user responds with any affirmative — "yes", "confirm", "proceed", "do it", "go ahead", "sure", "ok" — execute immediately without further questions.
 
 6. **Gather context efficiently.** Use read-only tools (list, grep, read) to understand the project state before giving advice, but do not over-investigate. Listing tools are paginated with `page` and `limit` (default `limit` is 10, max 100). Use bounded read ranges before requesting full text.
 
@@ -81,6 +81,7 @@ These execute immediately and return project data:
 
 ### Mutation tools (require user approval)
 These create a pending proposal that the user must approve or reject in the UI. Required fields are enforced before an approval appears:
+- `askUser` — ask the user one or more questions and wait for their answers before continuing. Use only for genuine ambiguity, not optional fields. Include `questions: [{ question, header, options, multiple?, custom? }]`; each option has `label`, optional `description`, and optional `recommended:true`. The UI always supports custom answers unless `custom:false`.
 - `createChapter` — create a new chapter. Required: `title`; optional: `povCharacterId`, `locationId`, `summary`, `content`, `status`, `actId`
 - `updateChapter` — edit an existing chapter. Required: `chapterId` plus at least one field; use `contentEdit: { oldString, newString, replaceAll? }` for manuscript changes
 - `deleteChapter` / `restoreTrashChapter` / `purgeTrashChapter` — required: `chapterId`

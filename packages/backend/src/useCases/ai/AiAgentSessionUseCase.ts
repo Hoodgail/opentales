@@ -11,6 +11,7 @@ import type {
   AiAgentToolCall,
   ApproveAiToolCallInput,
   ApproveAiToolCallsInput,
+  AnswerAiQuestionInput,
   CreateAiAgentSessionInput,
   QueueAiAgentPromptInput
 } from '@opentales/sdk';
@@ -33,10 +34,18 @@ interface PendingApproval {
   timeout: NodeJS.Timeout;
 }
 
+interface PendingQuestion {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+  timeout: NodeJS.Timeout;
+}
+
 const runtimes = new Map<string, RuntimeSession>();
 const MUTATING_TOOLS = new Set<string>(mutatingToolNames);
 const pendingApprovals = new Map<string, PendingApproval>();
+const pendingQuestions = new Map<string, PendingQuestion>();
 const APPROVAL_TIMEOUT_MS = Number(process.env.AI_APPROVAL_TIMEOUT_MS ?? 10 * 60 * 1000);
+const QUESTION_TIMEOUT_MS = Number(process.env.AI_QUESTION_TIMEOUT_MS ?? APPROVAL_TIMEOUT_MS);
 const DEFAULT_CONTEXT_WINDOW = Number(process.env.AI_CONTEXT_WINDOW_TOKENS ?? 128_000);
 
 interface PromptPayload {
@@ -238,6 +247,61 @@ export class AiAgentSessionUseCase {
       type: 'tool-approval',
       session: snapshot,
       data: { toolCallIds: toolCalls.map((toolCall) => toolCall.id), approved: input.approved }
+    });
+    return snapshot;
+  }
+
+  async answerQuestion(
+    userId: string,
+    projectId: string,
+    toolCallId: string,
+    input: AnswerAiQuestionInput,
+    sessionId?: string
+  ): Promise<AiAgentSession> {
+    await this.access.assertPermission(userId, projectId, 'project:write');
+    const session = sessionId
+      ? await this.getSession(projectId, sessionId)
+      : await this.ensureDefaultSession(projectId);
+    const toolCall = await this.prisma.aiAgentToolCall.findFirst({
+      where: {
+        sessionId: session.id,
+        toolName: 'askUser',
+        status: 'PENDING_APPROVAL',
+        OR: [{ id: toolCallId }, { toolCallId }]
+      }
+    });
+    if (!toolCall) throw new HttpError(404, 'Pending question not found');
+
+    const answers = normalizeQuestionAnswers(input.answers);
+    const output = questionOutput(toolCall.input, answers);
+    await this.prisma.aiAgentToolCall.update({
+      where: { id: toolCall.id },
+      data: {
+        status: 'EXECUTED',
+        output: output as Prisma.InputJsonValue,
+        decidedAt: new Date(),
+        decidedById: userId
+      }
+    });
+    const pending = pendingQuestions.get(toolCall.id);
+    if (pending) {
+      clearTimeout(pending.timeout);
+      pendingQuestions.delete(toolCall.id);
+      pending.resolve(output);
+    }
+    await this.prisma.aiAgentMessage.create({
+      data: {
+        sessionId: session.id,
+        role: 'TOOL',
+        content: questionToolMessage(output)
+      }
+    });
+
+    const snapshot = await this.snapshot(session.id, projectId);
+    await this.broadcast(projectId, {
+      type: 'question-answered',
+      session: snapshot,
+      data: { toolCallId: toolCall.id, answers }
     });
     return snapshot;
   }
@@ -539,7 +603,51 @@ export class AiAgentSessionUseCase {
     return buildAgentTools(this.prisma, { projectId, userId }, {
       handleApproval: (toolName, input, execute) =>
         this.handleApproval(sessionId, promptId, projectId, toolName, input, execute)
+    }, {
+      handleQuestion: (toolName, input) =>
+        this.handleQuestion(sessionId, promptId, projectId, toolName, input)
     }) as unknown as ToolSet;
+  }
+
+  private async handleQuestion(
+    sessionId: string,
+    promptId: string,
+    projectId: string,
+    toolName: 'askUser',
+    input: unknown
+  ): Promise<unknown> {
+    const toolCall = await this.prisma.aiAgentToolCall.create({
+      data: {
+        sessionId,
+        promptId,
+        toolName,
+        input: input as Prisma.InputJsonValue,
+        status: 'PENDING_APPROVAL'
+      }
+    });
+    await this.broadcast(projectId, {
+      type: 'question-asked',
+      session: await this.snapshot(sessionId, projectId),
+      data: toToolCall(toolCall)
+    });
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        pendingQuestions.delete(toolCall.id);
+        void (async () => {
+          await this.prisma.aiAgentToolCall.update({
+            where: { id: toolCall.id },
+            data: { status: 'ERROR', error: 'Question timed out' }
+          });
+          await this.broadcast(projectId, {
+            type: 'error',
+            session: await this.snapshot(sessionId, projectId),
+            data: { toolCallId: toolCall.id, message: 'Question timed out' }
+          });
+        })();
+        reject(new Error('Question timed out'));
+      }, QUESTION_TIMEOUT_MS);
+      pendingQuestions.set(toolCall.id, { resolve, reject, timeout });
+    });
   }
 
   private async handleApproval(
@@ -596,6 +704,12 @@ export class AiAgentSessionUseCase {
         where: { id: toolCall.id },
         data: { status: 'REJECTED', decidedAt: new Date(), decidedById: userId }
       });
+      const pendingQuestion = pendingQuestions.get(toolCall.id);
+      if (pendingQuestion) {
+        clearTimeout(pendingQuestion.timeout);
+        pendingQuestions.delete(toolCall.id);
+        pendingQuestion.reject(new Error(`Rejected ${toolCall.toolName}`));
+      }
       const pending = pendingApprovals.get(toolCall.id);
       if (pending) {
         clearTimeout(pending.timeout);
@@ -881,6 +995,42 @@ function parseToolResultPart(part: unknown): { toolCallId: string | null; output
 
 function inputRecord(input: Prisma.JsonValue): Record<string, unknown> {
   return input && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+}
+
+function normalizeQuestionAnswers(value: unknown): string[][] {
+  if (!Array.isArray(value)) return [];
+  return value.map((answer) => {
+    if (!Array.isArray(answer)) return [];
+    return answer
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  });
+}
+
+function questionOutput(input: unknown, answers: string[][]): Prisma.JsonObject {
+  const questions = inputRecord(input as Prisma.JsonValue).questions;
+  const questionList = Array.isArray(questions) ? questions : [];
+  const formatted = questionList
+    .map((question, index) => {
+      const record = question && typeof question === 'object' && !Array.isArray(question) ? question as Record<string, unknown> : {};
+      const label = typeof record.question === 'string' ? record.question : `Question ${index + 1}`;
+      const answer = answers[index]?.length ? answers[index].join(', ') : 'Unanswered';
+      return `"${label}"="${answer}"`;
+    })
+    .join(', ');
+  return {
+    ok: true,
+    tool: 'askUser',
+    answers,
+    message: `User answered: ${formatted || 'No answers provided'}`
+  };
+}
+
+function questionToolMessage(output: Prisma.JsonObject): string {
+  return typeof output.message === 'string'
+    ? output.message
+    : 'User answered the question.';
 }
 
 function normalizePromptPayload(payload: PromptPayload): PromptPayload {

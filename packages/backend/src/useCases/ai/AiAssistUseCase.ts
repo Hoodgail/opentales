@@ -280,6 +280,7 @@ export class AiAssistUseCase {
       'grepProject'
     ];
     const mutationToolNames = [
+      'askUser',
       'updateProject',
       'updateProjectAiSettings',
       'createAct',
@@ -328,7 +329,7 @@ export class AiAssistUseCase {
     return {
       tools: [
         ...readToolNames.map((name) => ({ name, description: `${name} read-only agent tool.`, requiresApproval: false, inputSchema: genericSchema })),
-        ...mutationToolNames.map((name) => ({ name, description: `${name} approval-gated mutation tool.`, requiresApproval: true, inputSchema: genericSchema }))
+        ...mutationToolNames.map((name) => ({ name, description: name === 'askUser' ? 'askUser question tool that waits for a user answer.' : `${name} approval-gated mutation tool.`, requiresApproval: true, inputSchema: genericSchema }))
       ]
     };
 

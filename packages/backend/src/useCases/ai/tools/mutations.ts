@@ -79,6 +79,18 @@ const roleSchema = z.enum(['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']);
 const obstacleTypeSchema = z.enum(['internal', 'external', 'interpersonal']);
 const assetKindSchema = z.enum(['image', 'audio', 'video', 'document']);
 const attachmentEntitySchema = z.enum(['CHARACTER', 'LOCATION', 'CHAPTER', 'SCENE', 'PROJECT', 'WRITING_VERSION', 'USER']);
+const questionOptionSchema = z.object({
+  label: nonEmptyString.describe('Display text for this answer choice, ideally 1-5 words'),
+  description: optionalString.describe('Short explanation of this choice'),
+  recommended: z.boolean().optional().describe('Set true when this is the recommended answer')
+});
+const questionPromptSchema = z.object({
+  question: nonEmptyString.describe('The complete question to ask the user'),
+  header: nonEmptyString.max(30).describe('Very short label for the question, max 30 characters'),
+  options: z.array(questionOptionSchema).min(1).describe('Available answer choices'),
+  multiple: z.boolean().optional().describe('Allow selecting multiple choices'),
+  custom: z.boolean().optional().describe('Allow typing a custom answer; defaults to true in the UI')
+});
 const contentEditSchema = editContentInputSchema.extend({
   oldString: z.string().min(1),
   newString: z.string()
@@ -91,6 +103,7 @@ function withAtLeastOne<T extends z.ZodRawShape>(schema: z.ZodObject<T>, fields:
 }
 
 export const mutatingToolNames = [
+  'askUser',
   'updateProject',
   'updateProjectAiSettings',
   'createAct',
@@ -144,6 +157,9 @@ export const mutatingToolNames = [
 export type MutatingToolName = (typeof mutatingToolNames)[number];
 
 const mutationToolSchemas = {
+  askUser: z.object({
+    questions: z.array(questionPromptSchema).min(1).max(5).describe('Questions to ask the user before continuing')
+  }),
   updateProject: withAtLeastOne(z.object({
     title: optionalString,
     slug: optionalString,
@@ -240,6 +256,7 @@ const mutationToolSchemas = {
 } satisfies Record<MutatingToolName, z.ZodTypeAny>;
 
 const mutationToolDescriptions = {
+  askUser: 'Ask the user one or more multiple-choice questions and wait for their answers before continuing. Include concise options; mark recommended choices with recommended:true when appropriate. The UI also allows custom answers.',
   updateProject: 'Update project metadata. Include at least one metadata field to change.',
   updateProjectAiSettings: 'Update project AI settings. Include at least one setting to change.',
   createAct: 'Create an act. Requires title.',
@@ -294,13 +311,27 @@ export interface ApprovalHandler {
   handleApproval(toolName: MutatingToolName, input: unknown, execute: () => Promise<unknown>): Promise<unknown>;
 }
 
+export interface QuestionHandler {
+  handleQuestion(toolName: 'askUser', input: unknown): Promise<unknown>;
+}
+
 export function mutationTools(
   prisma: PrismaClient,
   context: ToolContext & { userId: string },
-  approval: ApprovalHandler
+  approval: ApprovalHandler,
+  question: QuestionHandler
 ) {
   return {
     ...genericMutationTools(prisma, context, approval),
+    askUser: approvalTool({
+      description:
+        'Ask the user one or more questions and wait for answers before continuing. Provide answer choices, mark recommended answers when useful, and rely on the UI for custom answers.',
+      inputSchema: mutationToolSchemas.askUser,
+      execute: async (input) => {
+        const validated = validateMutationInput('askUser', input);
+        return question.handleQuestion('askUser', validated);
+      }
+    }),
     updateCharacter: approvalTool({
       description:
         'Update an existing character. Only `characterId` is required; include only fields to change. The user will approve/reject the proposal in the UI.',
