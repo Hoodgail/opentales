@@ -18,9 +18,11 @@ import type {
 import { stepCountIs, streamText } from 'ai';
 import { HttpError } from '../../http/HttpError.js';
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
+import { findAgent, loadAiAgents, subagentsForTask, type AiAgentInfo } from './agents.js';
 import { loadAiModelForProject } from './aiModel.js';
 import { renderSystemPrompt, renderUserContext } from './prompts/promptEngine.js';
 import { buildAgentTools, bodyOf, executeMutationTool, mutatingToolNames, type MutatingToolName } from './tools/index.js';
+import type { TaskToolInput } from './tools/task.js';
 
 interface RuntimeSession {
   clients: Set<Response>;
@@ -52,6 +54,7 @@ interface PromptPayload {
   prompt: string;
   model: string | null;
   attachments: AiAgentAttachment[];
+  agent: string | null;
 }
 
 interface UsagePayload {
@@ -124,7 +127,8 @@ export class AiAgentSessionUseCase {
     const payload = normalizePromptPayload({
       prompt,
       model: typeof input.model === 'string' ? input.model.trim() || null : null,
-      attachments: sanitizeAttachments(input.attachments)
+      attachments: sanitizeAttachments(input.attachments),
+      agent: null
     });
 
     const session = sessionId
@@ -362,19 +366,23 @@ export class AiAgentSessionUseCase {
       let assistantText = '';
       const promptPayload = parsePromptPayload(queued.prompt);
       try {
-        const model = await loadAiModelForProject(this.prisma, projectId, promptPayload.model);
+        const agents = await loadAiAgents(this.prisma, projectId);
+        const activeAgent = promptPayload.agent ? findAgent(agents, promptPayload.agent) : undefined;
+        const model = await loadAiModelForProject(this.prisma, projectId, activeAgent?.model ?? promptPayload.model);
         const { systemPrompt, userPrompt } = await this.buildPrompts(
           projectId,
           session.id,
           promptPayload.prompt,
-          promptPayload.attachments
+          promptPayload.attachments,
+          activeAgent,
+          agents
         );
         const messagePrompt = modelContent(userPrompt, promptPayload.attachments);
         const messages = [{ role: 'user' as const, content: messagePrompt }] as NonNullable<Parameters<typeof streamText>[0]['messages']>;
         const result = streamText({
           model,
           abortSignal: runtime.abortController.signal,
-          tools: this.buildAgentTools(projectId, session.id, queued.id, userId),
+          tools: this.buildAgentTools(projectId, session.id, queued.id, userId, agents, activeAgent),
           stopWhen: stepCountIs(8),
           system: systemPrompt,
           messages
@@ -530,7 +538,9 @@ export class AiAgentSessionUseCase {
     projectId: string,
     sessionId: string,
     prompt: string,
-    attachments: AiAgentAttachment[]
+    attachments: AiAgentAttachment[],
+    activeAgent: AiAgentInfo | undefined,
+    agents: AiAgentInfo[]
   ): Promise<{ systemPrompt: string; userPrompt: string }> {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
@@ -586,8 +596,17 @@ export class AiAgentSessionUseCase {
         title: doc.title,
         content: bodyOf(doc.bodyWriting)
       })),
-      skills
+      skills,
+      subagents: subagentsForTask(agents).map((agent) => ({
+        name: agent.name,
+        description: agent.description
+      }))
     });
+    const agentPrompt = activeAgent?.prompt?.trim();
+    const agentName = activeAgent?.name;
+    const finalSystemPrompt = agentPrompt
+      ? `${systemPrompt}\n\n## Active agent instructions: ${agentName ?? 'subagent'}\n\n${agentPrompt}`
+      : systemPrompt;
 
     const userPrompt = renderUserContext({
       transcript,
@@ -596,17 +615,83 @@ export class AiAgentSessionUseCase {
         : prompt
     });
 
-    return { systemPrompt, userPrompt };
+    return { systemPrompt: finalSystemPrompt, userPrompt };
   }
 
-  private buildAgentTools(projectId: string, sessionId: string, promptId: string, userId: string): ToolSet {
+  private buildAgentTools(
+    projectId: string,
+    sessionId: string,
+    promptId: string,
+    userId: string,
+    agents: AiAgentInfo[],
+    activeAgent: AiAgentInfo | undefined
+  ): ToolSet {
     return buildAgentTools(this.prisma, { projectId, userId }, {
       handleApproval: (toolName, input, execute) =>
         this.handleApproval(sessionId, promptId, projectId, toolName, input, execute)
     }, {
       handleQuestion: (toolName, input) =>
         this.handleQuestion(sessionId, promptId, projectId, toolName, input)
-    }) as unknown as ToolSet;
+    }, {
+      handleTask: (input) =>
+        this.handleTask(projectId, sessionId, userId, input, agents, activeAgent)
+    }, activeAgent?.mode === 'subagent' ? [] : subagentsForTask(agents)) as unknown as ToolSet;
+  }
+
+  private async handleTask(
+    projectId: string,
+    _parentSessionId: string,
+    userId: string,
+    input: TaskToolInput,
+    agents: AiAgentInfo[],
+    activeAgent: AiAgentInfo | undefined
+  ): Promise<unknown> {
+    if (activeAgent?.mode === 'subagent') throw new HttpError(403, 'Subagents cannot invoke other subagents');
+    const agent = findAgent(agents, input.subagent_type);
+    if (!agent || (agent.mode !== 'subagent' && agent.mode !== 'all')) throw new HttpError(400, `Unknown subagent type: ${input.subagent_type}`);
+    const session = input.task_id
+      ? await this.getSession(projectId, input.task_id)
+      : await this.prisma.projectAiAgentSession.create({
+          data: {
+            projectId,
+            title: `${input.description} (@${agent.name} subagent)`
+          }
+        });
+    const payload = normalizePromptPayload({
+      prompt: input.prompt,
+      model: agent.model ?? null,
+      attachments: [],
+      agent: agent.name
+    });
+    const last = await this.prisma.aiAgentPrompt.findFirst({
+      where: { sessionId: session.id },
+      orderBy: { order: 'desc' },
+      select: { order: true }
+    });
+    await this.prisma.aiAgentPrompt.create({
+      data: {
+        sessionId: session.id,
+        prompt: serializePromptPayload(payload),
+        order: (last?.order ?? 0) + 1
+      }
+    });
+    await this.drain(userId, projectId, session.id);
+    const result = await this.prisma.aiAgentMessage.findFirst({
+      where: { sessionId: session.id, role: 'ASSISTANT' },
+      orderBy: { createdAt: 'desc' },
+      select: { content: true }
+    });
+    return {
+      title: input.description,
+      task_id: session.id,
+      output: [
+        `task_id: ${session.id} (for resuming to continue this task if needed)`,
+        '',
+        '<task_result>',
+        result?.content ?? '',
+        '</task_result>'
+      ].join('\n')
+    };
   }
 
   private async handleQuestion(
@@ -1037,12 +1122,13 @@ function normalizePromptPayload(payload: PromptPayload): PromptPayload {
   return {
     prompt: payload.prompt.trim(),
     model: payload.model?.trim() || null,
-    attachments: sanitizeAttachments(payload.attachments)
+    attachments: sanitizeAttachments(payload.attachments),
+    agent: payload.agent?.trim() || null
   };
 }
 
 function serializePromptPayload(payload: PromptPayload): string {
-  if (!payload.model && payload.attachments.length === 0) return payload.prompt;
+  if (!payload.model && !payload.agent && payload.attachments.length === 0) return payload.prompt;
   return JSON.stringify({
     type: 'opentales.aiPrompt',
     version: 1,
@@ -1057,10 +1143,11 @@ function parsePromptPayload(value: string): PromptPayload {
     return normalizePromptPayload({
       prompt: typeof parsed.prompt === 'string' ? parsed.prompt : value,
       model: typeof parsed.model === 'string' ? parsed.model : null,
-      attachments: sanitizeAttachments(parsed.attachments)
+      attachments: sanitizeAttachments(parsed.attachments),
+      agent: typeof parsed.agent === 'string' ? parsed.agent : null
     });
   } catch {
-    return { prompt: value, model: null, attachments: [] };
+    return { prompt: value, model: null, attachments: [], agent: null };
   }
 }
 

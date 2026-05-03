@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { HttpError } from '../../http/HttpError.js';
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
 import { submissionDetailInclude } from '../submissions/submissionMapper.js';
+import { loadAiAgents, subagentsForTask } from './agents.js';
 import { loadAiModelForProject } from './aiModel.js';
 
 const continuitySchema = z.object({
@@ -277,7 +278,8 @@ export class AiAssistUseCase {
       'readProjectAiSkill',
       'listWritingVersions',
       'readWritingVersion',
-      'grepProject'
+      'grepProject',
+      'task'
     ];
     const mutationToolNames = [
       'askUser',
@@ -326,10 +328,12 @@ export class AiAssistUseCase {
       'revokeBetaShareLink',
       'postBetaShareComment'
     ];
+    const subagents = subagentsForTask(await loadAiAgents(this.prisma, projectId));
     return {
       tools: [
         ...readToolNames.map((name) => ({ name, description: `${name} read-only agent tool.`, requiresApproval: false, inputSchema: genericSchema })),
-        ...mutationToolNames.map((name) => ({ name, description: name === 'askUser' ? 'askUser question tool that waits for a user answer.' : `${name} approval-gated mutation tool.`, requiresApproval: true, inputSchema: genericSchema }))
+        ...mutationToolNames.map((name) => ({ name, description: name === 'askUser' ? 'askUser question tool that waits for a user answer.' : `${name} approval-gated mutation tool.`, requiresApproval: true, inputSchema: genericSchema })),
+        ...subagents.map((agent) => ({ name: `@${agent.name}`, description: agent.description, requiresApproval: false, inputSchema: genericSchema }))
       ]
     };
 

@@ -39,15 +39,20 @@ import {
 } from './readMore.js';
 import { readProjectDocTool } from './readProjectDoc.js';
 import { readStoryStructureTool } from './readStoryStructure.js';
+import { taskTool, type TaskHandler } from './task.js';
 import type { ToolContext } from './shared.js';
+import type { AiAgentInfo } from '../agents.js';
 
 export function buildAgentTools(
   prisma: PrismaClient,
   context: ToolContext & { userId: string },
   approval: ApprovalHandler,
-  question: QuestionHandler
+  question: QuestionHandler,
+  task: TaskHandler,
+  subagents: AiAgentInfo[] = []
 ) {
   return {
+    task: taskTool(subagents, task),
     readProject: readProjectTool(prisma, context),
     listProjectFiles: listProjectFilesTool(prisma, context),
     readFolder: readFolderTool(prisma, context),

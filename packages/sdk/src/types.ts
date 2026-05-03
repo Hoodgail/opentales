@@ -542,6 +542,8 @@ export type AiAgentSessionEventType =
   | 'tool-approval'
   | 'question-asked'
   | 'question-answered'
+  | 'subtask-started'
+  | 'subtask-finished'
   | 'prompt-finished'
   | 'error';
 

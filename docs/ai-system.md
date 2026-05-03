@@ -140,6 +140,26 @@ client.answerAiQuestion(projectId, toolCallId, { answers }, sessionId)
 
 Answers resolve the waiting tool call and are returned to the model as tool output so it can continue the same turn with the user's response in mind.
 
+## Subagents
+
+Primary agent runs can call the `task` tool to delegate focused work to a subagent. The tool creates or resumes a regular AI agent session, runs the requested subagent prompt, and returns a `task_id` plus the final `<task_result>` text so the primary agent can continue with the result.
+
+Built-in subagents:
+
+- `general` — general-purpose research and multi-step work.
+- `explore` — fast project exploration using read-oriented tools.
+
+Project-specific subagents can be defined as ProjectDocs whose path is under `agent/` or `agents/` and ends in `.md`, for example `agents/reviewer.md`. The markdown body becomes the subagent instructions. Optional frontmatter supports `description`, `mode`, `model`, `hidden`, and `name`.
+
+```markdown
+---
+description: Reviews manuscript continuity and character consistency
+mode: subagent
+model: openai/gpt-5-mini
+---
+You are a continuity reviewer. Focus on contradictions, timeline drift, and character voice.
+```
+
 ## Approval-gated mutations
 
 Mutating tools do not directly edit the project during model generation. They create pending tool calls that the frontend must approve or reject.
