@@ -20,6 +20,8 @@ The AI data model lives in `packages/backend/prisma/schema.prisma`.
 
 `ProjectAiSettings` stores whether AI is enabled and how to reach the model provider.
 
+`ProjectAiSkill` stores project-scoped Agent Skills. Each skill has a unique `name`, `description`, full markdown `content`, and an `enabled` flag. Enabled skills are disclosed to the agent as a compact catalog and loaded on demand through read-only tools.
+
 `ProjectAiAgentSession` stores each chat session for a project. A project can have multiple sessions. Each session has a title, status, active prompt, messages, queued prompts, and tool calls.
 
 `AiAgentMessage` stores persisted transcript messages with roles: `USER`, `ASSISTANT`, `SYSTEM`, and `TOOL`.
@@ -45,6 +47,21 @@ Provider modes:
 - `openai-compatible`: Uses `@ai-sdk/openai-compatible` with project-level `model`, optional `baseUrl`, and optional encrypted project API key.
 
 The backend does not return raw API keys. It returns whether a key exists. Sending `apiKey: null` clears a stored key, while omitting `apiKey` leaves the existing key unchanged.
+
+## Agent skills
+
+Projects can define reusable Agent Skills from the AI settings UI. The frontend edits skill markdown with `MonacoMarkdownEditor`, using the live collaboration system for skill content so co-authors see remote edits and presence like other project documents.
+
+Skill management uses:
+
+```ts
+client.listProjectAiSkills(projectId)
+client.createProjectAiSkill(projectId, input)
+client.updateProjectAiSkill(projectId, skillId, input)
+client.deleteProjectAiSkill(projectId, skillId)
+```
+
+During agent runs, enabled skills follow progressive disclosure. The system prompt includes only name and description in an `<available_skills>` catalog. When a task matches a skill, the agent activates it with `readProjectAiSkill`, which returns the full skill content wrapped in `<skill_content name="...">` tags.
 
 ## Agent sessions
 
@@ -106,6 +123,8 @@ Read-only tools include:
 - `readAssetMetadata`
 - `readAssetContent`
 - `readStoryStructure`
+- `listProjectAiSkills`
+- `readProjectAiSkill`
 
 The prompt tells the model to prefer summaries, grep, bounded reads, and lists before requesting full chapter text. This keeps the agent useful without loading the whole manuscript by default.
 

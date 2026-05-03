@@ -338,6 +338,46 @@ export function readProjectAiSettingsTool(prisma: PrismaClient, context: ToolCon
   });
 }
 
+export function listProjectAiSkillsTool(prisma: PrismaClient, context: ToolContext) {
+  return tool({
+    description: 'List enabled project agent skills by name and description. Use this catalog before activating a skill.',
+    inputSchema: emptyInputSchema,
+    execute: async () => {
+      const skills = await prisma.projectAiSkill.findMany({
+        where: { projectId: context.projectId, enabled: true },
+        orderBy: { name: 'asc' },
+        select: { name: true, description: true, updatedAt: true }
+      });
+      return {
+        skills: skills.map((skill) => ({
+          name: skill.name,
+          description: skill.description,
+          updatedAt: skill.updatedAt.toISOString()
+        }))
+      };
+    }
+  });
+}
+
+export function readProjectAiSkillTool(prisma: PrismaClient, context: ToolContext) {
+  return tool({
+    description: 'Activate a project agent skill by name and read its full instructions. Call this when the available skill catalog matches the user task.',
+    inputSchema: z.object({ name: z.string().describe('The skill name from the available skills catalog.') }),
+    execute: async ({ name }) => {
+      const skill = await prisma.projectAiSkill.findFirst({
+        where: { projectId: context.projectId, name, enabled: true }
+      });
+      if (!skill) throw new HttpError(404, 'AI skill not found');
+      return {
+        skillContent: `<skill_content name="${escapeAttribute(skill.name)}">\n${skill.content}\n</skill_content>`,
+        name: skill.name,
+        description: skill.description,
+        updatedAt: skill.updatedAt.toISOString()
+      };
+    }
+  });
+}
+
 export function listWritingVersionsTool(prisma: PrismaClient, context: ToolContext) {
   return tool({
     description: 'List writing versions for a writing, branch, or project writing kind.',
@@ -422,6 +462,10 @@ function makeMatcher(query: string, regex: boolean, caseSensitive: boolean): (li
   }
   const needle = caseSensitive ? query : query.toLowerCase();
   return (line) => (caseSensitive ? line : line.toLowerCase()).includes(needle);
+}
+
+function escapeAttribute(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
 
 function toObstacle(obstacle: { id: string; title: string; type: string; order: number; descriptionWriting: { defaultBranch: { headVersion: { body: string | null } | null } | null }; resolutionWriting: { defaultBranch: { headVersion: { body: string | null } | null } | null } }) {

@@ -7,7 +7,8 @@
     collaborationApi,
     createCollaborationClientId,
     type CollaborationDocumentEvent,
-    type CollaborationDocumentRef
+    type CollaborationDocumentRef,
+    type CollaborationLocation
   } from '$lib/stores/collaboration.svelte';
   import { preferences } from '$lib/stores/preferences.svelte';
   import { editorTheme, editorThemes, type EditorThemeId } from '$lib/stores/editorTheme.svelte';
@@ -21,6 +22,7 @@
     onChange: (next: string) => void;
     onSelectionChange?: (selectedText: string) => void;
     collaboration?: CollaborationDocumentRef;
+    collaborationLocation?: CollaborationLocation | null;
     language?: string;
     compact?: boolean;
   }
@@ -30,6 +32,7 @@
     onChange,
     onSelectionChange,
     collaboration,
+    collaborationLocation,
     language = 'markdown',
     compact = false
   }: Props = $props();
@@ -498,7 +501,7 @@
         })),
         selection: selection ? { lineNumber: selection.lineNumber, column: selection.column } : null,
         focused: true,
-        location: collaborationStore.currentLocation(collaboration.field)
+        location: collaborationLocation ?? collaborationStore.currentLocation(collaboration.field)
       })
       .then((response) => {
         if (response.type === 'edit') collaborationRevision = response.edit.revision;
@@ -514,7 +517,7 @@
         clientId: collaborationClientId,
         selection: selection ? { lineNumber: selection.lineNumber, column: selection.column } : null,
         focused,
-        location: focused ? collaborationStore.currentLocation(collaboration.field) : null
+        location: focused ? collaborationLocation ?? collaborationStore.currentLocation(collaboration.field) : null
       })
       .catch((error) => console.warn('Collaboration presence failed', error));
   }

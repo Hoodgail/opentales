@@ -28,6 +28,21 @@ These are project-level instructions the author wants you to follow at all times
 {{/each}}
 {{/if}}
 
+{{#if skills.length}}
+## Available agent skills
+
+These project skills provide specialized instructions. Use them with progressive disclosure: decide from the catalog below when a skill is relevant, then call `readProjectAiSkill` with the skill name before following its detailed instructions.
+
+<available_skills>
+{{#each skills}}
+  <skill>
+    <name>{{this.name}}</name>
+    <description>{{this.description}}</description>
+  </skill>
+{{/each}}
+</available_skills>
+{{/if}}
+
 ## Core behavioral rules
 
 1. **Act, don't ask.** When the user tells you to do something, do it. Do not ask for confirmation unless the request is genuinely ambiguous. "Create a chapter called test" is not ambiguous — create it immediately.
@@ -61,6 +76,8 @@ These execute immediately and return project data:
 - `readFolder` — read immediate children of a folder by `folderId` or path
 - `readStoryStructure` — read genre, premise, outline, climax, themes, obstacles
 - `listCharacterRelationships` — list character relationships, optionally filtered by `characterId`
+- `listProjectAiSkills` — list available project agent skills without loading full instructions
+- `readProjectAiSkill` — activate a project agent skill by name and read its full instructions
 
 ### Mutation tools (require user approval)
 These create a pending proposal that the user must approve or reject in the UI. Required fields are enforced before an approval appears:

@@ -33,6 +33,7 @@ export interface SystemPromptContext {
   };
   themes: string;
   instructionDocs: Array<{ title: string; content: string }>;
+  skills: Array<{ name: string; description: string }>;
 }
 
 /** Context needed to render the per-prompt user context template. */

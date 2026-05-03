@@ -493,6 +493,11 @@ export class AiAgentSessionUseCase {
       orderBy: { createdAt: 'desc' },
       take: 20
     });
+    const skills = await this.prisma.projectAiSkill.findMany({
+      where: { projectId, enabled: true },
+      orderBy: { name: 'asc' },
+      select: { name: true, description: true }
+    });
     const transcript = messages
       .reverse()
       .map((message) => {
@@ -516,7 +521,8 @@ export class AiAgentSessionUseCase {
       instructionDocs: instructionDocs.map((doc) => ({
         title: doc.title,
         content: bodyOf(doc.bodyWriting)
-      }))
+      })),
+      skills
     });
 
     const userPrompt = renderUserContext({

@@ -13,14 +13,17 @@ import {
   type AiRewriteMode,
   type AiRewriteSuggestion,
   type AiToolManifest,
+  type CreateProjectAiSkillInput,
   type CreateProjectFolderInput,
   type CreateProjectDocInput,
   type PaginatedProjectDocs,
   type ProjectAiSettings,
+  type ProjectAiSkill,
   type ProjectDoc,
   type ProjectFileTree,
   type ProjectFolder,
   type ProjectDocKind,
+  type UpdateProjectAiSkillInput,
   type UpdateProjectAiSettingsInput,
   type UpdateProjectAssetInput,
   type UpdateProjectFolderInput,
@@ -73,6 +76,63 @@ function createAiStore() {
       settings = await api.updateProjectAiSettings(projectId, input);
     } catch (err) {
       settingsError = err instanceof Error ? err.message : 'Failed to update AI settings';
+    }
+  }
+
+  // ── Project AI skills ────────────────────────────────────────────────
+  let skills = $state<ProjectAiSkill[]>([]);
+  let skillsLoading = $state(false);
+  let skillsError = $state<string | null>(null);
+
+  async function loadSkills(projectId: string) {
+    skillsLoading = true;
+    skillsError = null;
+    try {
+      const result = await api.listProjectAiSkills(projectId);
+      skills.splice(0, skills.length, ...result);
+    } catch (err) {
+      skillsError = err instanceof Error ? err.message : 'Failed to load AI skills';
+    } finally {
+      skillsLoading = false;
+    }
+  }
+
+  async function createSkill(projectId: string, input: CreateProjectAiSkillInput): Promise<ProjectAiSkill | null> {
+    skillsError = null;
+    try {
+      const skill = await api.createProjectAiSkill(projectId, input);
+      skills.push(skill);
+      skills.sort((a, b) => a.name.localeCompare(b.name));
+      return skill;
+    } catch (err) {
+      skillsError = err instanceof Error ? err.message : 'Failed to create AI skill';
+      return null;
+    }
+  }
+
+  async function updateSkill(projectId: string, skillId: string, input: UpdateProjectAiSkillInput): Promise<ProjectAiSkill | null> {
+    skillsError = null;
+    try {
+      const skill = await api.updateProjectAiSkill(projectId, skillId, input);
+      const idx = skills.findIndex((candidate) => candidate.id === skillId);
+      if (idx >= 0) skills[idx] = skill;
+      else skills.push(skill);
+      skills.sort((a, b) => a.name.localeCompare(b.name));
+      return skill;
+    } catch (err) {
+      skillsError = err instanceof Error ? err.message : 'Failed to update AI skill';
+      return null;
+    }
+  }
+
+  async function deleteSkill(projectId: string, skillId: string) {
+    skillsError = null;
+    try {
+      await api.deleteProjectAiSkill(projectId, skillId);
+      const idx = skills.findIndex((skill) => skill.id === skillId);
+      if (idx >= 0) skills.splice(idx, 1);
+    } catch (err) {
+      skillsError = err instanceof Error ? err.message : 'Failed to delete AI skill';
     }
   }
 
@@ -524,6 +584,8 @@ function createAiStore() {
   function reset() {
     settings = null;
     settingsError = null;
+    skills.splice(0, skills.length);
+    skillsError = null;
     docs.splice(0, docs.length);
     fileTree = { folders: [], docs: [], assets: [] };
     docsTotal = 0;
@@ -545,6 +607,15 @@ function createAiStore() {
     get settingsError() { return settingsError; },
     loadSettings,
     updateSettings,
+
+    // skills
+    get skills() { return skills; },
+    get skillsLoading() { return skillsLoading; },
+    get skillsError() { return skillsError; },
+    loadSkills,
+    createSkill,
+    updateSkill,
+    deleteSkill,
 
     // docs
     get docs() { return docs; },

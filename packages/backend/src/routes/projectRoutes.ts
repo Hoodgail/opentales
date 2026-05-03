@@ -48,6 +48,10 @@ projectRoutes.post(
 projectRoutes.get('/:projectId/ai-settings', asyncHandler(ai.getSettings));
 projectRoutes.patch('/:projectId/ai-settings', asyncHandler(ai.updateSettings));
 projectRoutes.get('/:projectId/ai/tools', asyncHandler(ai.tools));
+projectRoutes.get('/:projectId/ai/skills', asyncHandler(ai.skills));
+projectRoutes.post('/:projectId/ai/skills', asyncHandler(ai.createSkill));
+projectRoutes.patch('/:projectId/ai/skills/:skillId', asyncHandler(ai.updateSkill));
+projectRoutes.delete('/:projectId/ai/skills/:skillId', asyncHandler(ai.deleteSkill));
 projectRoutes.get('/:projectId/ai/agent-sessions', asyncHandler(ai.agentSessions));
 projectRoutes.post('/:projectId/ai/agent-sessions', asyncHandler(ai.createAgentSession));
 projectRoutes.get('/:projectId/ai/agent-sessions/:sessionId', asyncHandler(ai.agentSession));

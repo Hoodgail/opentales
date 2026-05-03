@@ -5,8 +5,10 @@ import type {
   CreateAiAgentSessionInput,
   CreateAiCharacterDialogueInput,
   CreateAiOutlineExpansionInput,
+  CreateProjectAiSkillInput,
   CreateAiRewriteSuggestionInput,
   QueueAiAgentPromptInput,
+  UpdateProjectAiSkillInput,
   UpdateProjectAiSettingsInput
 } from '@opentales/sdk';
 import { prisma } from '../config/prisma.js';
@@ -14,11 +16,13 @@ import { HttpError } from '../http/HttpError.js';
 import { AiAssistUseCase } from '../useCases/ai/AiAssistUseCase.js';
 import { AiAgentSessionUseCase } from '../useCases/ai/AiAgentSessionUseCase.js';
 import { ProjectAiSettingsUseCase } from '../useCases/ai/ProjectAiSettingsUseCase.js';
+import { ProjectAiSkillsUseCase } from '../useCases/ai/ProjectAiSkillsUseCase.js';
 
 export class AiController {
   private readonly settingsUseCase = new ProjectAiSettingsUseCase(prisma);
   private readonly assistUseCase = new AiAssistUseCase(prisma);
   private readonly agentSessionUseCase = new AiAgentSessionUseCase(prisma);
+  private readonly skillsUseCase = new ProjectAiSkillsUseCase(prisma);
 
   getSettings = async (req: Request, res: Response) => {
     res.json(await this.settingsUseCase.get(this.userId(req), req.params.projectId));
@@ -78,6 +82,35 @@ export class AiController {
 
   tools = async (req: Request, res: Response) => {
     res.json(await this.assistUseCase.listTools(this.userId(req), req.params.projectId));
+  };
+
+  skills = async (req: Request, res: Response) => {
+    res.json(await this.skillsUseCase.list(this.userId(req), req.params.projectId));
+  };
+
+  createSkill = async (req: Request, res: Response) => {
+    res.status(201).json(
+      await this.skillsUseCase.create(
+        this.userId(req),
+        req.params.projectId,
+        req.body as CreateProjectAiSkillInput
+      )
+    );
+  };
+
+  updateSkill = async (req: Request, res: Response) => {
+    res.json(
+      await this.skillsUseCase.update(
+        this.userId(req),
+        req.params.projectId,
+        req.params.skillId,
+        req.body as UpdateProjectAiSkillInput
+      )
+    );
+  };
+
+  deleteSkill = async (req: Request, res: Response) => {
+    res.json(await this.skillsUseCase.delete(this.userId(req), req.params.projectId, req.params.skillId));
   };
 
   agentSession = async (req: Request, res: Response) => {

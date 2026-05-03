@@ -13,7 +13,8 @@ export type CollaborationDocumentKind =
   | 'location'
   | 'structure'
   | 'obstacle'
-  | 'doc';
+  | 'doc'
+  | 'ai-skill';
 
 export interface AuthUser {
   id: string;
@@ -212,7 +213,7 @@ export interface CollaborationLeaveInput {
 }
 
 export interface CollaborationLocation {
-  tabType: 'chapter' | 'character' | 'location' | 'structure' | 'outline' | 'submission' | 'doc' | 'ai-approval';
+  tabType: 'chapter' | 'character' | 'location' | 'structure' | 'outline' | 'submission' | 'doc' | 'ai-skill' | 'ai-approval' | 'settings';
   refId: string;
   title: string;
   field?: string;
@@ -437,6 +438,31 @@ export interface UpdateProjectAiSettingsInput {
    * Write-only. Omit to keep the existing key, pass null to clear it.
    */
   apiKey?: string | null;
+}
+
+export interface ProjectAiSkill {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string;
+  content: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateProjectAiSkillInput {
+  name: string;
+  description: string;
+  content?: string;
+  enabled?: boolean;
+}
+
+export interface UpdateProjectAiSkillInput {
+  name?: string;
+  description?: string;
+  content?: string;
+  enabled?: boolean;
 }
 
 export interface AiContinuityIssue {

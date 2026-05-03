@@ -65,6 +65,7 @@ Important DTOs:
 - `ProjectFolder`
 - `ProjectFileTree`
 - `ProjectStorageUsage`
+- `ProjectAiSkill`
 - `Character`
 - `Location`
 - `Chapter`
@@ -97,5 +98,9 @@ Important DTOs:
 | `deleteProjectFolder(projectId, folderId)` | `DELETE /projects/:projectId/folders/:folderId` |
 | `updateProjectAsset(projectId, assetId, input)` | `PATCH /projects/:projectId/assets/:assetId` |
 | `getProjectStorage(projectId)` | `GET /projects/:projectId/storage` |
+| `listProjectAiSkills(projectId)` | `GET /projects/:projectId/ai/skills` |
+| `createProjectAiSkill(projectId, input)` | `POST /projects/:projectId/ai/skills` |
+| `updateProjectAiSkill(projectId, skillId, input)` | `PATCH /projects/:projectId/ai/skills/:skillId` |
+| `deleteProjectAiSkill(projectId, skillId)` | `DELETE /projects/:projectId/ai/skills/:skillId` |
 
 Project docs are path-based through folders. `ProjectDoc.kind` is only metadata for filtering and AI behavior; use `folderId` to place docs in the tree. Assets appear in the tree only when they have a `folderId`.

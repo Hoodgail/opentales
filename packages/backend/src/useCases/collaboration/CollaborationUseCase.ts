@@ -395,6 +395,17 @@ export class CollaborationUseCase {
       return currentBody(doc.bodyWriting);
     }
 
+    if (ref.kind === 'ai-skill') {
+      const skill = await this.prisma.projectAiSkill.findFirst({
+        where: { id: ref.entityId, projectId }
+      });
+      if (!skill) throw new HttpError(404, 'AI skill not found');
+      if (ref.field === 'name') return skill.name;
+      if (ref.field === 'description') return skill.description;
+      if (ref.field === 'content') return skill.content;
+      throw new HttpError(400, 'Unsupported AI skill collaboration field');
+    }
+
     throw new HttpError(400, 'Unsupported collaboration document kind');
   }
 }

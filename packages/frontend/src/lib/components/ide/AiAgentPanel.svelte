@@ -94,6 +94,7 @@
       void ai.startStream(pid);
       void ai.loadToolManifest(pid);
       void ai.loadDocs(pid, { limit: 100 });
+      void ai.loadSkills(pid);
     });
 
     return () => ai.stopStream();

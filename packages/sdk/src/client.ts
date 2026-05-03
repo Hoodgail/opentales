@@ -19,6 +19,7 @@ import type {
   CreateProjectFolderInput,
   CreateProjectDocInput,
   CreateProjectInput,
+  CreateProjectAiSkillInput,
   LoginInput,
   ManuscriptProject,
   MembersAndInvites,
@@ -54,6 +55,7 @@ import type {
   PatchStructureResult,
   ProjectInvite,
   ProjectAiSettings,
+  ProjectAiSkill,
   ProjectDoc,
   ProjectFileTree,
   ProjectFolder,
@@ -77,6 +79,7 @@ import type {
   UpdateProjectDocInput,
   UpdateProjectFolderInput,
   UpdateProjectAiSettingsInput,
+  UpdateProjectAiSkillInput,
   UpdateProjectInput,
   UpdateStructureInput
 } from './types.js';
@@ -596,6 +599,38 @@ export class OpenTalesClient {
       method: 'PATCH',
       body: input
     });
+  }
+
+  listProjectAiSkills(projectId: string): Promise<ProjectAiSkill[]> {
+    return this.request<ProjectAiSkill[]>(`/projects/${projectId}/ai/skills`);
+  }
+
+  createProjectAiSkill(
+    projectId: string,
+    input: CreateProjectAiSkillInput
+  ): Promise<ProjectAiSkill> {
+    return this.request<ProjectAiSkill>(`/projects/${projectId}/ai/skills`, {
+      method: 'POST',
+      body: input
+    });
+  }
+
+  updateProjectAiSkill(
+    projectId: string,
+    skillId: string,
+    input: UpdateProjectAiSkillInput
+  ): Promise<ProjectAiSkill> {
+    return this.request<ProjectAiSkill>(`/projects/${projectId}/ai/skills/${skillId}`, {
+      method: 'PATCH',
+      body: input
+    });
+  }
+
+  deleteProjectAiSkill(projectId: string, skillId: string): Promise<{ id: string; deleted: true }> {
+    return this.request<{ id: string; deleted: true }>(
+      `/projects/${projectId}/ai/skills/${skillId}`,
+      { method: 'DELETE' }
+    );
   }
 
   runContinuityReview(projectId: string, submissionId: string): Promise<AiContinuityReview> {

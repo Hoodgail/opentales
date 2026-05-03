@@ -128,6 +128,10 @@ function createStore() {
   }
 
   function goToLocation(location: CollaborationLocation) {
+    if (location.tabType === 'settings') {
+      void manuscript.setActiveView('settings');
+      return;
+    }
     void manuscript.openTab({
       id: tabIdFor(location),
       type: location.tabType,
@@ -188,6 +192,8 @@ function documentKey(document: CollaborationDocumentRef): string {
 }
 
 function tabIdFor(location: CollaborationLocation): string {
+  if (location.tabType === 'settings') return 'settings';
+  if (location.tabType === 'ai-skill') return `tab-ai-skill-${location.refId}`;
   if (location.tabType === 'structure') return 'tab-structure';
   if (location.tabType === 'outline') return 'tab-outline';
   return `tab-${location.refId}`;

@@ -1,12 +1,14 @@
 <script lang="ts">
-  import { Eye, EyeOff, Image as ImageIcon, Keyboard } from 'lucide-svelte';
+  import { Eye, EyeOff, Image as ImageIcon, Keyboard, PenLine, Sparkles, Target } from 'lucide-svelte';
   import type { CoverOrientation, ProjectVisibility } from '@opentales/sdk';
   import { liveTextField } from '$lib/actions/liveTextField';
+  import { ai } from '$lib/stores/ai.svelte';
   import { commandPalette } from '$lib/stores/commandPalette.svelte';
   import { editorTheme, type EditorThemeId } from '$lib/stores/editorTheme.svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import { preferences } from '$lib/stores/preferences.svelte';
   import AiSettingsSection from './AiSettingsSection.svelte';
+  import CollapsibleSettingsSection from './CollapsibleSettingsSection.svelte';
   import PanelHeader from './PanelHeader.svelte';
 
   let coverInput: HTMLInputElement | null = $state(null);
@@ -85,15 +87,17 @@
         .filter(Boolean)
     });
   }
+
+  function aiSummary(): string {
+    if (!ai.settings) return 'Not loaded';
+    return `${ai.settings.enabled ? 'Enabled' : 'Disabled'} · ${ai.skills.length} skills`;
+  }
 </script>
 
 <div class="flex h-full flex-col">
   <PanelHeader title="Project Settings" />
   <div class="flex-1 overflow-y-auto">
-    <section class="border-b border-border p-3 text-xs">
-      <h3 class="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-        Editor preferences
-      </h3>
+    <CollapsibleSettingsSection title="Editor preferences" icon={Keyboard}>
       <div class="mb-3">
         <span class="mb-1.5 block text-[10px] uppercase tracking-wide text-muted-foreground">
           Theme
@@ -131,16 +135,15 @@
         <Keyboard class="size-3.5" />
         Keyboard shortcuts
       </button>
-    </section>
+    </CollapsibleSettingsSection>
 
     {#if !manuscript.projectId}
       <div class="p-4 text-xs text-muted-foreground">No project loaded.</div>
     {:else}
-      <AiSettingsSection />
-      <section class="border-b border-border p-3 text-xs">
-        <h3 class="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-          Cover
-        </h3>
+      <CollapsibleSettingsSection title="AI configuration" icon={Sparkles} summary={aiSummary()}>
+        <AiSettingsSection />
+      </CollapsibleSettingsSection>
+      <CollapsibleSettingsSection title="Cover" icon={ImageIcon}>
         <div
           class={(
             manuscript.projectMeta.coverOrientation === 'portrait'
@@ -204,12 +207,9 @@
             </div>
           {/if}
         </div>
-      </section>
+      </CollapsibleSettingsSection>
 
-      <section class="border-b border-border p-3 text-xs">
-        <h3 class="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-          Visibility
-        </h3>
+      <CollapsibleSettingsSection title="Visibility" icon={manuscript.projectMeta.visibility === 'public' ? Eye : EyeOff}>
         <div class="flex gap-1.5">
           <button
             type="button"
@@ -249,9 +249,10 @@
             </a>
           {/if}
         {/if}
-      </section>
+      </CollapsibleSettingsSection>
 
-      <form onsubmit={saveBasics} class="space-y-3 p-3 text-xs">
+      <CollapsibleSettingsSection title="Project basics" icon={PenLine}>
+        <form onsubmit={saveBasics} class="space-y-3 text-xs">
         <label class="block">
           <span class="mb-1 block text-[10px] uppercase tracking-wide text-muted-foreground">Title</span>
           <input
@@ -427,12 +428,10 @@
             Your role ({manuscript.currentUserRole}) cannot edit project settings.
           </p>
         {/if}
-      </form>
+        </form>
+      </CollapsibleSettingsSection>
 
-      <section class="border-t border-border p-3 text-xs">
-        <h3 class="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-          Writing preferences
-        </h3>
+      <CollapsibleSettingsSection title="Writing preferences" icon={Target}>
         <label class="mb-2 block">
           <span class="mb-1 block text-[10px] uppercase tracking-wide text-muted-foreground">
             Daily word goal
@@ -480,7 +479,7 @@
           />
           <span>Show editor minimap</span>
         </label>
-      </section>
+      </CollapsibleSettingsSection>
     {/if}
   </div>
 </div>

@@ -255,6 +255,7 @@ model Project {
   docs          ProjectDoc[]
   folders       ProjectFolder[]
   aiAgentSessions ProjectAiAgentSession[]
+  aiSkills      ProjectAiSkill[]
 
   @@unique([orgId, slug])
   @@index([orgId])
@@ -377,6 +378,22 @@ model ProjectAiSettings {
   updatedAt    DateTime       @updatedAt
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model ProjectAiSkill {
+  id          String   @id @default(cuid())
+  projectId   String
+  name        String
+  description String
+  content     String
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, name])
+  @@index([projectId, enabled])
 }
 
 model BetaShareLink {

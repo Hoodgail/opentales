@@ -10,6 +10,7 @@ Express API for OpenTales. It uses Prisma with PostgreSQL and keeps business log
 - Project manuscript reads
 - Chapter, character, location, project, and story structure updates
 - Path-based project docs, nested folders, and foldered assets
+- Project-scoped AI settings and Agent Skills
 - Project storage usage accounting across assets and writing content
 - Versioned prose through `Writing`, `WritingBranch`, and `WritingVersion`
 - Demo seed data converted from the current frontend manuscript fixture
@@ -92,6 +93,8 @@ Project routes require `Authorization: Bearer <token>`.
 | `DELETE` | `/projects/:projectId/folders/:folderId` | Delete a folder subtree |
 | `PATCH` | `/projects/:projectId/assets/:assetId` | Rename or move an asset into/out of folders |
 | `GET` | `/projects/:projectId/storage` | Calculate total project storage usage |
+
+AI skill routes under `/projects/:projectId/ai/skills` let project admins list, create, update, and delete project-scoped Agent Skills. Enabled skills are disclosed to agent sessions as a compact catalog and loaded on demand with read-only AI tools.
 
 Folders use Linux-like case-sensitive names. A folder cannot contain two child items with the same name across folders, docs, and foldered assets. The backend enforces this in transactions with PostgreSQL advisory locks scoped to the project and parent folder, so cross-table sibling checks do not race.
 

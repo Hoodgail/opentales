@@ -273,6 +273,8 @@ export class AiAssistUseCase {
       'readBetaShareLink',
       'readPublicProject',
       'readProjectAiSettings',
+      'listProjectAiSkills',
+      'readProjectAiSkill',
       'listWritingVersions',
       'readWritingVersion',
       'grepProject'

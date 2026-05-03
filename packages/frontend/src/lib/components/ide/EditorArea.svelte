@@ -2,6 +2,7 @@
   import { BookOpen, FileText } from 'lucide-svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import AiApprovalEditor from './AiApprovalEditor.svelte';
+  import AiSkillEditor from './AiSkillEditor.svelte';
   import ChapterEditor from './ChapterEditor.svelte';
   import CharacterEditor from './CharacterEditor.svelte';
   import DocEditor from './DocEditor.svelte';
@@ -79,6 +80,8 @@
       <SubmissionEditor submissionId={activeTab.refId} />
     {:else if activeTab.type === 'doc'}
       <DocEditor docId={activeTab.refId} />
+    {:else if activeTab.type === 'ai-skill'}
+      <AiSkillEditor skillId={activeTab.refId} />
     {:else if activeTab.type === 'ai-approval'}
       <AiApprovalEditor approvalId={activeTab.refId} />
     {/if}
