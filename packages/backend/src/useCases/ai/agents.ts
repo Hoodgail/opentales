@@ -47,19 +47,22 @@ export async function loadAiAgents(prisma: PrismaClient, projectId: string): Pro
     Object.entries(BUILT_IN_AGENTS).map(([name, agent]) => [name, { ...agent }])
   );
 
+  const agentsFolder = await prisma.projectFolder.findFirst({
+    where: { projectId, parentFolderId: null, name: 'agents' },
+    select: { id: true }
+  });
+  if (!agentsFolder) return Object.values(agents).filter((agent) => agent.description.trim().length > 0);
+
   const docs = await prisma.projectDoc.findMany({
-    where: { projectId },
+    where: { projectId, folderId: agentsFolder.id },
     include: {
-      folder: true,
       bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } }
     },
     orderBy: [{ order: 'asc' }, { createdAt: 'asc' }]
   });
 
   for (const doc of docs) {
-    const path = doc.folder ? `${doc.folder.path}/${doc.title}` : doc.title;
-    const nameFromPath = agentNameFromPath(path);
-    if (!nameFromPath) continue;
+    const nameFromPath = agentNameFromDocTitle(doc.title);
     const parsed = parseAgentMarkdown(bodyOf(doc.bodyWriting));
     const name = safeAgentName(String(parsed.frontmatter.name ?? nameFromPath));
     if (!name) continue;
@@ -95,12 +98,8 @@ export function findAgent(agents: AiAgentInfo[], name: string): AiAgentInfo | un
   return agents.find((agent) => agent.name === normalized);
 }
 
-function agentNameFromPath(path: string): string | null {
-  const normalized = path.replace(/\\/g, '/').replace(/^\/+/, '');
-  const match = normalized.match(/^(?:agent|agents)\/(.+)\.md$/i);
-  if (!match) return null;
-  const basename = match[1].split('/').pop() ?? '';
-  return safeAgentName(basename) || null;
+function agentNameFromDocTitle(title: string): string {
+  return safeAgentName(title.replace(/\.md$/i, ''));
 }
 
 function safeAgentName(value: string): string {
