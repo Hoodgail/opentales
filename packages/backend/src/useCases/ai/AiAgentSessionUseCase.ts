@@ -605,14 +605,93 @@ export class AiAgentSessionUseCase {
       ? `${systemPrompt}\n\n## Active agent instructions: ${agentName ?? 'subagent'}\n\n${agentPrompt}`
       : systemPrompt;
 
+    const attachmentContext = await this.buildAttachmentContext(projectId, attachments);
+    const uploadAttachments = attachments.filter((attachment) => !attachment.reference);
     const userPrompt = renderUserContext({
       transcript,
-      prompt: attachments.length
-        ? `${prompt}\n\nAttached files:\n${attachments.map((attachment) => `- ${attachmentLabel(attachment)}`).join('\n')}`
+      prompt: attachmentContext || uploadAttachments.length
+        ? `${prompt}${uploadAttachments.length ? `\n\nAttached files:\n${uploadAttachments.map((attachment) => `- ${attachmentLabel(attachment)}`).join('\n')}` : ''}${attachmentContext ? `\n\nAttached project context:\n${attachmentContext}` : ''}`
         : prompt
     });
 
     return { systemPrompt: finalSystemPrompt, userPrompt };
+  }
+
+  private async buildAttachmentContext(projectId: string, attachments: AiAgentAttachment[]): Promise<string> {
+    const sections: string[] = [];
+    for (const attachment of attachments) {
+      const ref = attachment.reference;
+      if (!ref) continue;
+      const header = `### ${attachment.name}`;
+      if (ref.type === 'doc') {
+        const doc = await this.prisma.projectDoc.findFirst({
+          where: { id: ref.id, projectId },
+          include: { folder: { select: { path: true } }, bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } } }
+        });
+        if (!doc) continue;
+        sections.push(`${header}\nType: project doc\nPath: ${ref.path ?? (doc.folder ? `${doc.folder.path}/${doc.title}` : doc.title)}\nKind: ${doc.kind}\n\n${referenceContent(bodyOf(doc.bodyWriting), ref)}`);
+      } else if (ref.type === 'chapter') {
+        const chapter = await this.prisma.chapter.findFirst({
+          where: { id: ref.id, projectId, deletedAt: null },
+          include: { bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } } }
+        });
+        if (!chapter) continue;
+        sections.push(`${header}\nType: chapter\nNumber: ${chapter.number}\nStatus: ${chapter.status}\nSummary: ${chapter.summary ?? ''}\n\n${referenceContent(bodyOf(chapter.bodyWriting), ref)}`);
+      } else if (ref.type === 'character') {
+        const character = await this.prisma.character.findFirst({
+          where: { id: ref.id, projectId },
+          include: {
+            descriptionWriting: { include: { defaultBranch: { include: { headVersion: true } } } },
+            appearanceWriting: { include: { defaultBranch: { include: { headVersion: true } } } },
+            motivationWriting: { include: { defaultBranch: { include: { headVersion: true } } } },
+            arcWriting: { include: { defaultBranch: { include: { headVersion: true } } } }
+          }
+        });
+        if (!character) continue;
+        sections.push(`${header}\nType: character\nRole: ${character.role ?? ''}\nAge: ${character.age ?? ''}\nOccupation: ${character.occupation ?? ''}\nTraits: ${character.traits.join(', ')}\n\nDescription:\n${referenceContent(bodyOf(character.descriptionWriting), ref)}\n\nAppearance:\n${referenceContent(bodyOf(character.appearanceWriting), ref)}\n\nMotivation:\n${referenceContent(bodyOf(character.motivationWriting), ref)}\n\nArc:\n${referenceContent(bodyOf(character.arcWriting), ref)}`);
+      } else if (ref.type === 'location') {
+        const location = await this.prisma.location.findFirst({
+          where: { id: ref.id, projectId },
+          include: {
+            descriptionWriting: { include: { defaultBranch: { include: { headVersion: true } } } },
+            atmosphereWriting: { include: { defaultBranch: { include: { headVersion: true } } } },
+            significanceWriting: { include: { defaultBranch: { include: { headVersion: true } } } },
+            sensoryWriting: { include: { defaultBranch: { include: { headVersion: true } } } }
+          }
+        });
+        if (!location) continue;
+        sections.push(`${header}\nType: location\nLocation type: ${location.type ?? ''}\n\nDescription:\n${referenceContent(bodyOf(location.descriptionWriting), ref)}\n\nAtmosphere:\n${referenceContent(bodyOf(location.atmosphereWriting), ref)}\n\nSignificance:\n${referenceContent(bodyOf(location.significanceWriting), ref)}\n\nSensory details:\n${referenceContent(bodyOf(location.sensoryWriting), ref)}`);
+      } else if (ref.type === 'folder') {
+        const folder = await this.prisma.projectFolder.findFirst({ where: { id: ref.id, projectId } });
+        if (!folder) continue;
+        const [folders, docs, assets] = await Promise.all([
+          this.prisma.projectFolder.findMany({ where: { projectId, parentFolderId: folder.id }, orderBy: [{ order: 'asc' }, { name: 'asc' }], select: { id: true, name: true, path: true } }),
+          this.prisma.projectDoc.findMany({ where: { projectId, folderId: folder.id }, orderBy: [{ order: 'asc' }, { title: 'asc' }], select: { id: true, title: true, kind: true } }),
+          this.prisma.asset.findMany({ where: { projectId, folderId: folder.id }, orderBy: [{ order: 'asc' }, { createdAt: 'asc' }], select: { id: true, name: true, kind: true, mimeType: true, sizeBytes: true } })
+        ]);
+        sections.push(`${header}\nType: folder\nPath: ${folder.path}\n\n${jsonBlock({ folders, docs, assets: assets.map((asset) => ({ ...asset, sizeBytes: Number(asset.sizeBytes) })) })}`);
+      } else if (ref.type === 'asset') {
+        const asset = await this.prisma.asset.findFirst({ where: { id: ref.id, projectId }, include: { attachments: true } });
+        if (!asset) continue;
+        sections.push(`${header}\nType: asset\n\n${jsonBlock({ id: asset.id, name: asset.name, kind: asset.kind, mimeType: asset.mimeType, sizeBytes: Number(asset.sizeBytes), url: attachment.url, attachments: asset.attachments })}`);
+      } else if (ref.type === 'act') {
+        const act = await this.prisma.act.findFirst({ where: { id: ref.id, projectId }, include: { chapters: { where: { deletedAt: null }, orderBy: { order: 'asc' }, select: { id: true, number: true, title: true, summary: true, status: true } } } });
+        if (!act) continue;
+        sections.push(`${header}\nType: act\n\n${jsonBlock(act)}`);
+      } else if (ref.type === 'structure') {
+        const project = await this.prisma.project.findFirst({
+          where: { id: projectId },
+          include: { storyStructure: { include: { loglineWriting: { include: { defaultBranch: { include: { headVersion: true } } } }, outlineWriting: { include: { defaultBranch: { include: { headVersion: true } } } }, climaxWriting: { include: { defaultBranch: { include: { headVersion: true } } } } } }, obstacles: { orderBy: { order: 'asc' }, include: { descriptionWriting: { include: { defaultBranch: { include: { headVersion: true } } } }, resolutionWriting: { include: { defaultBranch: { include: { headVersion: true } } } } } } }
+        });
+        if (!project?.storyStructure) continue;
+        sections.push(`${header}\nType: story structure\nLogline:\n${referenceContent(bodyOf(project.storyStructure.loglineWriting), ref)}\n\nOutline:\n${referenceContent(bodyOf(project.storyStructure.outlineWriting), ref)}\n\nClimax:\n${referenceContent(bodyOf(project.storyStructure.climaxWriting), ref)}\n\nObstacles:\n${jsonBlock(project.obstacles.map((obstacle) => ({ id: obstacle.id, title: obstacle.title, type: obstacle.type, description: textExcerpt(bodyOf(obstacle.descriptionWriting)), resolution: textExcerpt(bodyOf(obstacle.resolutionWriting)) })))}`);
+      } else if (ref.type === 'obstacle') {
+        const obstacle = await this.prisma.obstacle.findFirst({ where: { id: ref.id, projectId }, include: { descriptionWriting: { include: { defaultBranch: { include: { headVersion: true } } } }, resolutionWriting: { include: { defaultBranch: { include: { headVersion: true } } } } } });
+        if (!obstacle) continue;
+        sections.push(`${header}\nType: obstacle\nObstacle type: ${obstacle.type}\n\nDescription:\n${referenceContent(bodyOf(obstacle.descriptionWriting), ref)}\n\nResolution:\n${referenceContent(bodyOf(obstacle.resolutionWriting), ref)}`);
+      }
+    }
+    return sections.join('\n\n');
   }
 
   private buildAgentTools(
@@ -1165,9 +1244,48 @@ function sanitizeAttachments(value: unknown): AiAgentAttachment[] {
       kind,
       sizeBytes: typeof record.sizeBytes === 'number' && Number.isFinite(record.sizeBytes) ? record.sizeBytes : 0,
       url,
-      assetId: typeof record.assetId === 'string' ? record.assetId : undefined
+      assetId: typeof record.assetId === 'string' ? record.assetId : undefined,
+      reference: sanitizeProjectReference(record.reference)
     } satisfies AiAgentAttachment];
   });
+}
+
+function sanitizeProjectReference(value: unknown): AiAgentAttachment['reference'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const type = typeof record.type === 'string' ? record.type : '';
+  const validTypes = new Set(['folder', 'doc', 'asset', 'chapter', 'character', 'location', 'act', 'structure', 'obstacle']);
+  const id = typeof record.id === 'string' ? record.id.trim() : '';
+  if (!validTypes.has(type) || !id) return undefined;
+  return {
+    type: type as NonNullable<AiAgentAttachment['reference']>['type'],
+    id,
+    path: typeof record.path === 'string' ? record.path.trim() || undefined : undefined,
+    startLine: positiveInteger(record.startLine),
+    endLine: positiveInteger(record.endLine)
+  };
+}
+
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+function referenceContent(content: string, ref: NonNullable<AiAgentAttachment['reference']>): string {
+  if (ref.startLine !== undefined || ref.endLine !== undefined) {
+    const lines = content.split(/\r?\n/);
+    const startLine = Math.max(ref.startLine ?? 1, 1);
+    const endLine = Math.min(ref.endLine ?? startLine + 80, lines.length);
+    return lines.slice(startLine - 1, endLine).join('\n');
+  }
+  return textExcerpt(content);
+}
+
+function textExcerpt(content: string, limit = 12000): string {
+  return content.length > limit ? `${content.slice(0, limit)}\n\n[truncated]` : content;
+}
+
+function jsonBlock(value: unknown): string {
+  return `\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``;
 }
 
 function attachmentLabel(attachment: AiAgentAttachment): string {

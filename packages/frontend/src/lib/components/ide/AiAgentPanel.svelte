@@ -17,6 +17,7 @@
   import type {
     AiAgentAttachmentInput,
     AiAgentMessage,
+    AiAgentProjectReferenceType,
     AiAgentToolCall,
     AssetKind,
   } from "@opentales/sdk";
@@ -32,11 +33,16 @@
 
   let prompt = $state("");
   let scrollEl: HTMLDivElement | undefined = $state();
+  let textareaEl: HTMLTextAreaElement | undefined = $state();
   let fileInputEl: HTMLInputElement | undefined = $state();
   let sessionMenuOpen = $state(false);
   let selectedModel = $state("");
   let attachments = $state<AiAgentAttachmentInput[]>([]);
   let uploadingAttachment = $state(false);
+  let autocompleteOpen = $state(false);
+  let autocompleteQuery = $state("");
+  let autocompleteStart = $state(0);
+  let selectedAutocompleteIndex = $state(0);
 
   const projectId = $derived(manuscript.projectId);
   const session = $derived(ai.session);
@@ -59,6 +65,9 @@
     session?.pendingToolCalls?.filter(
       (tc) => tc.status === "pending-approval" && tc.toolName === "askUser",
     ) ?? [],
+  );
+  const autocompleteItems = $derived(
+    autocompleteOpen ? projectReferenceSuggestions(autocompleteQuery) : [],
   );
 
   // Auto-scroll on new content
@@ -99,7 +108,7 @@
       void ai.loadSessions(pid);
       void ai.startStream(pid);
       void ai.loadToolManifest(pid);
-      void ai.loadDocs(pid, { limit: 100 });
+      void ai.loadFileTree(pid);
       void ai.loadSkills(pid);
     });
 
@@ -167,10 +176,74 @@
   }
 
   function handleKey(e: KeyboardEvent) {
+    if (autocompleteOpen) {
+      if (e.key === "ArrowDown" || (e.ctrlKey && e.key.toLowerCase() === "n")) {
+        e.preventDefault();
+        selectedAutocompleteIndex = Math.min(
+          selectedAutocompleteIndex + 1,
+          Math.max(autocompleteItems.length - 1, 0),
+        );
+        return;
+      }
+      if (e.key === "ArrowUp" || (e.ctrlKey && e.key.toLowerCase() === "p")) {
+        e.preventDefault();
+        selectedAutocompleteIndex = Math.max(selectedAutocompleteIndex - 1, 0);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        const item = autocompleteItems[selectedAutocompleteIndex];
+        if (item) {
+          e.preventDefault();
+          insertAutocompleteItem(item);
+          return;
+        }
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeAutocomplete();
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       send();
     }
+  }
+
+  function handlePromptInput(event: Event) {
+    prompt = (event.currentTarget as HTMLTextAreaElement).value;
+    updateAutocomplete();
+  }
+
+  function handlePromptClick() {
+    updateAutocomplete();
+  }
+
+  function updateAutocomplete() {
+    if (!textareaEl) return;
+    const offset = textareaEl.selectionStart ?? prompt.length;
+    const text = prompt.slice(0, offset);
+    const idx = text.lastIndexOf("@");
+    if (idx === -1) {
+      closeAutocomplete();
+      return;
+    }
+    const before = idx === 0 ? undefined : prompt[idx - 1];
+    const between = text.slice(idx + 1);
+    if ((before === undefined || /\s/.test(before)) && !/\s/.test(between)) {
+      autocompleteStart = idx;
+      autocompleteQuery = between;
+      autocompleteOpen = true;
+      selectedAutocompleteIndex = 0;
+    } else {
+      closeAutocomplete();
+    }
+  }
+
+  function closeAutocomplete() {
+    autocompleteOpen = false;
+    autocompleteQuery = "";
+    selectedAutocompleteIndex = 0;
   }
 
   async function handleFiles(files: FileList | null) {
@@ -204,6 +277,215 @@
 
   function removeAttachment(id: string) {
     attachments = attachments.filter((attachment) => attachment.id !== id);
+  }
+
+  type AutocompleteItem = {
+    id: string;
+    type: AiAgentProjectReferenceType;
+    label: string;
+    detail: string;
+    path?: string;
+    searchText: string;
+    scoreBoost?: number;
+  };
+
+  function insertAutocompleteItem(item: AutocompleteItem) {
+    if (!textareaEl) return;
+    const lineRange = extractLineRange(autocompleteQuery);
+    const cursor = textareaEl.selectionStart ?? prompt.length;
+    const mention = `@${item.label}${lineRange.suffix} `;
+    prompt = `${prompt.slice(0, autocompleteStart)}${mention}${prompt.slice(cursor)}`;
+    const nextCursor = autocompleteStart + mention.length;
+    const attachmentId = `reference:${item.type}:${item.id}:${lineRange.suffix}`;
+    const existingIndex = attachments.findIndex(
+      (attachment) => attachment.id === attachmentId,
+    );
+    const attachment: AiAgentAttachmentInput = {
+      id: attachmentId,
+      name: `${item.label}${lineRange.suffix}`,
+      mimeType: "text/plain",
+      kind: "document",
+      sizeBytes: 0,
+      reference: {
+        type: item.type,
+        id: item.id,
+        path: item.path,
+        startLine: lineRange.startLine,
+        endLine: lineRange.endLine,
+      },
+    };
+    attachments =
+      existingIndex === -1
+        ? [...attachments, attachment]
+        : attachments.map((existing, index) =>
+            index === existingIndex ? attachment : existing,
+          );
+    closeAutocomplete();
+    void tick().then(() => {
+      textareaEl?.focus();
+      textareaEl?.setSelectionRange(nextCursor, nextCursor);
+    });
+  }
+
+  function extractLineRange(query: string): {
+    suffix: string;
+    startLine?: number;
+    endLine?: number;
+  } {
+    const hashIndex = query.lastIndexOf("#");
+    if (hashIndex === -1) return { suffix: "" };
+    const linePart = query.slice(hashIndex + 1);
+    const match = linePart.match(/^(\d+)(?:-(\d*))?$/);
+    if (!match) return { suffix: "" };
+    const startLine = Number(match[1]);
+    const parsedEnd = match[2] ? Number(match[2]) : undefined;
+    const endLine = parsedEnd && startLine < parsedEnd ? parsedEnd : undefined;
+    return {
+      suffix: `#${startLine}${endLine ? `-${endLine}` : ""}`,
+      startLine,
+      endLine,
+    };
+  }
+
+  function projectReferenceSuggestions(rawQuery: string): AutocompleteItem[] {
+    const { baseQuery } = autocompleteQueryParts(rawQuery);
+    const items: AutocompleteItem[] = [
+      {
+        id: projectId ?? "structure",
+        type: "structure",
+        label: "story-structure",
+        detail: "Story structure",
+        searchText: "story structure logline outline climax obstacles plot",
+        scoreBoost: 3,
+      },
+      ...ai.fileTree.folders.map((folder) => ({
+        id: folder.id,
+        type: "folder" as const,
+        label: folder.path,
+        detail: "Folder",
+        path: folder.path,
+        searchText: `${folder.name} ${folder.path}`,
+        scoreBoost: 2,
+      })),
+      ...ai.fileTree.docs.map((doc) => ({
+        id: doc.id,
+        type: "doc" as const,
+        label: doc.path ?? doc.title,
+        detail: `Doc · ${doc.kind}`,
+        path: doc.path ?? doc.title,
+        searchText: `${doc.title} ${doc.path ?? ""} ${doc.kind}`,
+        scoreBoost: 4,
+      })),
+      ...ai.fileTree.assets.map((asset) => ({
+        id: asset.id,
+        type: "asset" as const,
+        label: asset.path,
+        detail: `Asset · ${asset.kind}`,
+        path: asset.path,
+        searchText: `${asset.name} ${asset.path} ${asset.kind} ${asset.mimeType}`,
+        scoreBoost: 1,
+      })),
+      ...manuscript.chapters.map((chapter) => ({
+        id: chapter.id,
+        type: "chapter" as const,
+        label: `chapters/${chapter.number}-${slugify(chapter.title)}`,
+        detail: `Chapter ${chapter.number}`,
+        searchText: `${chapter.title} chapter ${chapter.number} ${chapter.summary}`,
+        scoreBoost: 4,
+      })),
+      ...manuscript.characters.map((character) => ({
+        id: character.id,
+        type: "character" as const,
+        label: `characters/${slugify(character.name)}`,
+        detail: "Character",
+        searchText: `${character.name} ${character.role} ${character.traits.join(" ")}`,
+        scoreBoost: 3,
+      })),
+      ...manuscript.locations.map((location) => ({
+        id: location.id,
+        type: "location" as const,
+        label: `locations/${slugify(location.name)}`,
+        detail: "Location",
+        searchText: `${location.name} ${location.type}`,
+        scoreBoost: 3,
+      })),
+      ...manuscript.acts.map((act) => ({
+        id: act.id,
+        type: "act" as const,
+        label: `acts/${slugify(act.title)}`,
+        detail: "Act",
+        searchText: `${act.title} act`,
+        scoreBoost: 2,
+      })),
+      ...manuscript.structure.obstacles.map((obstacle) => ({
+        id: obstacle.id,
+        type: "obstacle" as const,
+        label: `obstacles/${slugify(obstacle.title)}`,
+        detail: `Obstacle · ${obstacle.type.toLowerCase()}`,
+        searchText: `${obstacle.title} ${obstacle.type}`,
+        scoreBoost: 2,
+      })),
+    ];
+    return items
+      .map((item) => ({ item, score: fuzzyScore(baseQuery, item) }))
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => {
+        if (a.score !== b.score) return b.score - a.score;
+        const aDepth = a.item.label.split("/").length;
+        const bDepth = b.item.label.split("/").length;
+        if (aDepth !== bDepth) return aDepth - bDepth;
+        return a.item.label.localeCompare(b.item.label);
+      })
+      .slice(0, 8)
+      .map((entry) => entry.item);
+  }
+
+  function autocompleteQueryParts(query: string): { baseQuery: string } {
+    const hashIndex = query.lastIndexOf("#");
+    if (hashIndex === -1) return { baseQuery: query };
+    const linePart = query.slice(hashIndex + 1);
+    return /^\d*(?:-\d*)?$/.test(linePart)
+      ? { baseQuery: query.slice(0, hashIndex) }
+      : { baseQuery: query };
+  }
+
+  function fuzzyScore(query: string, item: AutocompleteItem): number {
+    const q = query.trim().toLowerCase();
+    if (!q) return item.scoreBoost ?? 1;
+    const haystack = `${item.label} ${item.searchText}`.toLowerCase();
+    if (/[*?]/.test(q)) return globMatches(q, haystack) ? 200 + (item.scoreBoost ?? 0) : 0;
+    if (haystack.includes(q)) return 100 + q.length + (item.scoreBoost ?? 0);
+    let score = item.scoreBoost ?? 0;
+    let cursor = 0;
+    for (const char of q) {
+      const found = haystack.indexOf(char, cursor);
+      if (found === -1) return 0;
+      score += found === cursor ? 6 : 2;
+      cursor = found + 1;
+    }
+    return score;
+  }
+
+  function globMatches(pattern: string, value: string): boolean {
+    const source = pattern
+      .split("")
+      .map((char) => {
+        if (char === "*") return ".*";
+        if (char === "?") return ".";
+        return char.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+      })
+      .join("");
+    return new RegExp(source).test(value);
+  }
+
+  function slugify(value: string): string {
+    return (
+      value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "") || "untitled"
+    );
   }
 
   function assetKindForFile(file: File): AssetKind {
@@ -1086,18 +1368,70 @@
               >
                 <Paperclip class="size-3 shrink-0" />
                 <span class="truncate">{attachment.name}</span>
+                {#if attachment.reference}
+                  <span class="text-[9px] uppercase text-muted-foreground/70"
+                    >{attachment.reference.type}</span
+                  >
+                {/if}
                 <X class="size-3 shrink-0" />
               </button>
             {/each}
           </div>
         {/if}
-        <textarea
-          bind:value={prompt}
-          onkeydown={handleKey}
-          placeholder="Ask about your manuscript..."
-          rows="3"
-          class="max-h-36 min-h-20 w-full resize-none bg-transparent px-3 py-2 text-xs leading-relaxed text-foreground placeholder:text-muted-foreground outline-none"
-        ></textarea>
+        <div class="relative">
+          <textarea
+            bind:this={textareaEl}
+            value={prompt}
+            oninput={handlePromptInput}
+            onkeydown={handleKey}
+            onclick={handlePromptClick}
+            onkeyup={handlePromptClick}
+            placeholder="Ask about your manuscript..."
+            rows="3"
+            class="max-h-36 min-h-20 w-full resize-none bg-transparent px-3 py-2 text-xs leading-relaxed text-foreground placeholder:text-muted-foreground outline-none"
+          ></textarea>
+          {#if autocompleteOpen && autocompleteItems.length > 0}
+            <div
+              class="absolute bottom-full left-2 right-2 z-30 mb-1 overflow-hidden rounded-lg border border-border bg-popover shadow-xl"
+            >
+              <div
+                class="border-b border-border/70 px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground"
+              >
+                Project context
+              </div>
+              <div class="max-h-56 overflow-y-auto p-1">
+                {#each autocompleteItems as item, index (item.type + item.id)}
+                  <button
+                    type="button"
+                    onmousedown={(event) => {
+                      event.preventDefault();
+                      insertAutocompleteItem(item);
+                    }}
+                    class="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left {index ===
+                    selectedAutocompleteIndex
+                      ? 'bg-muted text-foreground'
+                      : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'}"
+                  >
+                    <span class="min-w-0">
+                      <span class="block truncate text-[11px]">@{item.label}</span>
+                      <span class="block truncate text-[10px] opacity-70"
+                        >{item.detail}</span
+                      >
+                    </span>
+                    <span class="shrink-0 text-[9px] uppercase opacity-60"
+                      >{item.type}</span
+                    >
+                  </button>
+                {/each}
+              </div>
+              <div
+                class="border-t border-border/70 px-2 py-1 text-[10px] text-muted-foreground"
+              >
+                Enter/Tab to attach, Esc to close. Add #10-20 for lines.
+              </div>
+            </div>
+          {/if}
+        </div>
         <div
           class="flex items-center justify-between gap-2 border-t border-border/60 px-2 py-1.5"
         >

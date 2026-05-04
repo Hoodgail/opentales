@@ -573,10 +573,30 @@ export interface AiAgentAttachment {
   sizeBytes: number;
   url?: string;
   assetId?: string;
+  reference?: AiAgentProjectReference;
 }
 
 export interface AiAgentAttachmentInput extends AiAgentAttachment {
   base64?: string;
+}
+
+export type AiAgentProjectReferenceType =
+  | 'folder'
+  | 'doc'
+  | 'asset'
+  | 'chapter'
+  | 'character'
+  | 'location'
+  | 'act'
+  | 'structure'
+  | 'obstacle';
+
+export interface AiAgentProjectReference {
+  type: AiAgentProjectReferenceType;
+  id: string;
+  path?: string;
+  startLine?: number;
+  endLine?: number;
 }
 
 export interface AiAgentContextUsage {
