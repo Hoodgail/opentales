@@ -1,0 +1,17 @@
+{
+  "skill_name": "novel-voice",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I've written about 30,000 words of my novel and something feels off. My writing reads like a police report -- 'She walked to the door. She opened it. There was a man standing there. He was tall.' Everything is just action action action with no personality. I've been told I need to develop my 'voice' but I don't even know what that means practically. I write literary fiction, kind of in the vein of Donna Tartt or Hanya Yanagihara -- lush, emotional, character-driven. How do I go from where I am to something that actually sounds like a novel?",
+      "expected_output": "A voice.md that diagnoses the 'police report' style, explains what voice is in practical terms, develops a specific voice plan for the writer's literary fiction ambitions, provides concrete before/after examples of how to transform flat prose, and addresses dialogue and narrative voice balance.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "My novel has three POV characters and they all sound exactly the same. The 65-year-old retired detective, the 22-year-old art student, and the 40-year-old single dad all narrate in the same voice. My writing group pointed this out and I was mortified. It's third person limited, alternating chapters. How do I give each character their own distinct voice while still making the book feel cohesive? And how do I handle dialogue -- everyone sounds the same there too.",
+      "expected_output": "A voice.md that provides practical techniques for differentiating three POV character voices in third-person limited, develops distinct speech patterns and narrative personalities for each character, and addresses dialogue differentiation while maintaining overall novel cohesion.",
+      "files": []
+    }
+  ]
+}

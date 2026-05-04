@@ -1,0 +1,17 @@
+{
+     "skill_name": "novel-characters",
+     "evals": [
+          {
+               "id": 1,
+               "prompt": "I need help developing the characters for my heist novel. I have five members of the crew and they all kind of blur together. There's the leader (Jack), the hacker (Mia), the con artist (Diego), the muscle (Tanya), and the driver (Sam). Right now they're just their roles -- I need them to feel like real people with real motivations beyond 'wants money.' The heist is stealing a painting from a corrupt billionaire's private collection. Help me make these characters actually interesting and give them reasons to be doing this that go beyond the job.",
+               "expected_output": "A characters.md that transforms five archetype-based heist crew members into distinct, motivated individuals with competing desires, unique personalities, personal stakes in the heist, and clear arcs. Should address the 'blur together' problem with distinctive traits and voices.",
+               "files": []
+          },
+          {
+               "id": 2,
+               "prompt": "My main character is a 16-year-old girl named Ava who's been described by my beta readers as 'boring' and 'too perfect.' She's smart, kind, brave, loyal... and apparently that's the problem? She always does the right thing. She never makes mistakes that matter. I love her but I can see what they mean -- she doesn't have flaws that actually affect the plot. This is a YA fantasy. How do I fix Ava without making her a completely different character? I want her to still be fundamentally good but more... human?",
+               "expected_output": "A characters.md that addresses the 'Mary Sue' problem by developing meaningful flaws and competing desires for Ava while preserving her core goodness, explaining how strengths can become weaknesses, and providing a character arc that feels organic to a YA fantasy.",
+               "files": []
+          }
+     ]
+}

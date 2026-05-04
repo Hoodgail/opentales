@@ -8,6 +8,7 @@ import { LocalAssetStorage } from '../../../repositories/AssetStorage.js';
 import { GetProjectStatsUseCase } from '../../stats/GetProjectStatsUseCase.js';
 import { submissionDetailInclude, submissionInclude, toSubmissionDetail, toSubmissionSummary, toStatus } from '../../submissions/submissionMapper.js';
 import { getProjectInclude, toManuscriptProject } from '../../projects/projectMapper.js';
+import { loadAiSkillCatalog, readAiSkillFromCatalog } from '../markdownCatalog.js';
 import { bodyOf, emptyInputSchema, pagination, paginatedResult, paginationInputSchema, readRangeInputSchema, readTextRange, type ToolContext } from './shared.js';
 
 const assetStorage = new LocalAssetStorage();
@@ -343,16 +344,13 @@ export function listProjectAiSkillsTool(prisma: PrismaClient, context: ToolConte
     description: 'List enabled project agent skills by name and description. Use this catalog before activating a skill.',
     inputSchema: emptyInputSchema,
     execute: async () => {
-      const skills = await prisma.projectAiSkill.findMany({
-        where: { projectId: context.projectId, enabled: true },
-        orderBy: { name: 'asc' },
-        select: { name: true, description: true, updatedAt: true }
-      });
+      const skills = await loadAiSkillCatalog(prisma, context.projectId);
       return {
         skills: skills.map((skill) => ({
           name: skill.name,
           description: skill.description,
-          updatedAt: skill.updatedAt.toISOString()
+          updatedAt: skill.updatedAt.toISOString(),
+          native: Boolean(skill.native)
         }))
       };
     }
@@ -364,15 +362,14 @@ export function readProjectAiSkillTool(prisma: PrismaClient, context: ToolContex
     description: 'Activate a project agent skill by name and read its full instructions. Call this when the available skill catalog matches the user task.',
     inputSchema: z.object({ name: z.string().describe('The skill name from the available skills catalog.') }),
     execute: async ({ name }) => {
-      const skill = await prisma.projectAiSkill.findFirst({
-        where: { projectId: context.projectId, name, enabled: true }
-      });
+      const skill = await readAiSkillFromCatalog(prisma, context.projectId, name);
       if (!skill) throw new HttpError(404, 'AI skill not found');
       return {
         skillContent: `<skill_content name="${escapeAttribute(skill.name)}">\n${skill.content}\n</skill_content>`,
         name: skill.name,
         description: skill.description,
-        updatedAt: skill.updatedAt.toISOString()
+        updatedAt: skill.updatedAt.toISOString(),
+        native: Boolean(skill.native)
       };
     }
   });

@@ -6,6 +6,7 @@ import type {
 } from '@opentales/sdk';
 import { HttpError } from '../../http/HttpError.js';
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
+import { loadBuiltInAiSkills } from './markdownCatalog.js';
 
 const MAX_SKILLS = 50;
 const MAX_CONTENT_LENGTH = 50_000;
@@ -24,7 +25,11 @@ export class ProjectAiSkillsUseCase {
       where: { projectId },
       orderBy: [{ enabled: 'desc' }, { name: 'asc' }]
     });
-    return skills.map(toProjectAiSkill);
+    const projectSkillNames = new Set(skills.map((skill) => skill.name));
+    const builtIns = loadBuiltInAiSkills(projectId)
+      .filter((skill) => !projectSkillNames.has(skill.name))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return [...builtIns.map(toProjectAiSkill), ...skills.map(toProjectAiSkill)];
   }
 
   async create(

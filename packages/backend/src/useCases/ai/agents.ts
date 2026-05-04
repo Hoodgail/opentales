@@ -1,5 +1,12 @@
 import type { PrismaClient } from '@prisma/client';
 import { bodyOf } from './tools/shared.js';
+import {
+  booleanValue,
+  loadMarkdownFiles,
+  parseMarkdownWithFrontmatter,
+  safeCatalogName,
+  stringValue
+} from './markdownCatalog.js';
 
 export type AiAgentMode = 'primary' | 'subagent' | 'all';
 
@@ -13,7 +20,7 @@ export interface AiAgentInfo {
   native?: boolean;
 }
 
-const BUILT_IN_AGENTS: Record<string, AiAgentInfo> = {
+const NATIVE_AGENTS: Record<string, AiAgentInfo> = {
   build: {
     name: 'build',
     description: 'The default agent. Executes tools based on configured permissions.',
@@ -42,10 +49,41 @@ const BUILT_IN_AGENTS: Record<string, AiAgentInfo> = {
   }
 };
 
+const builtInAgentCache = new Map<string, AiAgentInfo>();
+
+function loadBuiltInAgents(): Record<string, AiAgentInfo> {
+  if (builtInAgentCache.size === 0) {
+    for (const agent of Object.values(NATIVE_AGENTS)) builtInAgentCache.set(agent.name, { ...agent });
+
+    for (const { filename, markdown } of loadMarkdownFiles('agents')) {
+      const nameFromPath = agentNameFromDocTitle(filename.replace(/^.*[\\/]/, ''));
+      const parsed = parseMarkdownWithFrontmatter(markdown);
+      const name = safeAgentName(String(parsed.frontmatter.name ?? nameFromPath));
+      if (!name) continue;
+      const current = builtInAgentCache.get(name) ?? {
+        name,
+        description: '',
+        mode: 'all' as const,
+        native: true
+      };
+      builtInAgentCache.set(name, {
+        ...current,
+        name,
+        description: stringValue(parsed.frontmatter.description) ?? current.description,
+        mode: modeValue(parsed.frontmatter.mode) ?? current.mode,
+        model: stringValue(parsed.frontmatter.model) ?? current.model,
+        prompt: parsed.content || stringValue(parsed.frontmatter.prompt) || current.prompt,
+        hidden: booleanValue(parsed.frontmatter.hidden) ?? current.hidden,
+        native: true
+      });
+    }
+  }
+
+  return Object.fromEntries(Array.from(builtInAgentCache.entries()).map(([name, agent]) => [name, { ...agent }]));
+}
+
 export async function loadAiAgents(prisma: PrismaClient, projectId: string): Promise<AiAgentInfo[]> {
-  const agents: Record<string, AiAgentInfo> = Object.fromEntries(
-    Object.entries(BUILT_IN_AGENTS).map(([name, agent]) => [name, { ...agent }])
-  );
+  const agents: Record<string, AiAgentInfo> = loadBuiltInAgents();
 
   const agentsFolder = await prisma.projectFolder.findFirst({
     where: { projectId, parentFolderId: null, name: 'agents' },
@@ -63,7 +101,7 @@ export async function loadAiAgents(prisma: PrismaClient, projectId: string): Pro
 
   for (const doc of docs) {
     const nameFromPath = agentNameFromDocTitle(doc.title);
-    const parsed = parseAgentMarkdown(bodyOf(doc.bodyWriting));
+    const parsed = parseMarkdownWithFrontmatter(bodyOf(doc.bodyWriting));
     const name = safeAgentName(String(parsed.frontmatter.name ?? nameFromPath));
     if (!name) continue;
     const current = agents[name] ?? {
@@ -103,47 +141,7 @@ function agentNameFromDocTitle(title: string): string {
 }
 
 function safeAgentName(value: string): string {
-  return value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
-}
-
-function parseAgentMarkdown(markdown: string): { frontmatter: Record<string, unknown>; content: string } {
-  const text = markdown.trim();
-  if (!text.startsWith('---')) return { frontmatter: {}, content: text };
-  const end = text.indexOf('\n---', 3);
-  if (end < 0) return { frontmatter: {}, content: text };
-  const rawFrontmatter = text.slice(3, end).trim();
-  const content = text.slice(end + 4).trim();
-  return { frontmatter: parseSimpleFrontmatter(rawFrontmatter), content };
-}
-
-function parseSimpleFrontmatter(value: string): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const line of value.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const index = trimmed.indexOf(':');
-    if (index <= 0) continue;
-    const key = trimmed.slice(0, index).trim();
-    const raw = trimmed.slice(index + 1).trim();
-    result[key] = parseScalar(raw);
-  }
-  return result;
-}
-
-function parseScalar(value: string): unknown {
-  const unquoted = value.replace(/^['"]|['"]$/g, '');
-  if (unquoted === 'true') return true;
-  if (unquoted === 'false') return false;
-  if (unquoted === 'null') return null;
-  return unquoted;
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
-function booleanValue(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined;
+  return safeCatalogName(value);
 }
 
 function modeValue(value: unknown): AiAgentMode | undefined {

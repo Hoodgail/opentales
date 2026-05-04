@@ -1,0 +1,17 @@
+{
+  "skill_name": "novel-idea",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I want to write a novel but I'm totally stuck on what to write about. I keep going back and forth between a few ideas -- one is about a woman who discovers her dead grandmother was a spy during the Cold War, another is about a group of friends who open a restaurant together and it falls apart, and a third is about a near-future world where people can sell their memories. I can't tell which one has legs. Can you help me figure this out and develop whichever idea has the most potential?",
+      "expected_output": "A detailed idea.md document that evaluates all three ideas, helps the writer identify the strongest one (or synthesize elements), and develops it with premise, complication, theme, genre, unique angle, and emotional core.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "ok so I've been thinking about writing a novel for like two years now and I keep putting it off. I work as a nurse in a pediatric oncology ward and I see these incredible families every day dealing with the worst possible situation and somehow finding moments of joy and humor. I think there's a book in there somewhere but I don't want it to be a sad cancer book, you know? I want it to capture the weird dark humor and the bonds that form. But I don't even know if this is a memoir or fiction or what. Help me figure out if this is actually a viable novel idea and where to take it.",
+      "expected_output": "A detailed idea.md that takes the writer's real-world experience and helps shape it into a viable novel concept, addressing genre questions (memoir vs fiction), finding the unique angle, and developing the emotional core while honoring the writer's desire to avoid 'sad cancer book' territory.",
+      "files": []
+    }
+  ]
+}

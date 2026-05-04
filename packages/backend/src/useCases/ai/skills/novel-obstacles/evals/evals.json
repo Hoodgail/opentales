@@ -1,0 +1,17 @@
+{
+  "skill_name": "novel-obstacles",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "My novel is about a single mom trying to open a bakery in a gentrifying neighborhood. I have the character and setting nailed but honestly the middle 200 pages are SO BORING. She just... opens the bakery and it's fine? Like nothing really goes wrong in a compelling way. I've been told I need more conflict but I don't want to add some ridiculous villain or make it melodramatic. It's literary fiction, character-driven. How do I add real conflict and obstacles that feel organic to the story without turning it into a soap opera?",
+      "expected_output": "An obstacles.md that plans both surface and beneath-the-surface conflicts for a literary fiction novel, avoids melodrama while creating genuine tension, maps escalating obstacles organically connected to the character and setting, and addresses the 'boring middle' problem.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I'm writing a sci-fi novel where humanity has colonized Mars and my protagonist is a terraforming engineer who discovers evidence that Mars once had intelligent life. The external conflict is clear (corporate cover-up, dangerous Mars conditions, etc.) but I've been told my character feels flat because she doesn't have enough internal conflict. She's just competent and brave all the time. Help me plan obstacles that challenge her internally, not just externally. Also, I need help with pacing -- the first half is all setup and the second half is all action. How do I fix that?",
+      "expected_output": "An obstacles.md that develops internal conflicts and competing desires for the protagonist, plans a better pacing rhythm that interleaves setup and action, maps both external and internal obstacles with escalating intensity, and addresses the dynamic between surface and beneath-the-surface conflict.",
+      "files": []
+    }
+  ]
+}

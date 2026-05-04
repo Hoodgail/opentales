@@ -1,0 +1,17 @@
+{
+  "skill_name": "novel-perspective",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I'm writing a psychological thriller about a marriage falling apart. The husband is secretly embezzling from his company, and the wife is secretly having an affair. Neither knows the other's secret. The tension comes from dramatic irony -- the reader knows both secrets but the characters don't. I'm struggling with perspective because I need the reader to see inside BOTH their heads, but I've heard head-jumping is bad. What perspective should I use and how do I handle it? I want it to feel intimate and claustrophobic, like Gone Girl.",
+      "expected_output": "A detailed perspective.md that recommends a specific perspective approach (likely alternating third-person limited or alternating first person), explains how to handle the dual-POV without head-jumping, addresses tense choice, and gives specific guidelines for maintaining dramatic irony.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "My novel is a coming-of-age story set in a small fishing village. The narrator is looking back on events from 30 years ago. I started writing it in first person past tense but I keep accidentally slipping into present tense during the intense scenes and I'm not sure if that's a problem or if I should lean into it. Also, the older version of the narrator sometimes comments on what his younger self didn't understand at the time -- is that omniscient? Am I breaking rules? I'm confused about what I'm even doing with perspective at this point.",
+      "expected_output": "A perspective.md that untangles the writer's confusion about retrospective narration, addresses the tense-slipping issue, explains how an older narrator commenting on their younger self works within first person, and provides clear guidelines.",
+      "files": []
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "skill_name": "novel-outline",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I need help outlining my novel. It's a fantasy novel about a young cartographer who discovers that the maps she draws have the power to reshape the physical world -- but every change she makes on paper comes with an unintended consequence somewhere else. The main villain is a former cartographer who's been deliberately reshaping continents for decades to consolidate power. I know the beginning (she accidentally floods a village by erasing a river on her map) and the end (she has to draw a new map of the entire world from scratch to undo the damage) but the middle is a complete mystery to me. Target is about 90,000 words, epic fantasy.",
+      "expected_output": "A detailed outline.md with chapter-by-chapter or act-by-act structure, filling in the 'sagging middle' with escalating obstacles, character development beats, and subplot threads. Should include character fundamentals, tentpole moments, and pacing notes.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I'm writing a literary fiction novel with three timelines: 1943 Berlin, 1989 Berlin (the wall coming down), and present-day Berlin. Three different protagonists connected by the same apartment building. I have detailed scenes for each timeline but I have NO idea how to structure the thing -- do I alternate chapters? Group by timeline? Mix them within chapters? The novel is about how spaces hold memory and how history echoes. About 85,000 words. Please help me create an outline that actually makes this work structurally.",
+      "expected_output": "A detailed outline.md that tackles the multi-timeline structural challenge, proposes a chapter organization strategy, maps how the three timelines interact and echo each other, and creates a coherent arc despite the complexity.",
+      "files": []
+    }
+  ]
+}

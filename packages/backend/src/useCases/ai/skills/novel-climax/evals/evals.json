@@ -1,0 +1,17 @@
+{
+  "skill_name": "novel-climax",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I need help planning the climax of my novel. It's a contemporary family drama about three adult siblings who come home for their mother's 70th birthday, each carrying secrets that could tear the family apart. The older brother has been fired and hasn't told anyone, the middle sister is planning to move abroad with the grandkids, and the youngest has discovered their father (who died 10 years ago) had a second family. The whole novel has been building toward the birthday dinner where everything comes out. I need this scene to be devastating and cathartic and I'm terrified of screwing it up.",
+      "expected_output": "A climax.md that plans a multi-revelation birthday dinner climax, maps the emotional trajectory and order of reveals, connects each secret to character desires and stakes, plans the aftermath, and provides groundwork checklist for earlier chapters.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "My fantasy novel's climax isn't working. The hero (Kael) fights the evil sorcerer (Mordeth) in a big magical battle and wins. My beta readers said it was 'fine but forgettable.' I think the problem is it's just a fight scene with no emotional stakes beyond 'save the world.' Kael doesn't have to make any hard choices, he doesn't sacrifice anything, he just... wins because he's stronger. How do I redesign this climax so it actually means something beyond good guy beats bad guy?",
+      "expected_output": "A climax.md that redesigns a generic fantasy climax into something emotionally resonant by adding competing desires, impossible choices, character revelation through the climactic decision, and connecting the resolution to the character's internal journey -- not just the external fight.",
+      "files": []
+    }
+  ]
+}

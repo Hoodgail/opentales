@@ -1,0 +1,17 @@
+{
+  "skill_name": "novel-settings",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "My novel is set in a fictional coastal town in Maine, present day. It's a mystery/thriller about a cold case from 25 years ago. The problem is my beta reader said the town 'could be anywhere' -- there's nothing distinctive about it. I describe it as having a main street with shops and a harbor with boats and... yeah, that's basically it. How do I make Shelter Cove feel like a real, specific, memorable place? I want readers to feel like they've been there.",
+      "expected_output": "A settings.md that develops Shelter Cove into a vivid, specific coastal Maine town with sensory details across all five senses, personality and values, change underway, unfamiliarity factors, and connection to the mystery plot. Should address the 'could be anywhere' problem with concrete specificity.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I'm writing a fantasy novel and I need to worldbuild but I'm overwhelmed. I have three major locations: a floating city powered by captured lightning, an underground fungal forest where everything bioluminesces, and a desert made of crushed gemstones where nomads travel on giant beetles. I have the cool concepts but whenever I try to actually write scenes in these places, the descriptions fall flat. How do I turn these cool concepts into settings that actually feel lived-in and immersive rather than just 'here's another cool thing I thought of'?",
+      "expected_output": "A settings.md that develops all three fantasy locations beyond their 'cool concept' hooks into fully realized settings with sensory palettes, cultural values, change underway, and human-scale lived-in details that make them feel real rather than just spectacular.",
+      "files": []
+    }
+  ]
+}

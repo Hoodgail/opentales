@@ -19,6 +19,7 @@ import { stepCountIs, streamText } from 'ai';
 import { HttpError } from '../../http/HttpError.js';
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
 import { findAgent, loadAiAgents, subagentsForTask, type AiAgentInfo } from './agents.js';
+import { loadAiSkillCatalog } from './markdownCatalog.js';
 import { loadAiModelForProject } from './aiModel.js';
 import { renderSystemPrompt, renderUserContext } from './prompts/promptEngine.js';
 import { buildAgentTools, bodyOf, executeMutationTool, mutatingToolNames, type MutatingToolName } from './tools/index.js';
@@ -567,11 +568,7 @@ export class AiAgentSessionUseCase {
       orderBy: { createdAt: 'desc' },
       take: 20
     });
-    const skills = await this.prisma.projectAiSkill.findMany({
-      where: { projectId, enabled: true },
-      orderBy: { name: 'asc' },
-      select: { name: true, description: true }
-    });
+    const skills = await loadAiSkillCatalog(this.prisma, projectId);
     const transcript = messages
       .reverse()
       .map((message) => {
@@ -596,7 +593,7 @@ export class AiAgentSessionUseCase {
         title: doc.title,
         content: bodyOf(doc.bodyWriting)
       })),
-      skills,
+      skills: skills.map((skill) => ({ name: skill.name, description: skill.description })),
       subagents: subagentsForTask(agents).map((agent) => ({
         name: agent.name,
         description: agent.description
