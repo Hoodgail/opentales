@@ -176,7 +176,7 @@ const mutationToolSchemas = {
   }), ['title', 'slug', 'description', 'genre', 'perspective', 'pov', 'voice', 'tone', 'themes', 'visibility', 'coverAssetId', 'coverOrientation']),
   updateProjectAiSettings: withAtLeastOne(z.object({
     enabled: z.boolean().optional(),
-    providerKind: z.enum(['gateway', 'openai-compatible']).optional(),
+    providerKind: z.enum(['gateway', 'openai-compatible', 'github-copilot']).optional(),
     model: optionalString,
     baseUrl: nullableString,
     apiKey: nullableString
@@ -886,7 +886,7 @@ async function updateProject(prisma: PrismaClient, context: ToolContext & { user
 async function updateProjectAiSettings(prisma: PrismaClient, context: ToolContext & { userId: string }, input: Record<string, unknown>) {
   return new ProjectAiSettingsUseCase(prisma).update(context.userId, context.projectId, {
     enabled: booleanOrUndefined(input.enabled),
-    providerKind: input.providerKind === 'gateway' || input.providerKind === 'openai-compatible' ? input.providerKind : undefined,
+    providerKind: input.providerKind === 'gateway' || input.providerKind === 'openai-compatible' || input.providerKind === 'github-copilot' ? input.providerKind : undefined,
     model: stringOrUndefined(input.model),
     baseUrl: nullableStringOrUndefined(input.baseUrl),
     apiKey: nullableStringOrUndefined(input.apiKey)

@@ -4,7 +4,7 @@ export type AssetKind = 'image' | 'audio' | 'video' | 'document';
 export type Role = 'OWNER' | 'ADMIN' | 'EDITOR' | 'VIEWER';
 export type CoverOrientation = 'landscape' | 'portrait';
 export type ProjectVisibility = 'private' | 'public';
-export type AiProviderKind = 'gateway' | 'openai-compatible';
+export type AiProviderKind = 'gateway' | 'openai-compatible' | 'github-copilot';
 export type AiRewriteMode = 'tighter' | 'softer' | 'more-visceral' | 'more-lyrical';
 export type ProjectDocKind = 'note' | 'brainstorm' | 'instructions' | 'reference' | 'other';
 export type CollaborationDocumentKind =
@@ -438,6 +438,68 @@ export interface UpdateProjectAiSettingsInput {
    * Write-only. Omit to keep the existing key, pass null to clear it.
    */
   apiKey?: string | null;
+}
+
+export interface StartGithubCopilotAuthResult {
+  deviceCode: string;
+  userCode: string;
+  verificationUri: string;
+  expiresIn: number;
+  interval: number;
+}
+
+export interface PollGithubCopilotAuthInput {
+  deviceCode: string;
+}
+
+export interface PollGithubCopilotAuthResult {
+  status: 'pending' | 'slow_down' | 'authorized' | 'failed';
+  interval?: number;
+  settings?: ProjectAiSettings;
+  message?: string;
+}
+
+export interface AiModelCatalogApi {
+  id: string;
+  url: string | null;
+  npm: string | null;
+}
+
+export interface AiModelCatalogCost {
+  input: number | null;
+  output: number | null;
+}
+
+export interface AiModelCatalogModel {
+  id: string;
+  providerId: string;
+  name: string;
+  family: string;
+  releaseDate: string | null;
+  status: string;
+  api: AiModelCatalogApi;
+  cost: AiModelCatalogCost | null;
+  context: number | null;
+  maxOutput: number | null;
+  supportsTools: boolean;
+  supportsVision: boolean;
+  latest: boolean;
+  visible: boolean;
+}
+
+export interface AiModelCatalogProvider {
+  id: string;
+  name: string;
+  api: string | null;
+  npm: string | null;
+  popular: boolean;
+  models: AiModelCatalogModel[];
+}
+
+export interface AiModelCatalog {
+  providers: AiModelCatalogProvider[];
+  updatedAt: string;
+  source: 'models.dev' | 'unavailable';
 }
 
 export interface ProjectAiSkill {

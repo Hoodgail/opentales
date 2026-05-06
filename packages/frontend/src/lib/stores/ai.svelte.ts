@@ -9,6 +9,7 @@ import {
   type AiAgentAttachmentInput,
   type AiCharacterDialogueSuggestion,
   type AiContinuityReview,
+  type AiModelCatalog,
   type AiOutlineExpansion,
   type AiRewriteMode,
   type AiRewriteSuggestion,
@@ -17,12 +18,14 @@ import {
   type CreateProjectFolderInput,
   type CreateProjectDocInput,
   type PaginatedProjectDocs,
+  type PollGithubCopilotAuthResult,
   type ProjectAiSettings,
   type ProjectAiSkill,
   type ProjectDoc,
   type ProjectFileTree,
   type ProjectFolder,
   type ProjectDocKind,
+  type StartGithubCopilotAuthResult,
   type UpdateProjectAiSkillInput,
   type UpdateProjectAiSettingsInput,
   type UpdateProjectAssetInput,
@@ -57,6 +60,9 @@ function createAiStore() {
   let settings = $state<ProjectAiSettings | null>(null);
   let settingsLoading = $state(false);
   let settingsError = $state<string | null>(null);
+  let modelCatalog = $state<AiModelCatalog | null>(null);
+  let modelCatalogLoading = $state(false);
+  let modelCatalogError = $state<string | null>(null);
 
   async function loadSettings(projectId: string) {
     settingsLoading = true;
@@ -450,6 +456,40 @@ function createAiStore() {
     }
   }
 
+  async function startGithubCopilotAuth(projectId: string): Promise<StartGithubCopilotAuthResult | null> {
+    settingsError = null;
+    try {
+      return await api.startGithubCopilotAuth(projectId);
+    } catch (err) {
+      settingsError = err instanceof Error ? err.message : 'Failed to start GitHub Copilot auth';
+      return null;
+    }
+  }
+
+  async function pollGithubCopilotAuth(projectId: string, deviceCode: string): Promise<PollGithubCopilotAuthResult | null> {
+    settingsError = null;
+    try {
+      const result = await api.pollGithubCopilotAuth(projectId, { deviceCode });
+      if (result.settings) settings = result.settings;
+      return result;
+    } catch (err) {
+      settingsError = err instanceof Error ? err.message : 'Failed to finish GitHub Copilot auth';
+      return null;
+    }
+  }
+
+  async function loadModelCatalog(projectId: string) {
+    modelCatalogLoading = true;
+    modelCatalogError = null;
+    try {
+      modelCatalog = await api.listAiModels(projectId);
+    } catch (err) {
+      modelCatalogError = err instanceof Error ? err.message : 'Failed to load AI models';
+    } finally {
+      modelCatalogLoading = false;
+    }
+  }
+
   async function answerQuestion(projectId: string, toolCallId: string, answers: string[][], sessionId = activeSessionId ?? undefined) {
     sessionError = null;
     try {
@@ -595,6 +635,8 @@ function createAiStore() {
   function reset() {
     settings = null;
     settingsError = null;
+    modelCatalog = null;
+    modelCatalogError = null;
     skills.splice(0, skills.length);
     skillsError = null;
     docs.splice(0, docs.length);
@@ -616,8 +658,14 @@ function createAiStore() {
     get settings() { return settings; },
     get settingsLoading() { return settingsLoading; },
     get settingsError() { return settingsError; },
+    get modelCatalog() { return modelCatalog; },
+    get modelCatalogLoading() { return modelCatalogLoading; },
+    get modelCatalogError() { return modelCatalogError; },
     loadSettings,
     updateSettings,
+    loadModelCatalog,
+    startGithubCopilotAuth,
+    pollGithubCopilotAuth,
 
     // skills
     get skills() { return skills; },

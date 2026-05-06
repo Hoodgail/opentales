@@ -47,6 +47,15 @@ projectRoutes.post(
 
 projectRoutes.get('/:projectId/ai-settings', asyncHandler(ai.getSettings));
 projectRoutes.patch('/:projectId/ai-settings', asyncHandler(ai.updateSettings));
+projectRoutes.post(
+  '/:projectId/ai-settings/github-copilot/auth/start',
+  asyncHandler(ai.startGithubCopilotAuth)
+);
+projectRoutes.post(
+  '/:projectId/ai-settings/github-copilot/auth/poll',
+  asyncHandler(ai.pollGithubCopilotAuth)
+);
+projectRoutes.get('/:projectId/ai/models', asyncHandler(ai.models));
 projectRoutes.get('/:projectId/ai/tools', asyncHandler(ai.tools));
 projectRoutes.get('/:projectId/ai/skills', asyncHandler(ai.skills));
 projectRoutes.post('/:projectId/ai/skills', asyncHandler(ai.createSkill));

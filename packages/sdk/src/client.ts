@@ -32,9 +32,12 @@ import type {
   AiAgentSessionSummary,
   AiCharacterDialogueSuggestion,
   AiContinuityReview,
+  AiModelCatalog,
   AiOutlineExpansion,
   AiRewriteSuggestion,
   AiToolManifest,
+  PollGithubCopilotAuthInput,
+  PollGithubCopilotAuthResult,
   CreateSubmissionInput,
   CreateAiCharacterDialogueInput,
   CreateAiAgentSessionInput,
@@ -65,6 +68,7 @@ import type {
   ProjectSummary,
   PublicProject,
   RegisterInput,
+  StartGithubCopilotAuthResult,
   TrashItem,
   Role,
   SubmissionDetail,
@@ -600,6 +604,30 @@ export class OpenTalesClient {
       method: 'PATCH',
       body: input
     });
+  }
+
+  startGithubCopilotAuth(projectId: string): Promise<StartGithubCopilotAuthResult> {
+    return this.request<StartGithubCopilotAuthResult>(
+      `/projects/${projectId}/ai-settings/github-copilot/auth/start`,
+      { method: 'POST' }
+    );
+  }
+
+  pollGithubCopilotAuth(
+    projectId: string,
+    input: PollGithubCopilotAuthInput
+  ): Promise<PollGithubCopilotAuthResult> {
+    return this.request<PollGithubCopilotAuthResult>(
+      `/projects/${projectId}/ai-settings/github-copilot/auth/poll`,
+      {
+        method: 'POST',
+        body: input
+      }
+    );
+  }
+
+  listAiModels(projectId: string): Promise<AiModelCatalog> {
+    return this.request<AiModelCatalog>(`/projects/${projectId}/ai/models`);
   }
 
   listProjectAiSkills(projectId: string): Promise<ProjectAiSkill[]> {

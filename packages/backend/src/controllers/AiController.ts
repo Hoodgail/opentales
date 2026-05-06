@@ -16,6 +16,7 @@ import { prisma } from '../config/prisma.js';
 import { HttpError } from '../http/HttpError.js';
 import { AiAssistUseCase } from '../useCases/ai/AiAssistUseCase.js';
 import { AiAgentSessionUseCase } from '../useCases/ai/AiAgentSessionUseCase.js';
+import { ProjectAiModelsUseCase } from '../useCases/ai/ProjectAiModelsUseCase.js';
 import { ProjectAiSettingsUseCase } from '../useCases/ai/ProjectAiSettingsUseCase.js';
 import { ProjectAiSkillsUseCase } from '../useCases/ai/ProjectAiSkillsUseCase.js';
 
@@ -23,6 +24,7 @@ export class AiController {
   private readonly settingsUseCase = new ProjectAiSettingsUseCase(prisma);
   private readonly assistUseCase = new AiAssistUseCase(prisma);
   private readonly agentSessionUseCase = new AiAgentSessionUseCase(prisma);
+  private readonly modelsUseCase = new ProjectAiModelsUseCase(prisma);
   private readonly skillsUseCase = new ProjectAiSkillsUseCase(prisma);
 
   getSettings = async (req: Request, res: Response) => {
@@ -37,6 +39,10 @@ export class AiController {
         req.body as UpdateProjectAiSettingsInput
       )
     );
+  };
+
+  models = async (req: Request, res: Response) => {
+    res.json(await this.modelsUseCase.list(this.userId(req), req.params.projectId));
   };
 
   continuityReview = async (req: Request, res: Response) => {
@@ -187,6 +193,21 @@ export class AiController {
         req.params.projectId,
         req.body as ApproveAiToolCallsInput,
         req.params.sessionId
+      )
+    );
+  };
+
+  startGithubCopilotAuth = async (req: Request, res: Response) => {
+    res.json(await this.settingsUseCase.startGithubCopilotAuth(this.userId(req), req.params.projectId));
+  };
+
+  pollGithubCopilotAuth = async (req: Request, res: Response) => {
+    const deviceCode = typeof req.body?.deviceCode === 'string' ? req.body.deviceCode : '';
+    res.json(
+      await this.settingsUseCase.pollGithubCopilotAuth(
+        this.userId(req),
+        req.params.projectId,
+        deviceCode
       )
     );
   };

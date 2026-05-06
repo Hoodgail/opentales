@@ -3,7 +3,7 @@ import type { ProjectAiSettings } from '@opentales/sdk';
 export function toProjectAiSettings(settings: {
   projectId: string;
   enabled: boolean;
-  providerKind: 'GATEWAY' | 'OPENAI_COMPATIBLE';
+  providerKind: 'GATEWAY' | 'OPENAI_COMPATIBLE' | 'GITHUB_COPILOT';
   model: string;
   baseUrl: string | null;
   apiKey: string | null;
@@ -12,7 +12,12 @@ export function toProjectAiSettings(settings: {
   return {
     projectId: settings.projectId,
     enabled: settings.enabled,
-    providerKind: settings.providerKind === 'OPENAI_COMPATIBLE' ? 'openai-compatible' : 'gateway',
+    providerKind:
+      settings.providerKind === 'OPENAI_COMPATIBLE'
+        ? 'openai-compatible'
+        : settings.providerKind === 'GITHUB_COPILOT'
+          ? 'github-copilot'
+          : 'gateway',
     model: settings.model,
     baseUrl: settings.baseUrl,
     hasApiKey: Boolean(settings.apiKey),

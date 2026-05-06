@@ -105,6 +105,7 @@ enum ActivityType {
 enum AiProviderKind {
   GATEWAY
   OPENAI_COMPATIBLE
+  GITHUB_COPILOT
 }
 
 enum ProjectDocKind {
