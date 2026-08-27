@@ -102,7 +102,7 @@ Route fragments are mounted below the authenticated project router; consult the 
 | `novel-chapters` | `2.0.0` | `drafting` | 13 |
 | `novel-characters` | `1.2.0` | `planning` | 3 |
 | `novel-climax` | `1.0.0` | `planning` | 7 |
-| `novel-continuity` | `1.0.0` | `continuity` | 13 |
+| `novel-continuity` | `1.1.0` | `continuity` | 14 |
 | `novel-copy-edit` | `1.0.0` | `revision` | 9 |
 | `novel-critic` | `2.0.0` | `critique` | 11 |
 | `novel-developmental-revision` | `1.0.0` | `revision` | 14 |

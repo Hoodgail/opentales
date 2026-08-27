@@ -662,7 +662,7 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
 
     const canonFixture = await createIsolatedSceneRun(prisma, projectId, userId, `${suffix}-canon-compensation`, {
       taskType: 'extract-scene-canon', assignedAgent: 'librarian', acceptanceCriteria: { canonDeltaRequired: true },
-      skillVersions: { 'novel-build': '1.1.0', 'novel-continuity': '1.0.0' }, maxAttempts: 1
+      skillVersions: { 'novel-build': '1.1.0', 'novel-continuity': '1.1.0' }, maxAttempts: 1
     });
     await resumeRunnableBuilds(prisma, {
       workerId: `canon-compensation:${suffix}`, buildRunIds: [canonFixture.run.id], maxTasksPerSweep: 1, modelPricing: fixturePricing,
@@ -696,7 +696,7 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
 
     const canonFixture = await createIsolatedSceneRun(prisma, projectId, userId, `${suffix}-global-canon`, {
       taskType: 'extract-scene-canon', assignedAgent: 'librarian', acceptanceCriteria: { canonDeltaRequired: true },
-      skillVersions: { 'novel-build': '1.1.0', 'novel-continuity': '1.0.0' }, maxAttempts: 1
+      skillVersions: { 'novel-build': '1.1.0', 'novel-continuity': '1.1.0' }, maxAttempts: 1
     });
     await resumeRunnableBuilds(prisma, {
       workerId: `global-canon:${suffix}`, buildRunIds: [canonFixture.run.id], maxTasksPerSweep: 1, modelPricing: fixturePricing,
@@ -969,14 +969,19 @@ function deterministicExecutor(prisma: PrismaClient, buildRunId: string, scale?:
       ? productionPlanningArtifactsFor(input.contract.outputs.map((output) => output.type), input.contract.scope.buildTaskId ?? taskKey, input.contract.metadata, scale)
       : planningArtifactsFor(input.contract.outputs.map((output) => output.type), input.contract.scope.buildTaskId ?? taskKey);
     if (planningOperations.length) {
-      const batch = await call('applyArtifactBatch', {
-        buildRunId,
-        taskId: input.contract.scope.buildTaskId,
-        idempotencyKey: `${taskKey}:artifacts:${attempt}:${revisionIteration}`,
-        operations: planningOperations
-      });
-      const results = Array.isArray(batch.results) ? batch.results as Array<Record<string, unknown>> : [];
-      artifactIds.push(...results.map((item) => item.id).filter((id): id is string => typeof id === 'string'));
+      const operationBatches = taskType === 'create-character-bibles'
+        ? chunkValues(planningOperations, 3)
+        : [planningOperations];
+      for (const [batchIndex, operations] of operationBatches.entries()) {
+        const batch = await call('applyArtifactBatch', {
+          buildRunId,
+          taskId: input.contract.scope.buildTaskId,
+          idempotencyKey: `${taskKey}:artifacts:${attempt}:${revisionIteration}:${batchIndex + 1}`,
+          operations
+        });
+        const results = Array.isArray(batch.results) ? batch.results as Array<Record<string, unknown>> : [];
+        artifactIds.push(...results.map((item) => item.id).filter((id): id is string => typeof id === 'string'));
+      }
     }
 
     if (taskType === 'draft-scene-unit' || roleIsRevision(input)) {
@@ -1134,6 +1139,14 @@ function productionPlanningArtifactsFor(
     if (type === 'finale-plan') return [operation(type, 'finale', 'Production Finale', { finaleKey: 'finale', mainThreadKey: 'main-thread', resolvesMainThread: true, climax: 'The cartographer draws the final district knowing who will forget her.', endingCost: 'The beloved survives without recognition.', thematicResolution: 'Preservation without possession remains an act of love.', intentionallyOpenLoopKeys: [] })];
     return [];
   });
+}
+
+function chunkValues<T>(values: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function sceneBody(sceneKey: string): string {

@@ -507,7 +507,7 @@ export const REVISION_TASK_TEMPLATES: readonly TaskTemplate[] = Object.freeze([
     qualityThreshold: 0.8
   }),
   revisionTask('continuity-review-pass', 'continuity-review-pass', ['character-review-pass'], 'critic', 80, {
-    skillVersions: { 'novel-build': '1.1.0', 'novel-critic': '2.0.0', 'novel-continuity': '1.0.0' },
+    skillVersions: { 'novel-build': '1.1.0', 'novel-critic': '2.0.0', 'novel-continuity': '1.1.0' },
     acceptanceCriteria: { deterministicValidationRequired: true, rubric: 'continuity-v1' },
     qualityThreshold: 0.9
   }),
@@ -587,11 +587,11 @@ export function createSceneTaskTemplates(sceneKey: string, dependencyCheckpointK
       acceptanceCriteria: { manuscriptUnitDraftRequired: true }
     }),
     task('canon', 'extract-scene-canon', [`${prefix}:draft`], 'librarian', 80, {
-      skillVersions: { 'novel-build': '1.1.0', 'novel-continuity': '1.0.0' },
+      skillVersions: { 'novel-build': '1.1.0', 'novel-continuity': '1.1.0' },
       acceptanceCriteria: { canonDeltaRequired: true }
     }),
     task('diagnostics', 'run-scene-diagnostics', [`${prefix}:canon`], 'critic', 70, {
-      skillVersions: { 'novel-build': '1.1.0', 'novel-critic': '2.0.0', 'novel-continuity': '1.0.0' },
+      skillVersions: { 'novel-build': '1.1.0', 'novel-critic': '2.0.0', 'novel-continuity': '1.1.0' },
       acceptanceCriteria: { deterministicValidationRequired: true },
       executionPolicy: { deterministic: true }
     }),
@@ -607,11 +607,11 @@ export function createSceneTaskTemplates(sceneKey: string, dependencyCheckpointK
       maxRevisionIterations: 1
     }),
     task('reextract-canon', 'extract-scene-canon', [`${prefix}:revision`], 'librarian', 45, {
-      skillVersions: { 'novel-build': '1.1.0', 'novel-continuity': '1.0.0' },
+      skillVersions: { 'novel-build': '1.1.0', 'novel-continuity': '1.1.0' },
       acceptanceCriteria: { canonDeltaRequired: true }
     }),
     task('rerun-diagnostics', 'run-scene-diagnostics', [`${prefix}:reextract-canon`], 'critic', 42, {
-      skillVersions: { 'novel-build': '1.1.0', 'novel-critic': '2.0.0', 'novel-continuity': '1.0.0' },
+      skillVersions: { 'novel-build': '1.1.0', 'novel-critic': '2.0.0', 'novel-continuity': '1.1.0' },
       acceptanceCriteria: { deterministicValidationRequired: true },
       executionPolicy: { deterministic: true }
     }),
@@ -827,7 +827,7 @@ function planningSkillVersions(types: StoryArtifactType[]): JsonObject {
     if (type === 'world-bible') skills['novel-world'] = '1.0.0';
     if (['plot-thread', 'act-architecture', 'chapter-brief'].includes(type)) skills['novel-outline'] = '2.0.0';
     if (type === 'scene-plan') skills['novel-scenes'] = '1.0.0';
-    if (type === 'timeline') skills['novel-continuity'] = '1.0.0';
+    if (type === 'timeline') skills['novel-continuity'] = '1.1.0';
     if (type === 'setup-payoff-map') skills['novel-setup-payoff'] = '1.0.0';
     if (type === 'research-questions') skills['novel-research'] = '1.0.0';
   }

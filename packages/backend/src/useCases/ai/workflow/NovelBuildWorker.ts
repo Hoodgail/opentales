@@ -52,6 +52,13 @@ const judgeResultSchema = z.object({
   feedback: z.string(),
   evidence: z.array(z.object({ type: z.string(), id: z.string().optional(), summary: z.string() })).max(200).default([])
 });
+const AGGREGATE_ARTIFACT_TASK_TYPES = new Set([
+  'create-character-bibles',
+  'create-plot-threads',
+  'create-beats',
+  'create-chapter-briefs',
+  'create-scene-plans'
+]);
 
 type WorkerResult = z.infer<typeof workerResultSchema>;
 
@@ -1371,11 +1378,20 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       const spec = jsonRecord(rawSpec);
       const type = typeof spec.type === 'string' ? spec.type : '';
       if (!requiredTypes.includes(type)) continue;
-      const minimum = typeof spec.minCount === 'number' ? Math.max(0, Math.trunc(spec.minCount)) : 0;
-      const maximum = typeof spec.maxCount === 'number' ? Math.max(minimum, Math.trunc(spec.maxCount)) : Number.MAX_SAFE_INTEGER;
+      const aggregateProducer = AGGREGATE_ARTIFACT_TASK_TYPES.has(claimed.task.type);
+      const explicitMinimum = typeof acceptance.minOutputCount === 'number'
+        ? Math.max(0, Math.trunc(acceptance.minOutputCount))
+        : null;
+      const minimum = explicitMinimum
+        ?? (aggregateProducer && typeof spec.minCount === 'number' ? Math.max(0, Math.trunc(spec.minCount)) : 1);
+      const explicitMaximum = typeof acceptance.maxOutputCount === 'number'
+        ? Math.max(minimum, Math.trunc(acceptance.maxOutputCount))
+        : null;
+      const maximum = explicitMaximum
+        ?? (aggregateProducer && typeof spec.maxCount === 'number' ? Math.max(minimum, Math.trunc(spec.maxCount)) : 1);
       const count = artifacts.filter((artifact) =>
         prismaArtifactType(artifact.type) === type &&
-        artifact.taskId === claimed.task.id &&
+        (type === 'export-manifest' || artifact.taskId === claimed.task.id) &&
         ['VALIDATED', 'ACCEPTED'].includes(artifact.status)
       ).length;
       checks[`artifact-count:${type}`] = count >= minimum && count <= maximum;

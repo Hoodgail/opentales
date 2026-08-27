@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Manuscript — a desktop-class novel writing IDE built with SvelteKit + Electron",
   "private": true,
+  "packageManager": "pnpm@11.24.0",
   "type": "module",
   "main": "packages/electron/main.cjs",
   "scripts": {

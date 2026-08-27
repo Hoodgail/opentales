@@ -80,7 +80,7 @@ describeDatabase('durable Novel Build integration', () => {
     expect(created.tasks.find((task) => task.key === 'story-brief')?.skillVersions).toEqual(expect.objectContaining({ 'novel-build': '1.1.0', 'novel-intake': '1.0.0' }));
     expect(created.tasks.find((task) => task.key.startsWith('scene-plans:chapter-'))?.skillVersions).toEqual(expect.objectContaining({ 'novel-scenes': '1.0.0' }));
     expect(created.tasks.find((task) => task.key === 'scene-plans')).toMatchObject({ type: 'aggregate-scene-plans', assignedAgent: 'orchestrator' });
-    expect(created.tasks.find((task) => task.key === 'continuity-review-pass')?.skillVersions).toEqual(expect.objectContaining({ 'novel-continuity': '1.0.0' }));
+    expect(created.tasks.find((task) => task.key === 'continuity-review-pass')?.skillVersions).toEqual(expect.objectContaining({ 'novel-continuity': '1.1.0' }));
     expect(created.tasks.find((task) => task.key === 'line-edit')?.skillVersions).toEqual(expect.objectContaining({ 'novel-line-revision': '1.0.0' }));
 
     const claimInput = { idempotencyKey: 'integration:claim-story', workerId: 'worker-1', leaseMs: 60_000, taskTypes: ['create-story-brief'] };

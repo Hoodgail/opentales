@@ -52,6 +52,12 @@ it('validates the shipped novel-build entrypoint manifest', async () => {
   expect(skill && loadAiSkillReferences(skill)).toEqual([{ name: 'references/runtime-boundaries.md', content: expect.stringContaining('Durable runtime boundaries') }]);
 });
 
+it('publishes timeline artifact capability in the continuity skill contract', () => {
+  const continuity = loadBuiltInAiSkills().find((candidate) => candidate.name === 'novel-continuity');
+  expect(continuity?.manifest.version).toBe('1.1.0');
+  expect(continuity?.manifest.allowedTools).toContain('applyArtifactBatch');
+});
+
 it('gives every shipped skill a matching versioned machine contract', async () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const directories = (await readdir(here, { withFileTypes: true })).filter((entry) => entry.isDirectory());
