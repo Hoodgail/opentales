@@ -119,6 +119,10 @@ function createStore() {
   function currentLocation(field?: string): CollaborationLocation | null {
     const tab = manuscript.tabs.find((candidate) => candidate.id === manuscript.activeTabId);
     if (!tab) return null;
+    // Workspace projections (continuous manuscript, build graph, Story Bible)
+    // are not collaboration documents themselves. Presence continues to be
+    // reported once a concrete chapter/artifact editor is opened.
+    if (tab.type === 'manuscript' || tab.type === 'build' || tab.type === 'story-bible' || tab.type === 'outline-studio' || tab.type === 'publishing' || tab.type === 'revisions') return null;
     return {
       tabType: tab.type,
       refId: tab.refId,

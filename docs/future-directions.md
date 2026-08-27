@@ -2,6 +2,8 @@
 
 > A living roadmap. Some of this is "before 1.0", some is "if it works it works", some is research-grade. Ideas are grouped by whether they touch craft, the IDE, the platform, or the org.
 
+> **Current baseline (August 2026):** OpenTales now includes first-class scenes, continuous manuscript modes, a command palette, project search/references, an expanded Problems engine, durable Novel Builds, structured/versioned story state, sandbox manuscript review/merge, automated tests/evals/CI, and DOCX/PDF/EPUB/archive publishing. Items below describe further depth unless explicitly labeled unimplemented. Operational behavior is documented in [`architecture.md`](architecture.md), [`ai-system.md`](ai-system.md), and [`novel-build.md`](novel-build.md); this file is not a source-of-truth capability list.
+
 If you want to pick something up, open a GitHub issue first so we can sanity-check scope and shape.
 
 ## Vision
@@ -24,7 +26,7 @@ Treat the manuscript like source code and run a "linter" against it.
 - **Tense drift.** Flag passages that switch from past to present without a scene break.
 - **Forgotten props.** "Jamie pocketed the key" in chapter 3 but never references it again — surface as a Chekhov's gun candidate.
 
-Implemented as pluggable rules under a new `packages/lint/` package. Each rule operates on a `Chapter` and emits diagnostics that surface in a "Problems" panel — same UX VS Code uses.
+The current local and build-aware engines emit evidence-backed diagnostic families into Problems and include a synthetic continuity benchmark. Further work should improve natural-language recall/precision and project-configurable rules rather than inventing a second Problems pipeline.
 
 ### 1.2 Character voice consistency
 Per-character, train a tiny statistical fingerprint of their dialogue (sentence length, function-word usage, contraction rate, vocabulary tier). When they say something off-fingerprint, flag it.
@@ -48,6 +50,8 @@ Beyond chapters: a **scene** is a unit of narrative time. A chapter might have 1
 - Linked characters, locations, obstacles
 
 A dedicated **Outline** view shows scene cards as a corkboard (Scrivener-style) with drag-to-reorder and zoomable hierarchy.
+
+The current Outline Studio provides hierarchy, corkboard, plot grid, timeline, arc, and tension projections over synchronized scene/build-unit data. Future work should deepen templates and very-large-manuscript virtualization.
 
 ### 1.5 Character arcs
 A character has a starting belief, a wound, a want, a need, and a final state. OpenTales should track these as first-class fields on the character, then cross-reference with the chapters where each transformation lands. Visualize arcs as a timeline:
@@ -103,6 +107,8 @@ A "build" step that turns a manuscript into:
 - **Audiobook script** (paragraphs split for breath, with stage directions for character voices)
 
 Configurable per-project under `Project → Export presets`.
+
+DOCX, PDF, EPUB3, Markdown, text, HTML, and project archives are implemented with private provenance-bound assets and safe import previews. Audiobook scripts and additional publishing-house presets remain future work.
 
 ### 1.15 Submission tracker
 A built-in agent/publisher submission tracker. When you submit your manuscript to an agent, log the agent name, contact, date, response. Built-in templates for query letters, synopsis, and the dreaded "personalized opening paragraph."
@@ -169,6 +175,8 @@ Operational transforms or CRDT (yjs) layered on top of the existing branch model
 ### 4.1 Command palette (cmd+K)
 Fuzzy-find anything — chapters, characters, locations, scenes, settings, commands. The single keystroke that makes the IDE feel like an IDE.
 
+The command palette is implemented with keyboard and ARIA listbox behavior. Continue expanding context-sensitive refactors and plugin commands.
+
 ### 4.2 Go to definition
 Click a character mention → jump to their character page. Cmd+click for new tab. Hover preview shows the character's headshot + one-liner.
 
@@ -177,7 +185,7 @@ Click a character mention → jump to their character page. Cmd+click for new ta
 - Find references: "show me every chapter where Marcus appears."
 
 ### 4.4 Rename refactor
-Rename `Elena` → `Eleanor` and update every mention across the manuscript. Preview as a diff before applying. Like LSP rename in VS Code.
+Character/location symbol rename is implemented with stable IDs, alias preservation, main/build scoping, exact diff preview, and CAS/versioned apply. Continue extending the same protocol to future entity kinds.
 
 ### 4.5 Multi-cursor across documents
 Already inside a chapter (Monaco does this). Extend to "find/replace across all chapters" with multi-file editing.
@@ -213,7 +221,7 @@ Currently sparse. Right-click a chapter → rename, duplicate, move, delete, cop
 ## 5. Backend / data
 
 ### 5.1 Soft delete + trash
-Currently DELETE is destructive. Move deleted entities to a `trash_at` field; a `Trash` panel surfaces them with a 30-day auto-purge.
+Chapters currently use soft delete, Trash, restore, and purge. Extend the same retention policy consistently to remaining structured and build entities.
 
 ### 5.2 Audit log
 Every mutation logged: who, what, when. Replays into a project history view. Reuse the existing `Activity` polymorphic feed.
@@ -232,6 +240,8 @@ Local disk works. Add adapters for S3, MinIO, Cloudflare R2. Asset URLs become s
 
 ### 5.6 Search (the proper kind)
 Postgres `tsvector` + `tsquery` for full-text across writings. Index per-org, per-project. Surface in the command palette and in a dedicated Search panel.
+
+Project/build full-text, exact, regex, structural filters, aliases, and references are implemented. Embedding-backed semantic retrieval remains optional future depth.
 
 ### 5.7 Writing stats / analytics (private, on-device)
 - Total words by day/week/month, per project.
@@ -264,7 +274,7 @@ A single `docker-compose.yml` that runs Postgres + the backend + a static fronte
 A first-party hosted instance at opentales.lumina.pw. Free tier with reasonable limits; paid tier with cloud sync, larger asset quotas, AI features.
 
 ### 6.6 Monorepo CI
-There's no CI today. Add GitHub Actions:
+CI now migrates PostgreSQL, runs checks, tests, deterministic evals, and builds. Continue extending it with browser E2E and release previews:
 - Lint & typecheck on every PR.
 - Build all packages.
 - Run e2e (when we have e2e — see Testing).
@@ -277,7 +287,7 @@ There's no CI today. Add GitHub Actions:
 
 ## 7. Testing
 
-There is no automated test suite right now. This is the highest-leverage thing to fix.
+Automated Vitest, PostgreSQL integration, SDK contract, frontend component/store, deterministic agent eval, synthetic continuity, coverage-gate, migration, and documentation-link tests are implemented. Continue increasing representative browser E2E and credentialed multi-trial model evaluation.
 
 ### 7.1 Backend
 - **Unit tests** for use cases (jest/vitest). Mock the repository layer.
@@ -341,7 +351,7 @@ A pinned issue list of things to fix when someone has an afternoon. (Not exhaust
 - **Monaco mounting on mobile.** Monaco is heavy; on slow 3G it can take 5+ seconds. Consider lazy-mounting Monaco only when a chapter is opened, not when the IDE shell loads.
 - **Inspector "Connections" UI.** When a chapter has many linked characters, the connection cards overflow horizontally without scroll. Add overflow-x-auto.
 - **iOS PWA back-swipe.** The back-swipe gesture conflicts with the side drawer. Block edge-swipes when a drawer is open.
-- **Word count off by 1 on em-dashes.** Edge case in the splitter; needs proper Unicode-aware tokenizer.
+- **Word-count language calibration.** Counting is Unicode-aware and handles em dashes; expand cross-language fixtures as non-English manuscripts grow.
 - **Character avatars are eagerly loaded.** Lazy-load below-the-fold avatars on the character panel.
 
 ---

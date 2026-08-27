@@ -94,6 +94,18 @@ export const eyeColorDriftRule: LintRule = {
             .filter((c) => c !== color)
             .join(', ')}).`,
           hint: `Saw ${observations.length} eye-color mentions for ${character.name} across ${chapters.length} chapters.`,
+          category: 'continuity',
+          pass: 'continuity',
+          evidence: observations.map((observation) => ({
+            chapterId: observation.chapterId,
+            title: observation.chapterTitle,
+            lineStart: observation.line,
+            lineEnd: observation.line,
+            excerpt: chapters
+              .find((chapter) => chapter.id === observation.chapterId)
+              ?.content.split('\n')[observation.line - 1]
+              ?.trim()
+          })),
           lineStart: first.line,
           lineEnd: first.line
         });
@@ -168,7 +180,10 @@ export const tenseDriftRule: LintRule = {
           x.tense === 'mixed'
             ? `Chapter mixes past and present tense — manuscript baseline is ${baseline}.`
             : `Chapter is in ${x.tense} tense — manuscript baseline is ${baseline}.`,
-        hint: 'Tense drift inside a single scene reads as a typo; across a chapter it reads as authorial uncertainty.'
+        hint: 'Tense drift inside a single scene reads as a typo; across a chapter it reads as authorial uncertainty.',
+        category: 'style',
+        pass: 'copy',
+        evidence: [{ chapterId: x.chapter.id, title: x.chapter.title }]
       });
     }
 
@@ -177,7 +192,7 @@ export const tenseDriftRule: LintRule = {
 };
 
 const PROP_VERBS = [
-  'pocketed', 'grabbed', 'took', 'picked up', 'drew', 'stuffed', 'slipped',
+  'pocketed', 'grabbed', 'picked up', 'drew', 'stuffed', 'slipped',
   'tucked', 'pulled out', 'clutched'
 ];
 
@@ -222,6 +237,15 @@ export const forgottenPropsRule: LintRule = {
               chapterTitle: chapter.title,
               message: `Prop "${noun}" picked up here but never referenced in later chapters.`,
               hint: 'Chekhov\'s gun candidate — payoff or cut.',
+              category: 'setup-payoff',
+              pass: 'story',
+              evidence: [{
+                chapterId: chapter.id,
+                title: chapter.title,
+                lineStart: lineIdx + 1,
+                lineEnd: lineIdx + 1,
+                excerpt: line.trim()
+              }],
               lineStart: lineIdx + 1,
               lineEnd: lineIdx + 1
             });
@@ -272,7 +296,10 @@ export const sentenceLengthVarianceRule: LintRule = {
           chapterId: chapter.id,
           chapterTitle: chapter.title,
           message: `Sentence lengths cluster tightly around ${mean.toFixed(1)} words (σ = ${stdDev.toFixed(1)}).`,
-          hint: 'Vary cadence — short, then long, then medium — to give prose breath.'
+          hint: 'Vary cadence — short, then long, then medium — to give prose breath.',
+          category: 'style',
+          pass: 'line',
+          evidence: [{ chapterId: chapter.id, title: chapter.title }]
         });
       }
     }

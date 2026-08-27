@@ -1,6 +1,9 @@
 <script lang="ts">
   import {
+    AlertTriangle,
+    Archive,
     BookOpen,
+    BookMarked,
     Bot,
     Compass,
     FileText,
@@ -11,6 +14,8 @@
     StickyNote,
     UserCog,
     Users,
+    Workflow,
+    History,
   } from "lucide-svelte";
   import { fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
@@ -24,11 +29,16 @@
 
   const items: Item[] = [
     { id: "explorer", label: "Manuscript", icon: FileText },
+    { id: "build", label: "Build", icon: Workflow },
+    { id: "bible", label: "Bible", icon: BookMarked },
+    { id: "publishing", label: "Publish", icon: Archive },
+    { id: "revisions", label: "Revisions", icon: History },
     { id: "characters", label: "Characters", icon: Users },
     { id: "locations", label: "Settings", icon: MapPin },
     { id: "plot", label: "Plot", icon: Compass },
     { id: "outline", label: "Outline", icon: BookOpen },
     { id: "search", label: "Search", icon: Search },
+    { id: "problems", label: "Problems", icon: AlertTriangle },
     { id: "inbox", label: "Drafts", icon: Inbox },
     { id: "docs", label: "Docs", icon: StickyNote },
     { id: "ai", label: "AI", icon: Bot },

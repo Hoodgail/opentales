@@ -44,9 +44,13 @@ A novel is a codebase of human meaning — characters, places, plot threads, and
 - **Settings with atmosphere.** Upload reference imagery for every location.
 - **Plot, voice, and obstacles.** Premise, theme, POV, climax, and obstacles live in their own structured panels.
 - **Episodic chapters.** Acts, chapters, and scene beats organized like a project tree.
+- **Durable Novel Builds.** Turn one brainstorm into a structured, restart-safe plan and sandboxed scene-by-scene manuscript workflow.
+- **Story compiler.** Versioned canon, entity state, timeline, setups/payoffs, semantic search, and evidence-backed diagnostics.
+- **Reviewable AI branches.** Inspect, edit, compare, approve, merge, or reject generated prose without changing main prematurely.
+- **Publishing pipeline.** Validated DOCX, PDF, EPUB3, Markdown, text, HTML, and project archives with safe import previews.
 - **Drafts inbox.** Editors submit drafts; owners merge or decline with side-by-side diff. Like GitHub PRs, for prose.
 - **Public read view.** Publish chapters individually under a project's public URL.
-- **Mobile + PWA.** Install on iOS, Android, or desktop. Offline-ready.
+- **Mobile + PWA.** Install on iOS, Android, or desktop; the shell is cached while project data remains network-authoritative.
 - **Open-source.** Self-host, fork, extend.
 
 ## Quick start
@@ -84,7 +88,7 @@ packages/
   electron/     Electron main process and preload bridge
   sdk/          TypeScript client and shared API DTOs
 docs/           Project documentation
-prisma.md       Data-model design notes
+packages/backend/prisma/schema.prisma  Canonical data model
 ```
 
 ## Requirements
@@ -105,6 +109,10 @@ prisma.md       Data-model design notes
 | `pnpm check` | Frontend type checks (`svelte-check`) |
 | `pnpm check:backend` | Backend type checks (`tsc --noEmit`) |
 | `pnpm check:sdk` | SDK type checks |
+| `pnpm lint` | Run all frontend, SDK, and backend static checks |
+| `pnpm test` | Run unit/contract tests and documentation link validation |
+| `pnpm eval` | Run deterministic agent/artifact and continuity evals |
+| `pnpm test:coverage` | Run coverage gates, including critical Novel Build modules |
 | `pnpm build` | Build frontend, SDK, and backend |
 | `pnpm package` | Build and package the Electron app |
 
@@ -125,8 +133,10 @@ prisma.md       Data-model design notes
 | --- | --- |
 | **[Getting started](docs/getting-started.md)** | Local setup walkthrough — your first project in five minutes. |
 | **[Architecture](docs/architecture.md)** | High-level system design, package layout, data model, and conventions. |
-| **[AI system](docs/ai-system.md)** | How project AI settings, agent sessions, streaming, tool calls, and approval-gated edits work. |
-| **[AI assistive features](docs/ai-assistive-features.md)** | SDK and endpoint notes for AI settings, docs, one-shot features, and agent tools. |
+| **[AI system](docs/ai-system.md)** | How project AI settings, agent sessions, streaming, tool calls, and Manual/Auto execution modes work. |
+| **[Novel Builds](docs/novel-build.md)** | Durable workflow, story state, sandbox branches, diagnostics, review/merge, and export/import. |
+| **[Generated capabilities](docs/generated-capabilities.md)** | Source-derived route and built-in skill inventory, checked in CI. |
+| **[Export and import](docs/export-import.md)** | Private verified manuscript exports, secure downloads, import preview, and transactional apply. |
 | **[Future directions](docs/future-directions.md)** | Roadmap, refactor opportunities, and brainstormed features for novel writing. |
 | **[Contributing](CONTRIBUTING.md)** | How to set up a working copy and submit your first PR. |
 | **[Backend README](packages/backend/README.md)** | Backend-specific notes. |
@@ -138,14 +148,14 @@ Project docs are organized by folders and paths, not by `kind`. The `kind` field
 
 A few of the things we're thinking about next. Full list lives in [`docs/future-directions.md`](docs/future-directions.md).
 
-- 🪶 **Continuity lint** — surface eye-color drift, timeline contradictions, POV slips
+- 🪶 **Continuity benchmark expansion** — extend the current evidence-backed diagnostic families and synthetic fixtures
 - 🎭 **Character voice consistency** — train per-character voice fingerprints, flag off-voice dialogue
 - 📐 **Plot structure overlays** — Save the Cat, Hero's Journey, Story Grid as overlays on your chapters
 - 🃏 **Scene cards** — Dwight Swain scene-and-sequel structure, drag-to-reorder
 - 🧵 **Foreshadowing tracker** — link setups to payoffs across the manuscript
 - 🤖 **Local-first AI** — opt-in continuity reviews, rewrites, and outline expansion (Ollama-powered)
 - 🤝 **Real-time co-authoring** — CRDT-based multi-user editing on top of the existing branch model
-- 📚 **Export pipeline** — EPUB, PDF (submission-formatted), audiobook scripts
+- 📚 **Publishing expansion** — build on current DOCX/PDF/EPUB/archive output with additional presets and audiobook scripts
 - 🔌 **Self-hosting bundle** — single `docker-compose.yml`
 
 ## Contributing

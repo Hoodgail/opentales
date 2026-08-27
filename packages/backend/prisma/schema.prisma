@@ -31,6 +31,15 @@ enum ChapterStatus {
   FINAL
 }
 
+enum SceneStatus {
+  PLANNED
+  DRAFT
+  IN_PROGRESS
+  REVIEW
+  REVISED
+  FINAL
+}
+
 enum ObstacleType {
   INTERNAL
   EXTERNAL
@@ -62,6 +71,75 @@ enum AssetKind {
   VIDEO
   DOCUMENT
   TEXT_BLOB
+}
+
+enum ProjectExportFormat {
+  DOCX
+  PDF
+  EPUB
+  MARKDOWN
+  TEXT
+  HTML
+  PROJECT_ARCHIVE
+}
+
+enum ProjectExportPreset {
+  STANDARD_MANUSCRIPT
+  READING_COPY
+  EBOOK
+  WEB
+  ARCHIVE
+}
+
+enum ProjectExportTarget {
+  MAIN
+  BUILD
+}
+
+enum ProjectExportStatus {
+  PENDING
+  GENERATING
+  READY
+  FAILED
+  DELETED
+}
+
+enum ProjectImportFormat {
+  DOCX
+  MARKDOWN
+  TEXT
+  HTML
+  PROJECT_ARCHIVE
+}
+
+enum ProjectImportStatus {
+  PREVIEWED
+  APPLYING
+  APPLIED
+  FAILED
+}
+
+enum NamedSnapshotScope {
+  PROJECT
+  CHAPTER
+  SCENE
+  PROJECT_DOC
+  WRITING
+  BUILD_CHECKPOINT
+  BUILD_COMPILATION
+}
+
+enum WritingAnnotationKind {
+  COMMENT
+  NOTE
+  SUGGESTION
+}
+
+enum WritingAnnotationStatus {
+  OPEN
+  RESOLVED
+  ACCEPTED
+  REJECTED
 }
 
 enum AttachmentEntity {
@@ -123,6 +201,11 @@ enum AiAgentSessionStatus {
   ERROR
 }
 
+enum AiAgentApprovalMode {
+  MANUAL
+  AUTO
+}
+
 enum AiAgentMessageRole {
   USER
   ASSISTANT
@@ -142,31 +225,203 @@ enum AiToolCallStatus {
   PENDING_APPROVAL
   APPROVED
   REJECTED
+  RUNNING
   EXECUTED
   ERROR
 }
 
-model User {
-  id           String   @id @default(cuid())
-  username     String   @unique
-  email        String   @unique
-  passwordHash String
-  name         String?
-  avatarAssetId String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+enum BuildAutonomyMode {
+  ASSIST
+  PLAN_REVIEW
+  AUTONOMOUS_DRAFT
+}
 
-  avatarAsset Asset? @relation("UserAvatar", fields: [avatarAssetId], references: [id], onDelete: SetNull)
-  memberships Membership[]
-  writingVersions WritingVersion[]
-  uploadedAssets Asset[] @relation("UploadedAssets")
-  projectStates UserProjectState[]
-  sentInvites     Invite[] @relation("InviteInviter")
-  acceptedInvites Invite[] @relation("InviteAcceptedBy")
-  submissions     Submission[] @relation("SubmissionAuthor")
-  decidedSubmissions Submission[] @relation("SubmissionDecidedBy")
-  activities      Activity[]
-  betaShareLinks  BetaShareLink[] @relation("BetaShareCreatedBy")
+enum BuildRunStatus {
+  PLANNING
+  DRAFTING
+  REVISING
+  PAUSED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum BuildTaskStatus {
+  BLOCKED
+  READY
+  RUNNING
+  REVIEW
+  DONE
+  FAILED
+  CANCELLED
+}
+
+enum StoryArtifactType {
+  STORY_BRIEF
+  NARRATIVE_CONTRACT
+  CHARACTER_BIBLE
+  RELATIONSHIP_GRAPH
+  WORLD_BIBLE
+  PLOT_THREAD
+  ACT_ARCHITECTURE
+  CHAPTER_BRIEF
+  SCENE_PLAN
+  TIMELINE
+  SETUP_PAYOFF_MAP
+  RESEARCH_QUESTIONS
+  OPEN_QUESTIONS
+  BEAT
+  CHAPTER_DRAFT
+  REVISION_ISSUE
+  FINALE_PLAN
+  EXPORT_MANIFEST
+}
+
+enum BuildManuscriptUnitKind {
+  CHAPTER
+  SCENE
+}
+
+enum BuildManuscriptUnitStatus {
+  PLANNED
+  DRAFTING
+  REVIEW
+  ACCEPTED
+  INVALIDATED
+}
+
+enum StoryArtifactBindingKind {
+  BUILD_UNIT
+  ENTITY
+  LEDGER
+}
+
+enum BuildReviewStatus {
+  OPEN
+  APPROVED
+  MERGED
+  REJECTED
+}
+
+enum BuildReviewUnitAction {
+  CREATE
+  UPDATE
+}
+
+enum StoryArtifactStatus {
+  DRAFT
+  VALIDATED
+  ACCEPTED
+  SUPERSEDED
+  INVALIDATED
+}
+
+enum CanonFactStatus {
+  PROPOSED
+  CANONICAL
+  DISPUTED
+  RETRACTED
+  INVALIDATED
+}
+
+enum EntityStateStatus {
+  PROPOSED
+  ACTIVE
+  SUPERSEDED
+  INVALIDATED
+}
+
+enum OpenLoopKind {
+  PROMISE
+  QUESTION
+  CLUE
+  SETUP
+  MYSTERY
+  FORESHADOWING
+  OTHER
+}
+
+enum OpenLoopStatus {
+  OPEN
+  REINFORCED
+  RESOLVED
+  ABANDONED
+  INVALIDATED
+}
+
+enum SetupPayoffStatus {
+  PLANNED
+  SETUP
+  REINFORCED
+  PAID_OFF
+  ABANDONED
+  INVALIDATED
+}
+
+enum PlotThreadKind {
+  MAIN
+  SUBPLOT
+  CHARACTER_ARC
+  MYSTERY
+  ROMANCE
+  THEMATIC
+  OTHER
+}
+
+enum PlotThreadStatus {
+  PLANNED
+  ACTIVE
+  RESOLVED
+  ABANDONED
+  INVALIDATED
+}
+
+enum BuildTraceStatus {
+  STARTED
+  COMPLETED
+  FAILED
+}
+
+enum BuildEvaluationKind {
+  DETERMINISTIC
+  MODEL
+  HUMAN
+}
+
+model User {
+  id            String   @id @default(cuid())
+  username      String   @unique
+  email         String   @unique
+  passwordHash  String
+  name          String?
+  avatarAssetId String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  avatarAsset           Asset?                    @relation("UserAvatar", fields: [avatarAssetId], references: [id], onDelete: SetNull)
+  memberships           Membership[]
+  writingVersions       WritingVersion[]
+  uploadedAssets        Asset[]                   @relation("UploadedAssets")
+  projectStates         UserProjectState[]
+  sentInvites           Invite[]                  @relation("InviteInviter")
+  acceptedInvites       Invite[]                  @relation("InviteAcceptedBy")
+  submissions           Submission[]              @relation("SubmissionAuthor")
+  decidedSubmissions    Submission[]              @relation("SubmissionDecidedBy")
+  activities            Activity[]
+  betaShareLinks        BetaShareLink[]           @relation("BetaShareCreatedBy")
+  createdBuildRuns      BuildRun[]                @relation("BuildRunCreatedBy")
+  authorizedBuildRuns   BuildRun[]                @relation("BuildRunAuthorizedBy")
+  buildCheckpoints      BuildCheckpoint[]         @relation("BuildCheckpointCreatedBy")
+  buildDirectives       BuildDirective[]          @relation("BuildDirectiveCreatedBy")
+  createdBuildReviews   BuildReview[]             @relation("BuildReviewCreatedBy")
+  approvedBuildReviews  BuildReview[]             @relation("BuildReviewApprovedBy")
+  mergedBuildReviews    BuildReview[]             @relation("BuildReviewMergedBy")
+  requestedExports      ProjectExport[]           @relation("ProjectExportRequestedBy")
+  createdNamedSnapshots NamedSnapshot[]           @relation("NamedSnapshotCreator")
+  authoredAnnotations   WritingAnnotationThread[] @relation("WritingAnnotationAuthor")
+  resolvedAnnotations   WritingAnnotationThread[] @relation("WritingAnnotationResolver")
+  annotationReplies     WritingAnnotationReply[]
+  createdImports        ProjectImport[]           @relation("ProjectImportCreatedBy")
 }
 
 model Org {
@@ -177,20 +432,20 @@ model Org {
   updatedAt DateTime @updatedAt
 
   memberships Membership[]
-  projects Project[]
-  invites  Invite[]
+  projects    Project[]
+  invites     Invite[]
 }
 
 model Invite {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   orgId        String
   invitedById  String
   email        String?
   username     String?
   role         Role
-  token        String   @unique
+  token        String    @unique
   expiresAt    DateTime
-  createdAt    DateTime @default(now())
+  createdAt    DateTime  @default(now())
   acceptedAt   DateTime?
   acceptedById String?
   revokedAt    DateTime?
@@ -238,46 +493,98 @@ model Project {
   archivedAt       DateTime?
   deletedAt        DateTime?
 
-  org           Org             @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  coverAsset    Asset?          @relation("ProjectCover", fields: [coverAssetId], references: [id], onDelete: SetNull)
-  storyStructure StoryStructure?
-  characters    Character[]
+  org                    Org                       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  coverAsset             Asset?                    @relation("ProjectCover", fields: [coverAssetId], references: [id], onDelete: SetNull)
+  storyStructure         StoryStructure?
+  characters             Character[]
   characterRelationships CharacterRelationship[]
-  locations     Location[]
-  acts          Act[]
-  chapters      Chapter[]
-  writings      Writing[]
-  assets        Asset[]
-  obstacles     Obstacle[]
-  projectStates UserProjectState[]
-  submissions   Submission[]
-  betaShareLinks BetaShareLink[]
-  aiSettings    ProjectAiSettings?
-  docs          ProjectDoc[]
-  folders       ProjectFolder[]
-  aiAgentSessions ProjectAiAgentSession[]
-  aiSkills      ProjectAiSkill[]
+  locations              Location[]
+  acts                   Act[]
+  chapters               Chapter[]
+  writings               Writing[]
+  assets                 Asset[]
+  obstacles              Obstacle[]
+  projectStates          UserProjectState[]
+  submissions            Submission[]
+  betaShareLinks         BetaShareLink[]
+  aiSettings             ProjectAiSettings?
+  docs                   ProjectDoc[]
+  folders                ProjectFolder[]
+  aiAgentSessions        ProjectAiAgentSession[]
+  aiSkills               ProjectAiSkill[]
+  buildRuns              BuildRun[]
+  storyArtifacts         StoryArtifact[]
+  storyArtifactLinks     StoryArtifactLink[]
+  canonFacts             CanonFact[]
+  entityStates           EntityState[]
+  timelineEvents         TimelineEvent[]
+  openLoops              OpenLoop[]
+  setupPayoffLinks       SetupPayoffLink[]
+  plotThreads            PlotThread[]
+  buildCheckpoints       BuildCheckpoint[]
+  buildTraces            BuildTrace[]
+  buildEvaluationResults BuildEvaluationResult[]
+  buildDirectives        BuildDirective[]
+  buildManuscriptUnits   BuildManuscriptUnit[]
+  storyArtifactBindings  StoryArtifactBinding[]
+  buildCompilations      BuildCompilation[]
+  buildReviews           BuildReview[]
+  exports                ProjectExport[]
+  namedSnapshots         NamedSnapshot[]
+  writingAnnotations     WritingAnnotationThread[]
+  imports                ProjectImport[]
+  renameRefactorReceipts RenameRefactorReceipt[]
 
   @@unique([orgId, slug])
   @@index([orgId])
 }
 
 model ProjectAiAgentSession {
-  id             String               @id @default(cuid())
-  projectId      String
-  title          String?
-  status         AiAgentSessionStatus @default(IDLE)
-  activePromptId String?
-  lastError      String?
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
+  id               String               @id @default(cuid())
+  projectId        String
+  activeBuildRunId String?
+  title            String?
+  approvalMode     AiAgentApprovalMode  @default(MANUAL)
+  status           AiAgentSessionStatus @default(IDLE)
+  activePromptId   String?
+  nextPartSequence Int                  @default(0)
+  lastError        String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
 
-  project   Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  messages  AiAgentMessage[]
-  prompts   AiAgentPrompt[]
-  toolCalls AiAgentToolCall[]
+  project        Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  activeBuildRun BuildRun?            @relation(fields: [activeBuildRunId], references: [id], onDelete: SetNull)
+  messages       AiAgentMessage[]
+  prompts        AiAgentPrompt[]
+  toolCalls      AiAgentToolCall[]
+  parts          AiAgentSessionPart[]
 
   @@index([projectId, updatedAt])
+  @@index([activeBuildRunId])
+}
+
+model AiAgentSessionPart {
+  id         String   @id @default(cuid())
+  sessionId  String
+  promptId   String?
+  messageId  String?
+  toolCallId String?
+  kind       String
+  sequence   Int
+  payload    Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  session  ProjectAiAgentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  prompt   AiAgentPrompt?        @relation(fields: [promptId], references: [id], onDelete: SetNull)
+  message  AiAgentMessage?       @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  toolCall AiAgentToolCall?      @relation(fields: [toolCallId], references: [id], onDelete: SetNull)
+
+  @@unique([sessionId, sequence])
+  @@unique([sessionId, kind, toolCallId])
+  @@index([sessionId, createdAt])
+  @@index([messageId])
+  @@index([toolCallId])
 }
 
 model AiAgentMessage {
@@ -288,6 +595,7 @@ model AiAgentMessage {
   createdAt DateTime           @default(now())
 
   session ProjectAiAgentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  parts   AiAgentSessionPart[]
 
   @@index([sessionId, createdAt])
 }
@@ -302,26 +610,29 @@ model AiAgentPrompt {
   updatedAt DateTime            @updatedAt
 
   session ProjectAiAgentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  parts   AiAgentSessionPart[]
 
   @@index([sessionId, status, order])
 }
 
 model AiAgentToolCall {
-  id         String           @id @default(cuid())
-  sessionId  String
-  promptId   String?
-  toolCallId String?
-  toolName   String
-  input      Json
-  status     AiToolCallStatus @default(PENDING_APPROVAL)
-  output     Json?
-  error      String?
-  createdAt  DateTime         @default(now())
-  decidedAt  DateTime?
+  id          String           @id @default(cuid())
+  sessionId   String
+  promptId    String?
+  toolCallId  String?
+  toolName    String
+  input       Json
+  status      AiToolCallStatus @default(PENDING_APPROVAL)
+  output      Json?
+  error       String?
+  createdAt   DateTime         @default(now())
+  decidedAt   DateTime?
   decidedById String?
 
   session ProjectAiAgentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  parts   AiAgentSessionPart[]
 
+  @@unique([sessionId, toolCallId])
   @@index([sessionId, status, createdAt])
   @@index([toolCallId])
 }
@@ -337,9 +648,9 @@ model ProjectDoc {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
-  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project     Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   folder      ProjectFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
-  bodyWriting Writing @relation("ProjectDocBodyWriting", fields: [bodyWritingId], references: [id], onDelete: Restrict)
+  bodyWriting Writing        @relation("ProjectDocBodyWriting", fields: [bodyWritingId], references: [id], onDelete: Restrict)
 
   @@index([folderId, order])
   @@index([projectId, order])
@@ -356,8 +667,8 @@ model ProjectFolder {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  project      Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  parentFolder ProjectFolder? @relation("ProjectFolderTree", fields: [parentFolderId], references: [id], onDelete: Cascade)
+  project      Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parentFolder ProjectFolder?  @relation("ProjectFolderTree", fields: [parentFolderId], references: [id], onDelete: Cascade)
   childFolders ProjectFolder[] @relation("ProjectFolderTree")
   docs         ProjectDoc[]
   assets       Asset[]
@@ -398,22 +709,22 @@ model ProjectAiSkill {
 }
 
 model BetaShareLink {
-  id             String    @id @default(cuid())
-  projectId      String
-  token          String    @unique
+  id            String    @id @default(cuid())
+  projectId     String
+  token         String    @unique
   // null = entire manuscript; otherwise restricted to these chapter ids.
-  chapterIds     String[]  @default([])
+  chapterIds    String[]  @default([])
   // Whether unauthenticated visitors may post comments on this share.
-  allowComments  Boolean   @default(true)
+  allowComments Boolean   @default(true)
   // Optional human label shown to the owner (e.g. "agent — Sarah").
-  label          String?
-  createdById    String
-  createdAt      DateTime  @default(now())
-  expiresAt      DateTime?
-  revokedAt      DateTime?
+  label         String?
+  createdById   String
+  createdAt     DateTime  @default(now())
+  expiresAt     DateTime?
+  revokedAt     DateTime?
 
-  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  createdBy User    @relation("BetaShareCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  project   Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User               @relation("BetaShareCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
   comments  BetaShareComment[]
 
   @@index([projectId])
@@ -450,37 +761,40 @@ model StoryStructure {
 }
 
 model Character {
-  id                    String   @id @default(cuid())
-  projectId             String
-  name                  String
-  role                  String?
-  age                   String?
-  occupation            String?
-  traits                String[] @default([])
-  avatarAssetId          String?
-  descriptionWritingId   String
-  appearanceWritingId    String
-  motivationWritingId    String
-  arcWritingId           String
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  id                   String   @id @default(cuid())
+  projectId            String
+  name                 String
+  role                 String?
+  age                  String?
+  occupation           String?
+  traits               String[] @default([])
+  aliases              String[] @default([])
+  avatarAssetId        String?
+  descriptionWritingId String
+  appearanceWritingId  String
+  motivationWritingId  String
+  arcWritingId         String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
-  project             Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  avatarAsset          Asset?  @relation("CharacterAvatar", fields: [avatarAssetId], references: [id], onDelete: SetNull)
-  descriptionWriting   Writing @relation("CharacterDescriptionWriting", fields: [descriptionWritingId], references: [id], onDelete: Restrict)
-  appearanceWriting    Writing @relation("CharacterAppearanceWriting", fields: [appearanceWritingId], references: [id], onDelete: Restrict)
-  motivationWriting    Writing @relation("CharacterMotivationWriting", fields: [motivationWritingId], references: [id], onDelete: Restrict)
-  arcWriting           Writing @relation("CharacterArcWriting", fields: [arcWritingId], references: [id], onDelete: Restrict)
+  project               Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  avatarAsset           Asset?                  @relation("CharacterAvatar", fields: [avatarAssetId], references: [id], onDelete: SetNull)
+  descriptionWriting    Writing                 @relation("CharacterDescriptionWriting", fields: [descriptionWritingId], references: [id], onDelete: Restrict)
+  appearanceWriting     Writing                 @relation("CharacterAppearanceWriting", fields: [appearanceWritingId], references: [id], onDelete: Restrict)
+  motivationWriting     Writing                 @relation("CharacterMotivationWriting", fields: [motivationWritingId], references: [id], onDelete: Restrict)
+  arcWriting            Writing                 @relation("CharacterArcWriting", fields: [arcWritingId], references: [id], onDelete: Restrict)
   outgoingRelationships CharacterRelationship[] @relation("RelationshipFrom")
   incomingRelationships CharacterRelationship[] @relation("RelationshipTo")
-  povChapters          Chapter[] @relation("ChapterPovCharacter")
-  povScenes            Scene[] @relation("ScenePovCharacter")
+  povChapters           Chapter[]               @relation("ChapterPovCharacter")
+  povScenes             Scene[]                 @relation("ScenePovCharacter")
+  povBuildUnits         BuildManuscriptUnit[]   @relation("BuildUnitPovCharacter")
 
   @@index([projectId])
+  @@index([aliases], type: Gin, map: "Character_aliases_gin_idx")
 }
 
 model CharacterRelationship {
-  id              String @id @default(cuid())
+  id              String  @id @default(cuid())
   projectId       String
   fromCharacterId String
   toCharacterId   String
@@ -500,25 +814,28 @@ model Location {
   id                    String   @id @default(cuid())
   projectId             String
   name                  String
+  aliases               String[] @default([])
   type                  String?
-  imageAssetId           String?
-  descriptionWritingId   String
-  atmosphereWritingId    String
-  significanceWritingId  String
-  sensoryWritingId       String
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  imageAssetId          String?
+  descriptionWritingId  String
+  atmosphereWritingId   String
+  significanceWritingId String
+  sensoryWritingId      String
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
-  project             Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  imageAsset           Asset?  @relation("LocationImage", fields: [imageAssetId], references: [id], onDelete: SetNull)
-  descriptionWriting   Writing @relation("LocationDescriptionWriting", fields: [descriptionWritingId], references: [id], onDelete: Restrict)
-  atmosphereWriting    Writing @relation("LocationAtmosphereWriting", fields: [atmosphereWritingId], references: [id], onDelete: Restrict)
-  significanceWriting  Writing @relation("LocationSignificanceWriting", fields: [significanceWritingId], references: [id], onDelete: Restrict)
-  sensoryWriting       Writing @relation("LocationSensoryWriting", fields: [sensoryWritingId], references: [id], onDelete: Restrict)
-  chapters             Chapter[]
-  scenes               Scene[]
+  project             Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  imageAsset          Asset?                @relation("LocationImage", fields: [imageAssetId], references: [id], onDelete: SetNull)
+  descriptionWriting  Writing               @relation("LocationDescriptionWriting", fields: [descriptionWritingId], references: [id], onDelete: Restrict)
+  atmosphereWriting   Writing               @relation("LocationAtmosphereWriting", fields: [atmosphereWritingId], references: [id], onDelete: Restrict)
+  significanceWriting Writing               @relation("LocationSignificanceWriting", fields: [significanceWritingId], references: [id], onDelete: Restrict)
+  sensoryWriting      Writing               @relation("LocationSensoryWriting", fields: [sensoryWritingId], references: [id], onDelete: Restrict)
+  chapters            Chapter[]
+  scenes              Scene[]
+  buildUnits          BuildManuscriptUnit[] @relation("BuildUnitLocation")
 
   @@index([projectId])
+  @@index([aliases], type: Gin, map: "Location_aliases_gin_idx")
 }
 
 model Act {
@@ -547,17 +864,19 @@ model Chapter {
   bodyWritingId  String
   order          Int
   publishedAt    DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
   deletedAt      DateTime?
 
-  project      Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  act          Act?       @relation(fields: [actId], references: [id], onDelete: SetNull)
-  povCharacter Character? @relation("ChapterPovCharacter", fields: [povCharacterId], references: [id], onDelete: SetNull)
-  location     Location?  @relation(fields: [locationId], references: [id], onDelete: SetNull)
-  bodyWriting  Writing   @relation("ChapterBodyWriting", fields: [bodyWritingId], references: [id], onDelete: Restrict)
-  scenes       Scene[]
-  submissions  Submission[]
+  project          Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  act              Act?                  @relation(fields: [actId], references: [id], onDelete: SetNull)
+  povCharacter     Character?            @relation("ChapterPovCharacter", fields: [povCharacterId], references: [id], onDelete: SetNull)
+  location         Location?             @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  bodyWriting      Writing               @relation("ChapterBodyWriting", fields: [bodyWritingId], references: [id], onDelete: Restrict)
+  scenes           Scene[]
+  submissions      Submission[]
+  sourceBuildUnits BuildManuscriptUnit[] @relation("BuildUnitSourceChapter")
+  buildReviewUnits BuildReviewUnit[]
 
   @@unique([projectId, number])
   @@index([projectId])
@@ -566,21 +885,59 @@ model Chapter {
 }
 
 model Scene {
-  id             String @id @default(cuid())
-  chapterId      String
-  order          Int
-  title          String?
-  povCharacterId String?
-  locationId     String?
-  bodyWritingId  String
+  id                     String      @id @default(cuid())
+  chapterId              String
+  order                  Int
+  title                  String?
+  status                 SceneStatus @default(DRAFT)
+  povCharacterId         String?
+  locationId             String?
+  storyDate              String?
+  storyTime              String?
+  estimatedWordCount     Int?
+  actualWordCount        Int         @default(0)
+  sceneFunction          String?
+  goal                   String?
+  obstacle               String?
+  stakes                 String?
+  conflict               String?
+  turn                   String?
+  revelation             String?
+  outcome                String?
+  emotionalValueShift    String?
+  tension                Float?
+  characterPresentIds    String[]    @default([])
+  characterReferencedIds String[]    @default([])
+  plotThreadIds          String[]    @default([])
+  setupPayoffIds         String[]    @default([])
+  knowledgeDeltas        Json?
+  objectTransfers        Json?
+  injuryStateChanges     Json?
+  worldRuleRefs          Json?
+  entryState             Json?
+  exitState              Json?
+  summary                String?
+  writerNotes            String?
+  aiNotes                String?
+  bodyWritingId          String
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
+  revision               Int         @default(0)
 
-  chapter      Chapter    @relation(fields: [chapterId], references: [id], onDelete: Cascade)
-  povCharacter Character? @relation("ScenePovCharacter", fields: [povCharacterId], references: [id], onDelete: SetNull)
-  location     Location?  @relation(fields: [locationId], references: [id], onDelete: SetNull)
-  bodyWriting  Writing    @relation("SceneBodyWriting", fields: [bodyWritingId], references: [id], onDelete: Restrict)
+  chapter          Chapter               @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  povCharacter     Character?            @relation("ScenePovCharacter", fields: [povCharacterId], references: [id], onDelete: SetNull)
+  location         Location?             @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  bodyWriting      Writing               @relation("SceneBodyWriting", fields: [bodyWritingId], references: [id], onDelete: Restrict)
+  sourceBuildUnits BuildManuscriptUnit[] @relation("BuildUnitSourceScene")
+  buildReviewUnits BuildReviewUnit[]
 
   @@unique([chapterId, order])
+  @@unique([id, revision])
   @@index([chapterId])
+  @@index([characterPresentIds], type: Gin, map: "Scene_characterPresentIds_gin_idx")
+  @@index([characterReferencedIds], type: Gin, map: "Scene_characterReferencedIds_gin_idx")
+  @@index([plotThreadIds], type: Gin, map: "Scene_plotThreadIds_gin_idx")
+  @@index([setupPayoffIds], type: Gin, map: "Scene_setupPayoffIds_gin_idx")
 }
 
 model Obstacle {
@@ -607,71 +964,87 @@ model Writing {
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
-  project       Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  defaultBranch WritingBranch? @relation("DefaultWritingBranch", fields: [defaultBranchId], references: [id], onDelete: SetNull)
+  project       Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  defaultBranch WritingBranch?  @relation("DefaultWritingBranch", fields: [defaultBranchId], references: [id], onDelete: SetNull)
   branches      WritingBranch[] @relation("WritingBranches")
 
-  storyLoglineStructure StoryStructure[] @relation("StoryLoglineWriting")
-  storyOutlineStructure StoryStructure[] @relation("StoryOutlineWriting")
-  storyClimaxStructure  StoryStructure[] @relation("StoryClimaxWriting")
-  chapterBodies Chapter[] @relation("ChapterBodyWriting")
-  sceneBodies Scene[] @relation("SceneBodyWriting")
-  characterDescriptions Character[] @relation("CharacterDescriptionWriting")
-  characterAppearances Character[] @relation("CharacterAppearanceWriting")
-  characterMotivations Character[] @relation("CharacterMotivationWriting")
-  characterArcs Character[] @relation("CharacterArcWriting")
-  locationDescriptions Location[] @relation("LocationDescriptionWriting")
-  locationAtmospheres Location[] @relation("LocationAtmosphereWriting")
-  locationSignificances Location[] @relation("LocationSignificanceWriting")
-  locationSensoryDetails Location[] @relation("LocationSensoryWriting")
-  obstacleDescriptions Obstacle[] @relation("ObstacleDescriptionWriting")
-  obstacleResolutions Obstacle[] @relation("ObstacleResolutionWriting")
-  projectDocs ProjectDoc[] @relation("ProjectDocBodyWriting")
+  storyLoglineStructure  StoryStructure[]          @relation("StoryLoglineWriting")
+  storyOutlineStructure  StoryStructure[]          @relation("StoryOutlineWriting")
+  storyClimaxStructure   StoryStructure[]          @relation("StoryClimaxWriting")
+  chapterBodies          Chapter[]                 @relation("ChapterBodyWriting")
+  sceneBodies            Scene[]                   @relation("SceneBodyWriting")
+  characterDescriptions  Character[]               @relation("CharacterDescriptionWriting")
+  characterAppearances   Character[]               @relation("CharacterAppearanceWriting")
+  characterMotivations   Character[]               @relation("CharacterMotivationWriting")
+  characterArcs          Character[]               @relation("CharacterArcWriting")
+  locationDescriptions   Location[]                @relation("LocationDescriptionWriting")
+  locationAtmospheres    Location[]                @relation("LocationAtmosphereWriting")
+  locationSignificances  Location[]                @relation("LocationSignificanceWriting")
+  locationSensoryDetails Location[]                @relation("LocationSensoryWriting")
+  obstacleDescriptions   Obstacle[]                @relation("ObstacleDescriptionWriting")
+  obstacleResolutions    Obstacle[]                @relation("ObstacleResolutionWriting")
+  projectDocs            ProjectDoc[]              @relation("ProjectDocBodyWriting")
+  buildManuscriptUnits   BuildManuscriptUnit[]     @relation("BuildUnitWriting")
+  annotationThreads      WritingAnnotationThread[]
 
   @@index([projectId, kind])
 }
 
 model WritingBranch {
-  id             String @id @default(cuid())
+  id             String   @id @default(cuid())
   writingId      String
+  buildRunId     String?
   name           String
   parentBranchId String?
   headVersionId  String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  writing       Writing @relation("WritingBranches", fields: [writingId], references: [id], onDelete: Cascade)
-  defaultFor    Writing[] @relation("DefaultWritingBranch")
-  parentBranch  WritingBranch? @relation("BranchLineage", fields: [parentBranchId], references: [id], onDelete: SetNull)
-  childBranches WritingBranch[] @relation("BranchLineage")
-  headVersion   WritingVersion? @relation("BranchHeadVersion", fields: [headVersionId], references: [id], onDelete: SetNull)
-  versions      WritingVersion[] @relation("BranchVersions")
-  submission    Submission?
+  writing              Writing                   @relation("WritingBranches", fields: [writingId], references: [id], onDelete: Cascade)
+  buildRun             BuildRun?                 @relation(fields: [buildRunId], references: [id], onDelete: SetNull)
+  defaultFor           Writing[]                 @relation("DefaultWritingBranch")
+  parentBranch         WritingBranch?            @relation("BranchLineage", fields: [parentBranchId], references: [id], onDelete: SetNull)
+  childBranches        WritingBranch[]           @relation("BranchLineage")
+  headVersion          WritingVersion?           @relation("BranchHeadVersion", fields: [headVersionId], references: [id], onDelete: SetNull)
+  versions             WritingVersion[]          @relation("BranchVersions")
+  submission           Submission?
+  buildManuscriptUnits BuildManuscriptUnit[]     @relation("BuildUnitBranch")
+  annotationThreads    WritingAnnotationThread[]
 
   @@unique([writingId, name])
+  @@index([buildRunId])
   @@index([parentBranchId])
 }
 
 model WritingVersion {
-  id              String @id @default(cuid())
+  id              String   @id @default(cuid())
   branchId        String
+  sourceTaskId    String?
   parentVersionId String?
   body            String?
   bodyAssetId     String?
-  wordCount       Int    @default(0)
+  wordCount       Int      @default(0)
   authorId        String?
   message         String?
   createdAt       DateTime @default(now())
 
-  branch         WritingBranch @relation("BranchVersions", fields: [branchId], references: [id], onDelete: Cascade)
-  headForBranch  WritingBranch[] @relation("BranchHeadVersion")
-  parentVersion  WritingVersion? @relation("VersionLineage", fields: [parentVersionId], references: [id], onDelete: SetNull)
-  childVersions  WritingVersion[] @relation("VersionLineage")
-  bodyAsset      Asset? @relation("WritingVersionBodyAsset", fields: [bodyAssetId], references: [id], onDelete: SetNull)
-  author         User? @relation(fields: [authorId], references: [id], onDelete: SetNull)
-  submissionBases Submission[] @relation("SubmissionBaseVersion")
+  branch              WritingBranch             @relation("BranchVersions", fields: [branchId], references: [id], onDelete: Cascade)
+  sourceTask          BuildTask?                @relation("WritingVersionSourceTask", fields: [sourceTaskId], references: [id], onDelete: SetNull)
+  headForBranch       WritingBranch[]           @relation("BranchHeadVersion")
+  parentVersion       WritingVersion?           @relation("VersionLineage", fields: [parentVersionId], references: [id], onDelete: SetNull)
+  childVersions       WritingVersion[]          @relation("VersionLineage")
+  bodyAsset           Asset?                    @relation("WritingVersionBodyAsset", fields: [bodyAssetId], references: [id], onDelete: SetNull)
+  author              User?                     @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  submissionBases     Submission[]              @relation("SubmissionBaseVersion")
+  compilationUnits    BuildCompilationUnit[]    @relation("CompilationWritingVersion")
+  reviewExpectedUnits BuildReviewUnit[]         @relation("ReviewExpectedMainVersion")
+  reviewSourceUnits   BuildReviewUnit[]         @relation("ReviewSourceBuildVersion")
+  reviewResultUnits   BuildReviewUnit[]         @relation("ReviewResultMainVersion")
+  anchoredAnnotations WritingAnnotationThread[] @relation("AnnotationAnchorVersion")
+  acceptedAnnotations WritingAnnotationThread[] @relation("AnnotationAcceptedVersion")
 
   @@index([branchId])
+  @@index([sourceTaskId])
   @@index([parentVersionId])
 }
 
@@ -687,28 +1060,31 @@ model Asset {
   mimeType     String
   sizeBytes    BigInt
   checksum     String?
+  isPublic     Boolean   @default(true)
   width        Int?
   height       Int?
   durationMs   Int?
   uploadedById String?
   createdAt    DateTime  @default(now())
 
-  project       Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  folder        ProjectFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
-  uploadedBy    User?    @relation("UploadedAssets", fields: [uploadedById], references: [id], onDelete: SetNull)
-  attachments   AssetAttachment[]
-  projectCovers Project[] @relation("ProjectCover")
-  userAvatars   User[] @relation("UserAvatar")
-  characterAvatars Character[] @relation("CharacterAvatar")
-  locationImages Location[] @relation("LocationImage")
-  writingVersionBodies WritingVersion[] @relation("WritingVersionBodyAsset")
+  project              Project?          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  folder               ProjectFolder?    @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  uploadedBy           User?             @relation("UploadedAssets", fields: [uploadedById], references: [id], onDelete: SetNull)
+  attachments          AssetAttachment[]
+  projectCovers        Project[]         @relation("ProjectCover")
+  userAvatars          User[]            @relation("UserAvatar")
+  characterAvatars     Character[]       @relation("CharacterAvatar")
+  locationImages       Location[]        @relation("LocationImage")
+  projectExport        ProjectExport?    @relation("ProjectExportAsset")
+  projectImport        ProjectImport?    @relation("ProjectImportAsset")
+  writingVersionBodies WritingVersion[]  @relation("WritingVersionBodyAsset")
 
   @@index([folderId, order])
   @@index([projectId, kind])
 }
 
 model AssetAttachment {
-  id         String @id @default(cuid())
+  id         String           @id @default(cuid())
   assetId    String
   entityType AttachmentEntity
   entityId   String
@@ -717,12 +1093,12 @@ model AssetAttachment {
 
   asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
 
-  @@index([entityType, entityId])
   @@unique([entityType, entityId, role, assetId])
+  @@index([entityType, entityId])
 }
 
 model UserProjectState {
-  id              String @id @default(cuid())
+  id              String  @id @default(cuid())
   userId          String
   projectId       String
   activeView      String?
@@ -730,15 +1106,15 @@ model UserProjectState {
   selectedRefType String?
   selectedRefId   String?
 
-  user    User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   tabs    OpenTab[]
 
   @@unique([userId, projectId])
 }
 
 model OpenTab {
-  id                 String @id @default(cuid())
+  id                 String  @id @default(cuid())
   userProjectStateId String
   kind               TabKind
   refId              String
@@ -750,35 +1126,35 @@ model OpenTab {
 }
 
 model Submission {
-  id              String           @id @default(cuid())
-  projectId       String
-  authorId        String
-  kind            SubmissionKind
-  status          SubmissionStatus @default(OPEN)
-  title           String
-  message         String?
+  id             String           @id @default(cuid())
+  projectId      String
+  authorId       String
+  kind           SubmissionKind
+  status         SubmissionStatus @default(OPEN)
+  title          String
+  message        String?
   // For CHAPTER_EDIT: the existing chapter being edited.
   // For NEW_CHAPTER: null (a chapter is created on merge).
-  chapterId       String?
+  chapterId      String?
   // Snapshot WritingBranch holding the proposed body. Always set.
-  branchId        String           @unique
+  branchId       String           @unique
   // Snapshot of the base WritingVersion at submission time (for diff).
-  baseVersionId   String?
+  baseVersionId  String?
   // Optional fields used when kind = NEW_CHAPTER so the merge can materialize one.
-  proposedTitle   String?
-  proposedNumber  Int?
-  proposedActId   String?
-  createdAt       DateTime         @default(now())
-  decidedAt       DateTime?
-  decidedById     String?
+  proposedTitle  String?
+  proposedNumber Int?
+  proposedActId  String?
+  createdAt      DateTime         @default(now())
+  decidedAt      DateTime?
+  decidedById    String?
 
-  project    Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  author     User           @relation("SubmissionAuthor", fields: [authorId], references: [id], onDelete: Cascade)
-  decidedBy  User?          @relation("SubmissionDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
-  branch     WritingBranch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  author      User            @relation("SubmissionAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  decidedBy   User?           @relation("SubmissionDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  branch      WritingBranch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
   baseVersion WritingVersion? @relation("SubmissionBaseVersion", fields: [baseVersionId], references: [id], onDelete: SetNull)
-  chapter    Chapter?       @relation(fields: [chapterId], references: [id], onDelete: SetNull)
-  activities Activity[]
+  chapter     Chapter?        @relation(fields: [chapterId], references: [id], onDelete: SetNull)
+  activities  Activity[]
 
   @@index([projectId, status])
   @@index([authorId])
@@ -797,4 +1173,990 @@ model Activity {
   author     User?      @relation(fields: [authorId], references: [id], onDelete: SetNull)
 
   @@index([submissionId, createdAt])
+}
+
+model BuildRun {
+  id                  String            @id @default(cuid())
+  projectId           String
+  createdById         String?
+  authorizedById      String?
+  objective           String
+  brainstorm          String
+  idempotencyKey      String
+  requestHash         String            @default("")
+  manifest            Json
+  autonomyMode        BuildAutonomyMode @default(ASSIST)
+  status              BuildRunStatus    @default(PLANNING)
+  currentPhase        String            @default("planning")
+  workflowVersion     String
+  branchName          String
+  authorizationScope  Json
+  maxTokens           Int?
+  tokensUsed          Int               @default(0)
+  tokensReserved      Int               @default(0)
+  maxCostMicros       Int?
+  costMicrosUsed      Int               @default(0)
+  costMicrosReserved  Int               @default(0)
+  revision            Int               @default(0)
+  executionGeneration Int               @default(0)
+  lastError           String?
+  authorizedAt        DateTime?
+  pausedAt            DateTime?
+  completedAt         DateTime?
+  failedAt            DateTime?
+  cancelledAt         DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  project           Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy         User?                   @relation("BuildRunCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  authorizedBy      User?                   @relation("BuildRunAuthorizedBy", fields: [authorizedById], references: [id], onDelete: SetNull)
+  tasks             BuildTask[]
+  transitions       BuildTaskTransition[]
+  artifacts         StoryArtifact[]
+  artifactLinks     StoryArtifactLink[]
+  canonFacts        CanonFact[]
+  entityStates      EntityState[]
+  timelineEvents    TimelineEvent[]
+  openLoops         OpenLoop[]
+  setupPayoffs      SetupPayoffLink[]
+  plotThreads       PlotThread[]
+  checkpoints       BuildCheckpoint[]
+  traces            BuildTrace[]
+  evaluations       BuildEvaluationResult[]
+  operationReceipts BuildOperationReceipt[]
+  directives        BuildDirective[]
+  manuscriptUnits   BuildManuscriptUnit[]
+  artifactBindings  StoryArtifactBinding[]
+  compilations      BuildCompilation[]
+  reviews           BuildReview[]
+  exports           ProjectExport[]
+  writingBranches   WritingBranch[]
+  aiAgentSessions   ProjectAiAgentSession[]
+
+  @@unique([projectId, branchName])
+  @@unique([projectId, idempotencyKey])
+  @@index([projectId, status, updatedAt])
+}
+
+model BuildTask {
+  id                    String          @id @default(cuid())
+  buildRunId            String
+  key                   String
+  type                  String
+  phase                 String
+  status                BuildTaskStatus @default(BLOCKED)
+  dependencyIds         String[]        @default([])
+  inputArtifactIds      String[]        @default([])
+  outputArtifactIds     String[]        @default([])
+  scopeUnitIds          String[]        @default([])
+  assignedAgent         String
+  skillVersions         Json
+  acceptanceCriteria    Json
+  executionPolicy       Json
+  attempts              Int             @default(0)
+  maxAttempts           Int             @default(3)
+  revisionIteration     Int             @default(0)
+  maxRevisionIterations Int             @default(1)
+  qualityThreshold      Float?
+  priority              Int             @default(0)
+  progress              Int             @default(0)
+  revision              Int             @default(0)
+  leaseOwner            String?
+  leaseToken            String?
+  leaseGeneration       Int             @default(0)
+  runGeneration         Int             @default(0)
+  reservedTokens        Int             @default(0)
+  reservedCostMicros    Int             @default(0)
+  leaseExpiresAt        DateTime?
+  heartbeatAt           DateTime?
+  startedAt             DateTime?
+  completedAt           DateTime?
+  failedAt              DateTime?
+  cancelledAt           DateTime?
+  invalidatedAt         DateTime?
+  lastError             String?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  buildRun             BuildRun                @relation(fields: [buildRunId], references: [id], onDelete: Cascade)
+  transitions          BuildTaskTransition[]
+  artifacts            StoryArtifact[]
+  checkpoints          BuildCheckpoint[]
+  traces               BuildTrace[]
+  evaluations          BuildEvaluationResult[]
+  directives           BuildDirective[]
+  manuscriptUnits      BuildManuscriptUnit[]   @relation("BuildUnitSourceTask")
+  artifactBindings     StoryArtifactBinding[]
+  ledgerCanonFacts     CanonFact[]             @relation("CanonFactSourceTask")
+  ledgerEntityStates   EntityState[]           @relation("EntityStateSourceTask")
+  ledgerTimelineEvents TimelineEvent[]         @relation("TimelineEventSourceTask")
+  ledgerOpenLoops      OpenLoop[]              @relation("OpenLoopSourceTask")
+  ledgerSetupPayoffs   SetupPayoffLink[]       @relation("SetupPayoffSourceTask")
+  ledgerPlotThreads    PlotThread[]            @relation("PlotThreadSourceTask")
+  writingVersions      WritingVersion[]        @relation("WritingVersionSourceTask")
+
+  @@unique([buildRunId, key])
+  @@index([buildRunId, status, priority, createdAt])
+  @@index([leaseExpiresAt])
+}
+
+model BuildTaskTransition {
+  id             String          @id @default(cuid())
+  buildRunId     String
+  taskId         String
+  fromStatus     BuildTaskStatus
+  toStatus       BuildTaskStatus
+  idempotencyKey String
+  requestHash    String          @default("")
+  reason         String?
+  metadata       Json?
+  createdAt      DateTime        @default(now())
+
+  buildRun BuildRun  @relation(fields: [buildRunId], references: [id], onDelete: Cascade)
+  task     BuildTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, idempotencyKey])
+  @@index([buildRunId, createdAt])
+}
+
+model StoryArtifact {
+  id                 String              @id @default(cuid())
+  projectId          String
+  buildRunId         String
+  taskId             String?
+  type               StoryArtifactType
+  key                String
+  title              String
+  version            Int                 @default(1)
+  schemaVersion      String
+  status             StoryArtifactStatus @default(DRAFT)
+  content            Json
+  contentHash        String
+  replacesArtifactId String?
+  acceptedAt         DateTime?
+  invalidatedAt      DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  project              Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  buildRun             BuildRun                @relation(fields: [buildRunId], references: [id], onDelete: Cascade)
+  task                 BuildTask?              @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  replacesArtifact     StoryArtifact?          @relation("ArtifactRevisions", fields: [replacesArtifactId], references: [id], onDelete: SetNull)
+  replacementArtifacts StoryArtifact[]         @relation("ArtifactRevisions")
+  outgoingLinks        StoryArtifactLink[]     @relation("ArtifactLinkFrom")
+  incomingLinks        StoryArtifactLink[]     @relation("ArtifactLinkTo")
+  canonFacts           CanonFact[]
+  entityStates         EntityState[]
+  timelineEvents       TimelineEvent[]
+  introducedLoops      OpenLoop[]              @relation("OpenLoopIntroducedArtifact")
+  resolvedLoops        OpenLoop[]              @relation("OpenLoopResolvedArtifact")
+  setupLinks           SetupPayoffLink[]       @relation("SetupArtifact")
+  payoffLinks          SetupPayoffLink[]       @relation("PayoffArtifact")
+  plotThreads          PlotThread[]
+  evaluations          BuildEvaluationResult[]
+  bindings             StoryArtifactBinding[]
+  plannedBuildUnits    BuildManuscriptUnit[]   @relation("BuildUnitPlanArtifact")
+  exportCompilations   BuildCompilation[]      @relation("CompilationExportManifest")
+
+  @@unique([buildRunId, type, key, version])
+  @@index([projectId, type, status])
+  @@index([buildRunId, type, status])
+  @@index([taskId])
+  @@index([replacesArtifactId])
+}
+
+model StoryArtifactLink {
+  id             String   @id @default(cuid())
+  projectId      String
+  buildRunId     String
+  fromArtifactId String
+  toArtifactId   String
+  relationType   String
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  buildRun     BuildRun      @relation(fields: [buildRunId], references: [id], onDelete: Cascade)
+  fromArtifact StoryArtifact @relation("ArtifactLinkFrom", fields: [fromArtifactId], references: [id], onDelete: Cascade)
+  toArtifact   StoryArtifact @relation("ArtifactLinkTo", fields: [toArtifactId], references: [id], onDelete: Cascade)
+
+  @@unique([fromArtifactId, toArtifactId, relationType])
+  @@index([projectId, relationType])
+  @@index([buildRunId])
+  @@index([toArtifactId])
+}
+
+model CanonFact {
+  id               String          @id @default(cuid())
+  projectId        String
+  buildRunId       String
+  sourceArtifactId String?
+  sourceTaskId     String?
+  sourceUnitId     String?
+  supersedesFactId String?
+  key              String
+  version          Int             @default(1)
+  isCurrent        Boolean         @default(true)
+  subjectType      String
+  subjectId        String
+  predicate        String
+  object           Json
+  status           CanonFactStatus @default(PROPOSED)
+  validFromSceneId String?
+  validToSceneId   String?
+  validFromOrder   Int?
+  validToOrder     Int?
+  sourceChapterId  String?
+  sourceSceneId    String?
+  sourceSpan       Json?
+  confidence       Float           @default(1)
+  invalidatedAt    DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  project        Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  buildRun       BuildRun             @relation(fields: [buildRunId], references: [id], onDelete: Cascade)
+  sourceArtifact StoryArtifact?       @relation(fields: [sourceArtifactId], references: [id], onDelete: SetNull)
+  sourceTask     BuildTask?           @relation("CanonFactSourceTask", fields: [sourceTaskId], references: [id], onDelete: SetNull)
+  sourceUnit     BuildManuscriptUnit? @relation("CanonFactSourceUnit", fields: [sourceUnitId], references: [id], onDelete: SetNull)
+  supersedesFact CanonFact?           @relation("CanonFactHistory", fields: [supersedesFactId], references: [id], onDelete: SetNull)
+  supersededBy   CanonFact[]          @relation("CanonFactHistory")
+  entityStates   EntityState[]
+
+  @@unique([buildRunId, key, version])
+  @@index([projectId, subjectType, subjectId, predicate])
+  @@index([buildRunId, status])
+  @@index([sourceSceneId])
+}
+
+model EntityState {
+  id                String            @id @default(cuid())
+  projectId         String
+  buildRunId        String
+  sourceArtifactId  String?
+  sourceTaskId      String?
+  sourceUnitId      String?
+  sourceFactId      String?
+  supersedesStateId String?
+  key               String
+  version           Int               @default(1)
+  isCurrent         Boolean           @default(true)
+  entityType        String
+  entityId          String
+  stateKey          String
+  value             Json
+  status            EntityStateStatus @default(PROPOSED)
+  validFromSceneId  String?
+  validToSceneId    String?
+  validFromOrder    Int?
+  validToOrder      Int?
+  storyOrder        Int?
+  sourceSpan        Json?
+  invalidatedAt     DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  project         Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  buildRun        BuildRun             @relation(fields: [buildRunId], references: [id], onDelete: Cascade)
+  sourceArtifact  StoryArtifact?       @relation(fields: [sourceArtifactId], references: [id], onDelete: SetNull)
+  sourceTask      BuildTask?           @relation("EntityStateSourceTask", fields: [sourceTaskId], references: [id], onDelete: SetNull)
+  sourceUnit      BuildManuscriptUnit? @relation("EntityStateSourceUnit", fields: [sourceUnitId], references: [id], onDelete: SetNull)
+  sourceFact      CanonFact?           @relation(fields: [sourceFactId], references: [id], onDelete: SetNull)
+  supersedesState EntityState?         @relation("EntityStateHistory", fields: [supersedesStateId], references: [id], onDelete: SetNull)
+  supersededBy    EntityState[]        @relation("EntityStateHistory")
+
+  @@unique([buildRunId, key, version])
+  @@index([projectId, entityType, entityId, stateKey, storyOrder])
+  @@index([buildRunId, status])
+}
+
+model TimelineEvent {
+  id                String    @id @default(cuid())
+  projectId         String
+  buildRunId        String
+  sourceArtifactId  String?
+  sourceTaskId      String?
+  sourceUnitId      String?
+  supersedesEventId String?
+  key               String
+  version           Int       @default(1)
+  isCurrent         Boolean   @default(true)
+  title             String
+  description       String?
+  chronology        Json
+  sortOrder         Float?
+  chapterId         String?
+  sceneId           String?
+  dependencyIds     String[]  @default([])
+  participantRefs   Json
+  sourceSpan        Json?
+  invalidatedAt     DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  project         Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  buildRun        BuildRun             @relation(fields: [buildRunId], references: [id], onDelete: Cascade)
+  sourceArtifact  StoryArtifact?       @relation(fields: [sourceArtifactId], references: [id], onDelete: SetNull)
+  sourceTask      BuildTask?           @relation("TimelineEventSourceTask", fields: [sourceTaskId], references: [id], onDelete: SetNull)
+  sourceUnit      BuildManuscriptUnit? @relation("TimelineEventSourceUnit", fields: [sourceUnitId], references: [id], onDelete: SetNull)
+  supersedesEvent TimelineEvent?       @relation("TimelineEventHistory", fields: [supersedesEventId], references: [id], onDelete: SetNull)
+  supersededBy    TimelineEvent[]      @relation("TimelineEventHistory")
+
+  @@unique([buildRunId, key, version])
+  @@index([projectId, sortOrder])
+  @@index([buildRunId, sceneId])
+}
+
+model OpenLoop {
+  id                   String         @id @default(cuid())
+  projectId            String
+  buildRunId           String
+  sourceTaskId         String?
+  sourceUnitId         String?
+  supersedesLoopId     String?
+  key                  String
+  version              Int            @default(1)
+  isCurrent            Boolean        @default(true)
+  kind                 OpenLoopKind
+  status               OpenLoopStatus @default(OPEN)
+  title                String
+  description          String
+  introducedSceneId    String?
+  resolvedSceneId      String?
+  introducedArtifactId String?
+  resolvedArtifactId   String?
+  targetPayoff         String?
+  metadata             Json?
+  invalidatedAt        DateTime?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  project            Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  buildRun           BuildRun             @relation(fields: [buildRunId], references: [id], onDelete: Cascade)
+  introducedArtifact StoryArtifact?       @relation("OpenLoopIntroducedArtifact", fields: [introducedArtifactId], references: [id], onDelete: SetNull)
+  resolvedArtifact   StoryArtifact?       @relation("OpenLoopResolvedArtifact", fields: [resolvedArtifactId], references: [id], onDelete: SetNull)
+  sourceTask         BuildTask?           @relation("OpenLoopSourceTask", fields: [sourceTaskId], references: [id], onDelete: SetNull)
+  sourceUnit         BuildManuscriptUnit? @relation("OpenLoopSourceUnit", fields: [sourceUnitId], references: [id], onDelete: SetNull)
+  supersedesLoop     OpenLoop?            @relation("OpenLoopHistory", fields: [supersedesLoopId], references: [id], onDelete: SetNull)
+  supersededBy       OpenLoop[]           @relation("OpenLoopHistory")
+
+  @@unique([buildRunId, key, version])
+  @@index([projectId, kind, status])
+  @@index([buildRunId, status])
+}
+
+model SetupPayoffLink {
+  id                    String            @id @default(cuid())
+  projectId             String
+  buildRunId            String
+  sourceTaskId          String?
+  sourceUnitId          String?
+  supersedesLinkId      String?
+  plotThreadId          String?
+  key                   String
+  version               Int               @default(1)
+  isCurrent             Boolean           @default(true)
+  title                 String
+  description           String
+  status                SetupPayoffStatus @default(PLANNED)
+  setupSceneId          String?
+  payoffSceneId         String?
+  reinforcementSceneIds String[]          @default([])
+  setupArtifactId       String?
+  payoffArtifactId      String?
+  metadata              Json?
+  invalidatedAt         DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  project        Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  buildRun       BuildRun             @relation(fields: [buildRunId], references: [id], onDelete: Cascade)
+  plotThread     PlotThread?          @relation(fields: [plotThreadId], references: [id], onDelete: SetNull)
+  setupArtifact  StoryArtifact?       @relation("SetupArtifact", fields: [setupArtifactId], references: [id], onDelete: SetNull)
+  payoffArtifact StoryArtifact?       @relation("PayoffArtifact", fields: [payoffArtifactId], references: [id], onDelete: SetNull)
+  sourceTask     BuildTask?           @relation("SetupPayoffSourceTask", fields: [sourceTaskId], references: [id], onDelete: SetNull)
+  sourceUnit     BuildManuscriptUnit? @relation("SetupPayoffSourceUnit", fields: [sourceUnitId], references: [id], onDelete: SetNull)
+  supersedesLink SetupPayoffLink?     @relation("SetupPayoffHistory", fields: [supersedesLinkId], references: [id], onDelete: SetNull)
+  supersededBy   SetupPayoffLink[]    @relation("SetupPayoffHistory")
+
+  @@unique([buildRunId, key, version])
+  @@index([projectId, status])
+  @@index([buildRunId, plotThreadId])
+}
+
+model PlotThread {
+  id                 String           @id @default(cuid())
+  projectId          String
+  buildRunId         String
+  sourceArtifactId   String?
+  sourceTaskId       String?
+  sourceUnitId       String?
+  supersedesThreadId String?
+  parentThreadId     String?
+  key                String
+  version            Int              @default(1)
+  isCurrent          Boolean          @default(true)
+  title              String
+  kind               PlotThreadKind
+  status             PlotThreadStatus @default(PLANNED)
+  summary            String
+  stakes             String?
+  sceneIds           String[]         @default([])
+  introducedSceneId  String?
+  resolvedSceneId    String?
+  metadata           Json?
+  invalidatedAt      DateTime?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  project          Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  buildRun         BuildRun             @relation(fields: [buildRunId], references: [id], onDelete: Cascade)
+  sourceArtifact   StoryArtifact?       @relation(fields: [sourceArtifactId], references: [id], onDelete: SetNull)
+  sourceTask       BuildTask?           @relation("PlotThreadSourceTask", fields: [sourceTaskId], references: [id], onDelete: SetNull)
+  sourceUnit       BuildManuscriptUnit? @relation("PlotThreadSourceUnit", fields: [sourceUnitId], references: [id], onDelete: SetNull)
+  supersedesThread PlotThread?          @relation("PlotThreadHistory", fields: [supersedesThreadId], references: [id], onDelete: SetNull)
+  supersededBy     PlotThread[]         @relation("PlotThreadHistory")
+  parentThread     PlotThread?          @relation("PlotThreadHierarchy", fields: [parentThreadId], references: [id], onDelete: SetNull)
+  childThreads     PlotThread[]         @relation("PlotThreadHierarchy")
+  setupPayoffs     SetupPayoffLink[]
+
+  @@unique([buildRunId, key, version])
+  @@index([projectId, kind, status])
+  @@index([buildRunId, parentThreadId])
+}
+
+model BuildCheckpoint {
+  id             String   @id @default(cuid())
+  projectId      String
+  buildRunId     String
+  taskId         String?
+  idempotencyKey String
+  requestHash    String   @default("")
+  createdById    String?
+  sequence       Int
+  label          String
+  phase          String
+  stateSnapshot  Json
+  contentHash    String
+  createdAt      DateTime @default(now())
+
+  project      Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  buildRun     BuildRun           @relation(fields: [buildRunId], references: [id], onDelete: Cascade)
+  task         BuildTask?         @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  createdBy    User?              @relation("BuildCheckpointCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  directives   BuildDirective[]
+  compilations BuildCompilation[]
+  reviews      BuildReview[]
+
+  @@unique([buildRunId, sequence])
+  @@unique([buildRunId, idempotencyKey])
+  @@index([projectId, createdAt])
+  @@index([taskId])
+}
+
+model BuildTrace {
+  id                   String           @id @default(cuid())
+  projectId            String
+  buildRunId           String
+  taskId               String?
+  idempotencyKey       String
+  requestHash          String           @default("")
+  finishRequestHash    String?
+  attempt              Int
+  status               BuildTraceStatus
+  provider             String?
+  model                String?
+  modelParameters      Json?
+  workflowVersion      String
+  systemPromptVersion  String?
+  skillVersions        Json
+  toolSchemaVersions   Json
+  inputs               Json
+  retrievedArtifactIds String[]         @default([])
+  contextTokenCount    Int?
+  toolCalls            Json
+  toolResults          Json
+  outputs              Json
+  validatorResults     Json
+  inputTokens          Int?
+  outputTokens         Int?
+  costMicros           Int?
+  latencyMs            Int?
+  retries              Int              @default(0)
+  completionState      String?
+  error                String?
+  startedAt            DateTime         @default(now())
+  completedAt          DateTime?
+
+  project  Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  buildRun BuildRun   @relation(fields: [buildRunId], references: [id], onDelete: Cascade)
+  task     BuildTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@unique([buildRunId, idempotencyKey])
+  @@index([projectId, startedAt])
+  @@index([buildRunId, taskId, attempt])
+}
+
+model BuildEvaluationResult {
+  id             String              @id @default(cuid())
+  projectId      String
+  buildRunId     String
+  taskId         String?
+  artifactId     String?
+  idempotencyKey String
+  requestHash    String              @default("")
+  kind           BuildEvaluationKind
+  rubric         String
+  rubricVersion  String
+  scores         Json
+  checks         Json
+  passed         Boolean
+  threshold      Float?
+  feedback       String?
+  evidence       Json?
+  createdAt      DateTime            @default(now())
+
+  project  Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  buildRun BuildRun       @relation(fields: [buildRunId], references: [id], onDelete: Cascade)
+  task     BuildTask?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  artifact StoryArtifact? @relation(fields: [artifactId], references: [id], onDelete: SetNull)
+
+  @@unique([buildRunId, idempotencyKey])
+  @@index([projectId, createdAt])
+  @@index([buildRunId, taskId])
+  @@index([artifactId])
+}
+
+model BuildOperationReceipt {
+  id             String   @id @default(cuid())
+  buildRunId     String
+  operation      String
+  idempotencyKey String
+  requestHash    String
+  response       Json
+  createdAt      DateTime @default(now())
+
+  buildRun BuildRun @relation(fields: [buildRunId], references: [id], onDelete: Cascade)
+
+  @@unique([buildRunId, idempotencyKey])
+  @@index([buildRunId, operation, createdAt])
+}
+
+model BuildDirective {
+  id                String   @id @default(cuid())
+  projectId         String
+  buildRunId        String
+  fromTaskId        String
+  checkpointId      String?
+  createdById       String?
+  idempotencyKey    String
+  directive         String
+  pinnedArtifactIds String[] @default([])
+  createdAt         DateTime @default(now())
+
+  project    Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  buildRun   BuildRun         @relation(fields: [buildRunId], references: [id], onDelete: Cascade)
+  fromTask   BuildTask        @relation(fields: [fromTaskId], references: [id], onDelete: Cascade)
+  checkpoint BuildCheckpoint? @relation(fields: [checkpointId], references: [id], onDelete: SetNull)
+  createdBy  User?            @relation("BuildDirectiveCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([buildRunId, idempotencyKey])
+  @@index([projectId, createdAt])
+  @@index([buildRunId, createdAt])
+  @@index([fromTaskId])
+  @@index([checkpointId])
+}
+
+model BuildManuscriptUnit {
+  id              String                    @id @default(cuid())
+  projectId       String
+  buildRunId      String
+  sourceTaskId    String?
+  planArtifactId  String?
+  parentUnitId    String?
+  sourceChapterId String?
+  sourceSceneId   String?
+  writingId       String                    @unique
+  branchId        String                    @unique
+  kind            BuildManuscriptUnitKind
+  status          BuildManuscriptUnitStatus @default(PLANNED)
+  key             String
+  containerKey    String
+  order           Int
+  chapterNumber   Int?
+  title           String
+  povCharacterId  String?
+  locationId      String?
+  storyDate       String?
+  storyTime       String?
+  tension         Float?
+  metadata        Json
+  revision        Int                       @default(0)
+  invalidatedAt   DateTime?
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+
+  project          Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  buildRun         BuildRun               @relation(fields: [buildRunId], references: [id], onDelete: Cascade)
+  sourceTask       BuildTask?             @relation("BuildUnitSourceTask", fields: [sourceTaskId], references: [id], onDelete: SetNull)
+  planArtifact     StoryArtifact?         @relation("BuildUnitPlanArtifact", fields: [planArtifactId], references: [id], onDelete: SetNull)
+  parentUnit       BuildManuscriptUnit?   @relation("BuildUnitTree", fields: [parentUnitId], references: [id], onDelete: Cascade)
+  childUnits       BuildManuscriptUnit[]  @relation("BuildUnitTree")
+  sourceChapter    Chapter?               @relation("BuildUnitSourceChapter", fields: [sourceChapterId], references: [id], onDelete: SetNull)
+  sourceScene      Scene?                 @relation("BuildUnitSourceScene", fields: [sourceSceneId], references: [id], onDelete: SetNull)
+  writing          Writing                @relation("BuildUnitWriting", fields: [writingId], references: [id], onDelete: Cascade)
+  branch           WritingBranch          @relation("BuildUnitBranch", fields: [branchId], references: [id], onDelete: Cascade)
+  povCharacter     Character?             @relation("BuildUnitPovCharacter", fields: [povCharacterId], references: [id], onDelete: SetNull)
+  location         Location?              @relation("BuildUnitLocation", fields: [locationId], references: [id], onDelete: SetNull)
+  bindings         StoryArtifactBinding[]
+  compilationUnits BuildCompilationUnit[]
+  reviewUnits      BuildReviewUnit[]
+  canonFacts       CanonFact[]            @relation("CanonFactSourceUnit")
+  entityStates     EntityState[]          @relation("EntityStateSourceUnit")
+  timelineEvents   TimelineEvent[]        @relation("TimelineEventSourceUnit")
+  openLoops        OpenLoop[]             @relation("OpenLoopSourceUnit")
+  setupPayoffs     SetupPayoffLink[]      @relation("SetupPayoffSourceUnit")
+  plotThreads      PlotThread[]           @relation("PlotThreadSourceUnit")
+
+  @@unique([buildRunId, kind, key])
+  @@unique([buildRunId, kind, containerKey, order])
+  @@index([projectId, kind, order])
+  @@index([buildRunId, parentUnitId, order])
+  @@index([sourceTaskId])
+  @@index([planArtifactId])
+}
+
+model StoryArtifactBinding {
+  id          String                   @id @default(cuid())
+  projectId   String
+  buildRunId  String
+  artifactId  String
+  taskId      String?
+  unitId      String?
+  bindingKind StoryArtifactBindingKind
+  entityType  String?
+  entityId    String?
+  role        String
+  createdAt   DateTime                 @default(now())
+
+  project  Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  buildRun BuildRun             @relation(fields: [buildRunId], references: [id], onDelete: Cascade)
+  artifact StoryArtifact        @relation(fields: [artifactId], references: [id], onDelete: Cascade)
+  task     BuildTask?           @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  unit     BuildManuscriptUnit? @relation(fields: [unitId], references: [id], onDelete: Cascade)
+
+  @@unique([artifactId, bindingKind, role, unitId, entityType, entityId])
+  @@index([projectId, entityType, entityId])
+  @@index([buildRunId, bindingKind])
+  @@index([unitId])
+  @@index([taskId])
+}
+
+model BuildCompilation {
+  id                       String   @id @default(cuid())
+  projectId                String
+  buildRunId               String
+  checkpointId             String?
+  exportManifestArtifactId String?
+  idempotencyKey           String
+  requestHash              String
+  manifest                 Json
+  totalWordCount           Int
+  contentHash              String
+  createdAt                DateTime @default(now())
+
+  project                Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  buildRun               BuildRun               @relation(fields: [buildRunId], references: [id], onDelete: Cascade)
+  checkpoint             BuildCheckpoint?       @relation(fields: [checkpointId], references: [id], onDelete: SetNull)
+  exportManifestArtifact StoryArtifact?         @relation("CompilationExportManifest", fields: [exportManifestArtifactId], references: [id], onDelete: SetNull)
+  units                  BuildCompilationUnit[]
+  reviews                BuildReview[]
+  exports                ProjectExport[]
+
+  @@unique([buildRunId, idempotencyKey])
+  @@index([projectId, createdAt])
+  @@index([buildRunId, createdAt])
+}
+
+model BuildCompilationUnit {
+  id               String @id @default(cuid())
+  compilationId    String
+  unitId           String
+  writingVersionId String
+  order            Int
+  wordCount        Int
+  contentHash      String
+
+  compilation    BuildCompilation    @relation(fields: [compilationId], references: [id], onDelete: Cascade)
+  unit           BuildManuscriptUnit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  writingVersion WritingVersion      @relation("CompilationWritingVersion", fields: [writingVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([compilationId, unitId])
+  @@index([unitId])
+  @@index([writingVersionId])
+}
+
+model BuildReview {
+  id              String            @id @default(cuid())
+  projectId       String
+  buildRunId      String
+  compilationId   String
+  checkpointId    String?
+  createdById     String?
+  approvedById    String?
+  mergedById      String?
+  title           String
+  message         String?
+  status          BuildReviewStatus @default(OPEN)
+  revision        Int               @default(0)
+  approvedAt      DateTime?
+  mergedAt        DateTime?
+  rejectedAt      DateTime?
+  rejectionReason String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  project     Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  buildRun    BuildRun          @relation(fields: [buildRunId], references: [id], onDelete: Cascade)
+  compilation BuildCompilation  @relation(fields: [compilationId], references: [id], onDelete: Restrict)
+  checkpoint  BuildCheckpoint?  @relation(fields: [checkpointId], references: [id], onDelete: SetNull)
+  createdBy   User?             @relation("BuildReviewCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  approvedBy  User?             @relation("BuildReviewApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  mergedBy    User?             @relation("BuildReviewMergedBy", fields: [mergedById], references: [id], onDelete: SetNull)
+  units       BuildReviewUnit[]
+
+  @@index([projectId, status, createdAt])
+  @@index([buildRunId, status])
+}
+
+model BuildReviewUnit {
+  id                        String                @id @default(cuid())
+  reviewId                  String
+  unitId                    String
+  action                    BuildReviewUnitAction
+  targetChapterId           String?
+  targetSceneId             String?
+  expectedMainHeadVersionId String?
+  sourceBuildVersionId      String
+  reviewedUnitRevision      Int                   @default(0)
+  reviewedUnitSnapshot      Json                  @default("{}")
+  reviewedUnitSnapshotHash  String                @default("")
+  reviewedContentHash       String                @default("")
+  resultMainVersionId       String?
+  order                     Int
+
+  review                  BuildReview         @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  unit                    BuildManuscriptUnit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  targetChapter           Chapter?            @relation(fields: [targetChapterId], references: [id], onDelete: SetNull)
+  targetScene             Scene?              @relation(fields: [targetSceneId], references: [id], onDelete: SetNull)
+  expectedMainHeadVersion WritingVersion?     @relation("ReviewExpectedMainVersion", fields: [expectedMainHeadVersionId], references: [id], onDelete: SetNull)
+  sourceBuildVersion      WritingVersion      @relation("ReviewSourceBuildVersion", fields: [sourceBuildVersionId], references: [id], onDelete: Restrict)
+  resultMainVersion       WritingVersion?     @relation("ReviewResultMainVersion", fields: [resultMainVersionId], references: [id], onDelete: SetNull)
+
+  @@unique([reviewId, unitId])
+  @@index([targetChapterId])
+  @@index([targetSceneId])
+}
+
+model ProjectExport {
+  id                String              @id @default(cuid())
+  projectId         String
+  buildRunId        String?
+  compilationId     String?
+  assetId           String?             @unique
+  requestedById     String?
+  regeneratedFromId String?
+  idempotencyKey    String
+  requestHash       String
+  target            ProjectExportTarget
+  format            ProjectExportFormat
+  preset            ProjectExportPreset
+  status            ProjectExportStatus @default(PENDING)
+  filename          String
+  mimeType          String?
+  checksum          String?
+  sizeBytes         BigInt?
+  options           Json
+  provenance        Json
+  branchHeads       Json
+  error             String?
+  generatedAt       DateTime?
+  deletedAt         DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  project         Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  buildRun        BuildRun?         @relation(fields: [buildRunId], references: [id], onDelete: Cascade)
+  compilation     BuildCompilation? @relation(fields: [compilationId], references: [id], onDelete: SetNull)
+  asset           Asset?            @relation("ProjectExportAsset", fields: [assetId], references: [id], onDelete: SetNull)
+  requestedBy     User?             @relation("ProjectExportRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+  regeneratedFrom ProjectExport?    @relation("ProjectExportRegeneration", fields: [regeneratedFromId], references: [id], onDelete: SetNull)
+  regenerations   ProjectExport[]   @relation("ProjectExportRegeneration")
+
+  @@unique([projectId, idempotencyKey])
+  @@index([projectId, status, createdAt])
+  @@index([buildRunId, compilationId])
+  @@index([requestedById])
+  @@index([regeneratedFromId])
+}
+
+model ProjectImport {
+  id                  String              @id @default(cuid())
+  projectId           String
+  assetId             String?             @unique
+  createdById         String?
+  idempotencyKey      String
+  applyIdempotencyKey String?
+  requestHash         String
+  format              ProjectImportFormat
+  status              ProjectImportStatus @default(PREVIEWED)
+  filename            String
+  mimeType            String
+  checksum            String
+  sizeBytes           BigInt
+  preview             Json
+  conflicts           Json
+  sourceMetadata      Json
+  applyResult         Json?
+  error               String?
+  expiresAt           DateTime
+  appliedAt           DateTime?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  asset     Asset?  @relation("ProjectImportAsset", fields: [assetId], references: [id], onDelete: SetNull)
+  createdBy User?   @relation("ProjectImportCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, idempotencyKey])
+  @@index([projectId, status, createdAt])
+  @@index([createdById])
+  @@index([expiresAt])
+}
+
+model NamedSnapshot {
+  id              String             @id @default(cuid())
+  projectId       String
+  createdById     String?
+  idempotencyKey  String
+  requestHash     String
+  label           String
+  message         String?
+  scope           NamedSnapshotScope
+  chapterId       String?
+  sceneId         String?
+  projectDocId    String?
+  writingId       String?
+  buildRunId      String?
+  checkpointId    String?
+  compilationId   String?
+  heads           Json
+  structuredState Json
+  contentHash     String
+  sizeBytes       Int
+  createdAt       DateTime           @default(now())
+  deletedAt       DateTime?
+
+  project    Project                    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy  User?                      @relation("NamedSnapshotCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  operations SnapshotOperationReceipt[]
+
+  @@unique([projectId, idempotencyKey])
+  @@index([projectId, scope, createdAt])
+  @@index([buildRunId, checkpointId])
+  @@index([chapterId])
+  @@index([sceneId])
+  @@index([writingId])
+}
+
+model WritingAnnotationThread {
+  id                     String                  @id @default(cuid())
+  projectId              String
+  writingId              String
+  branchId               String
+  anchorVersionId        String
+  authorId               String?
+  resolvedById           String?
+  acceptedVersionId      String?
+  chapterId              String?
+  sceneId                String?
+  idempotencyKey         String
+  requestHash            String
+  kind                   WritingAnnotationKind
+  status                 WritingAnnotationStatus @default(OPEN)
+  revision               Int                     @default(0)
+  startOffset            Int
+  endOffset              Int
+  quote                  String
+  anchorHash             String
+  body                   String
+  suggestedReplacement   String?
+  decisionIdempotencyKey String?
+  decisionRequestHash    String?
+  resolvedAt             DateTime?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+
+  project         Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  writing         Writing                  @relation(fields: [writingId], references: [id], onDelete: Cascade)
+  branch          WritingBranch            @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  anchorVersion   WritingVersion           @relation("AnnotationAnchorVersion", fields: [anchorVersionId], references: [id], onDelete: Cascade)
+  acceptedVersion WritingVersion?          @relation("AnnotationAcceptedVersion", fields: [acceptedVersionId], references: [id], onDelete: SetNull)
+  author          User?                    @relation("WritingAnnotationAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  resolvedBy      User?                    @relation("WritingAnnotationResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+  replies         WritingAnnotationReply[]
+
+  @@unique([projectId, idempotencyKey])
+  @@index([projectId, status, updatedAt])
+  @@index([writingId, status, startOffset])
+  @@index([chapterId, status])
+  @@index([sceneId, status])
+  @@index([branchId, anchorVersionId])
+}
+
+model WritingAnnotationReply {
+  id             String   @id @default(cuid())
+  threadId       String
+  authorId       String?
+  idempotencyKey String
+  requestHash    String
+  body           String
+  createdAt      DateTime @default(now())
+
+  thread WritingAnnotationThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  author User?                   @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@unique([threadId, idempotencyKey])
+  @@index([threadId, createdAt])
+}
+
+model RenameRefactorReceipt {
+  id             String   @id @default(cuid())
+  projectId      String
+  idempotencyKey String
+  requestHash    String
+  targetType     String
+  targetId       String
+  result         Json
+  createdAt      DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, idempotencyKey])
+  @@index([projectId, targetType, targetId])
+}
+
+model SnapshotOperationReceipt {
+  id             String   @id @default(cuid())
+  snapshotId     String
+  idempotencyKey String
+  requestHash    String
+  operation      String
+  result         Json
+  createdAt      DateTime @default(now())
+
+  snapshot NamedSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, idempotencyKey])
 }

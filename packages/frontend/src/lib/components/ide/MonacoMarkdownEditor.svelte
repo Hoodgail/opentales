@@ -12,6 +12,12 @@
   } from '$lib/stores/collaboration.svelte';
   import { preferences } from '$lib/stores/preferences.svelte';
   import { editorTheme, editorThemes, type EditorThemeId } from '$lib/stores/editorTheme.svelte';
+  import {
+    clampEditorRange,
+    markerAtOffset,
+    type EditorAnnotationMarker,
+    type EditorTextSelection
+  } from '$lib/editor-annotations';
   import { viewport } from '$lib/stores/viewport.svelte';
 
   type Monaco = typeof import('monaco-editor');
@@ -21,20 +27,39 @@
     value: string;
     onChange: (next: string) => void;
     onSelectionChange?: (selectedText: string) => void;
+    onSelectionRangeChange?: (selection: EditorTextSelection | null) => void;
+    annotations?: EditorAnnotationMarker[];
+    activeAnnotationId?: string | null;
+    onAnnotationActivate?: (id: string) => void;
+    revealOffset?: { start: number; end: number; nonce?: number } | null;
+    nativeSpellcheck?: boolean;
     collaboration?: CollaborationDocumentRef;
     collaborationLocation?: CollaborationLocation | null;
     language?: string;
     compact?: boolean;
+    reveal?: {
+      line: number;
+      endLine?: number;
+      column?: number;
+      nonce?: number;
+    } | null;
   }
 
   let {
     value,
     onChange,
     onSelectionChange,
+    onSelectionRangeChange,
+    annotations = [],
+    activeAnnotationId = null,
+    onAnnotationActivate,
+    revealOffset = null,
+    nativeSpellcheck = true,
     collaboration,
     collaborationLocation,
     language = 'markdown',
-    compact = false
+    compact = false,
+    reveal = null
   }: Props = $props();
 
   function monacoThemeFor(id: EditorThemeId): string {
@@ -168,6 +193,54 @@
   let collaborationKey: string | null = null;
   let focusDecorations: import('monaco-editor').editor.IEditorDecorationsCollection | null = null;
   let remoteCursorDecorations: import('monaco-editor').editor.IEditorDecorationsCollection | null = null;
+  let annotationDecorations: import('monaco-editor').editor.IEditorDecorationsCollection | null = null;
+  let lastRevealKey = '';
+  let lastOffsetRevealKey = '';
+
+  $effect(() => {
+    if (!editor || !reveal) return;
+    const line = Math.max(1, reveal.line);
+    const model = editor.getModel();
+    if (!model) return;
+    const endLine = Math.min(model.getLineCount(), Math.max(line, reveal.endLine ?? line));
+    const key = `${line}:${reveal.endLine ?? line}:${reveal.column ?? 1}:${reveal.nonce ?? 0}`;
+    if (key === lastRevealKey) return;
+    lastRevealKey = key;
+    editor.setSelection({
+      startLineNumber: line,
+      startColumn: Math.max(1, reveal.column ?? 1),
+      endLineNumber: endLine,
+      endColumn: model.getLineMaxColumn(endLine)
+    });
+    editor.revealLineInCenter(line);
+    editor.focus();
+  });
+
+  $effect(() => {
+    if (!editor || !revealOffset) return;
+    const model = editor.getModel();
+    if (!model) return;
+    const range = clampEditorRange(model.getValueLength(), revealOffset);
+    if (!range) return;
+    const key = `${range.start}:${range.end}:${revealOffset.nonce ?? 0}`;
+    if (key === lastOffsetRevealKey) return;
+    lastOffsetRevealKey = key;
+    const start = model.getPositionAt(range.start);
+    const end = model.getPositionAt(range.end);
+    editor.setSelection({
+      startLineNumber: start.lineNumber,
+      startColumn: start.column,
+      endLineNumber: end.lineNumber,
+      endColumn: end.column
+    });
+    editor.revealRangeInCenter({
+      startLineNumber: start.lineNumber,
+      startColumn: start.column,
+      endLineNumber: end.lineNumber,
+      endColumn: end.column
+    });
+    editor.focus();
+  });
 
   onMount(() => {
     if (!browser) return;
@@ -248,6 +321,8 @@
 
       focusDecorations = editor.createDecorationsCollection([]);
       remoteCursorDecorations = editor.createDecorationsCollection([]);
+      annotationDecorations = editor.createDecorationsCollection([]);
+      applyNativeSpellcheck();
 
       editor.onDidChangeModelContent((event) => {
         if (suppressNext) {
@@ -265,18 +340,34 @@
 
       // Track text selection changes and report to parent
       editor.onDidChangeCursorSelection(() => {
-        if (!editor || !onSelectionChange) return;
+        if (!editor || (!onSelectionChange && !onSelectionRangeChange)) return;
         const selection = editor.getSelection();
         if (!selection || selection.isEmpty()) {
-          onSelectionChange('');
+          onSelectionChange?.('');
+          onSelectionRangeChange?.(null);
           return;
         }
         const model = editor.getModel();
         if (!model) return;
-        onSelectionChange(model.getValueInRange(selection));
+        const quote = model.getValueInRange(selection);
+        onSelectionChange?.(quote);
+        onSelectionRangeChange?.({
+          start: model.getOffsetAt(selection.getStartPosition()),
+          end: model.getOffsetAt(selection.getEndPosition()),
+          quote
+        });
+      });
+
+      editor.onMouseDown((event) => {
+        if (!editor || !event.target.position || !onAnnotationActivate) return;
+        const model = editor.getModel();
+        if (!model) return;
+        const marker = markerAtOffset(annotations, model.getOffsetAt(event.target.position));
+        if (marker) onAnnotationActivate(marker.id);
       });
 
       updateFocusDecorations();
+      updateAnnotationDecorations();
     })();
 
     return () => {
@@ -296,6 +387,18 @@
       suppressCollaboration = false;
     }
     updateFocusDecorations();
+    updateAnnotationDecorations();
+  });
+
+  $effect(() => {
+    void annotations;
+    void activeAnnotationId;
+    updateAnnotationDecorations();
+  });
+
+  $effect(() => {
+    void nativeSpellcheck;
+    applyNativeSpellcheck();
   });
 
   $effect(() => {
@@ -434,6 +537,35 @@
     focusDecorations.set(decorations);
   }
 
+  function updateAnnotationDecorations() {
+    if (!editor || !monaco || !annotationDecorations) return;
+    const model = editor.getModel();
+    if (!model) return;
+    annotationDecorations.set(annotations.flatMap((marker) => {
+      const range = clampEditorRange(model.getValueLength(), marker);
+      if (!range) return [];
+      const start = model.getPositionAt(range.start);
+      const end = model.getPositionAt(range.end);
+      return [{
+        range: new monaco!.Range(start.lineNumber, start.column, end.lineNumber, end.column),
+        options: {
+          inlineClassName: `opentales-annotation opentales-annotation-${marker.kind}${marker.id === activeAnnotationId ? ' opentales-annotation-active' : ''}`,
+          hoverMessage: marker.label ? { value: marker.label } : undefined,
+          stickiness: monaco!.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges
+        }
+      }];
+    }));
+  }
+
+  function applyNativeSpellcheck() {
+    const input = editor?.getDomNode()?.querySelector<HTMLTextAreaElement>('textarea.inputarea');
+    if (!input) return;
+    input.spellcheck = nativeSpellcheck;
+    input.setAttribute('spellcheck', nativeSpellcheck ? 'true' : 'false');
+    input.setAttribute('autocapitalize', nativeSpellcheck ? 'sentences' : 'off');
+    input.setAttribute('autocorrect', nativeSpellcheck ? 'on' : 'off');
+  }
+
   function updateRemoteCursors() {
     if (!editor || !monaco || !remoteCursorDecorations || !collaboration) return;
     const decorations = collaborationStore.collaborators
@@ -469,6 +601,7 @@
     disposing = true;
     sendCollaborationPresence(false);
     unsubscribeCollaboration?.();
+    annotationDecorations?.clear();
     editor?.dispose();
     editor = null;
   });
@@ -545,4 +678,25 @@
   :global(.opentales-remote-cursor-3) { border-left-color: #fbbf24; }
   :global(.opentales-remote-cursor-4) { border-left-color: #a78bfa; }
   :global(.opentales-remote-cursor-5) { border-left-color: #fb7185; }
+
+  :global(.opentales-annotation) {
+    border-bottom: 2px solid color-mix(in oklch, var(--accent) 75%, transparent);
+    background: color-mix(in oklch, var(--accent) 10%, transparent);
+    cursor: pointer;
+  }
+
+  :global(.opentales-annotation-note) {
+    border-bottom-color: #60a5fa;
+    background: color-mix(in oklch, #60a5fa 10%, transparent);
+  }
+
+  :global(.opentales-annotation-suggestion) {
+    border-bottom-color: #34d399;
+    background: color-mix(in oklch, #34d399 10%, transparent);
+  }
+
+  :global(.opentales-annotation-active) {
+    outline: 1px solid color-mix(in oklch, var(--accent) 80%, transparent);
+    background: color-mix(in oklch, var(--accent) 22%, transparent);
+  }
 </style>

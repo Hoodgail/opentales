@@ -16,7 +16,7 @@ export function listCharactersTool(prisma: PrismaClient, context: ToolContext) {
           orderBy: { createdAt: 'asc' },
           skip: page.offset,
           take: page.limit,
-          select: { id: true, name: true, role: true, traits: true }
+          select: { id: true, name: true, aliases: true, role: true, traits: true }
         })
       ]);
       return paginatedResult(items, total, page.page, page.limit);

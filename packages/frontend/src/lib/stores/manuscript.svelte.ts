@@ -10,6 +10,7 @@ import {
   type CreateLocationInput,
   type CreateObstacleInput,
   type CreateProjectInput,
+  type CreateSceneInput,
   type ManuscriptProject,
   type MembersAndInvites,
   type OrgMember,
@@ -21,16 +22,21 @@ import {
   type SubmissionCommentAnchor,
   type SubmissionDetail,
   type SubmissionSummary,
+  type Scene,
   type TrashItem,
   type ProjectStats,
   type UpdateChapterInput,
   type UpdateCharacterInput,
   type UpdateLocationInput,
   type UpdateObstacleInput,
-  type UpdateProjectInput
+  type UpdateProjectInput,
+  type UpdateSceneInput
 } from '@opentales/sdk';
-import { syncAiToken } from '$lib/stores/ai.svelte';
+import { syncAiProjectContext, syncAiToken } from '$lib/stores/ai.svelte';
 import { syncCollaborationToken } from '$lib/stores/collaboration.svelte';
+import { storyIde, syncStoryIdeToken } from '$lib/stores/storyIde.svelte';
+import { exportImport, syncExportImportToken } from '$lib/stores/exportImport.svelte';
+import { revisions, syncRevisionsToken } from '$lib/stores/revisions.svelte';
 import type {
   Act,
   ActivityView,
@@ -162,9 +168,17 @@ function createStore() {
   const tabs = $state<OpenTab[]>([]);
   let activeTabId = $state<string | null>(null);
   let selectedId = $state<string | null>(null);
+  let navigationTarget = $state<{
+    chapterId: string;
+    line: number;
+    endLine?: number;
+    column?: number;
+    nonce: number;
+  } | null>(null);
   const pendingEntityVersions = new Map<string, number>();
   const patchTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const pendingPatchInputs = new Map<string, Record<string, unknown>>();
+  const inFlightPatchPromises = new Map<string, Promise<void>>();
   const AUTOSAVE_DELAY_MS = 900;
 
   function nextEntityVersion(key: string): number {
@@ -208,8 +222,12 @@ function createStore() {
         patchTimers.delete(key);
         const queued = (pendingPatchInputs.get(key) ?? {}) as T;
         pendingPatchInputs.delete(key);
-        void persist(async () => {
+        const running = persist(async () => {
           await persistPatch(queued, version);
+        });
+        inFlightPatchPromises.set(key, running);
+        void running.finally(() => {
+          if (inFlightPatchPromises.get(key) === running) inFlightPatchPromises.delete(key);
         });
       }, AUTOSAVE_DELAY_MS)
     );
@@ -231,11 +249,16 @@ function createStore() {
       browserLocalStorage().setItem('opentales.token', session.token);
       syncAiToken(session.token);
       syncCollaborationToken(session.token);
+      syncStoryIdeToken(session.token);
+      syncExportImportToken(session.token);
+      syncRevisionsToken(session.token);
       authenticated = true;
       await loadProject();
     } catch (caught) {
       authenticated = false;
       api.setToken(undefined);
+      syncStoryIdeToken(undefined);
+      syncExportImportToken(undefined);
       browserLocalStorage().removeItem('opentales.token');
       error = caught instanceof Error ? caught.message : 'Login failed';
     } finally {
@@ -257,11 +280,16 @@ function createStore() {
       browserLocalStorage().setItem('opentales.token', session.token);
       syncAiToken(session.token);
       syncCollaborationToken(session.token);
+      syncStoryIdeToken(session.token);
+      syncExportImportToken(session.token);
+      syncRevisionsToken(session.token);
       authenticated = true;
       await loadProject();
     } catch (caught) {
       authenticated = false;
       api.setToken(undefined);
+      syncStoryIdeToken(undefined);
+      syncExportImportToken(undefined);
       browserLocalStorage().removeItem('opentales.token');
       error = caught instanceof Error ? caught.message : 'Registration failed';
     } finally {
@@ -273,6 +301,9 @@ function createStore() {
     api.setToken(undefined);
     syncAiToken(undefined);
     syncCollaborationToken(undefined);
+    syncStoryIdeToken(undefined);
+    syncExportImportToken(undefined);
+    syncRevisionsToken(undefined);
     browserLocalStorage().removeItem('opentales.token');
     authenticated = false;
     error = null;
@@ -334,6 +365,14 @@ function createStore() {
   }
 
   function clearProject() {
+    syncAiProjectContext(null);
+    storyIde.reset();
+    exportImport.reset();
+    revisions.reset();
+    for (const timer of patchTimers.values()) clearTimeout(timer);
+    patchTimers.clear();
+    pendingPatchInputs.clear();
+    pendingEntityVersions.clear();
     projectId.value = null;
     characters.splice(0, characters.length);
     locations.splice(0, locations.length);
@@ -364,6 +403,7 @@ function createStore() {
 
   async function switchProject(id: string) {
     if (id === projectId.value) return;
+    syncAiProjectContext(id);
     membersLoaded = false;
     submissionsLoaded = false;
     trashLoaded = false;
@@ -699,6 +739,28 @@ function createStore() {
     selectedId = id;
   }
 
+  async function navigateToChapter(
+    chapterId: string,
+    location: { line?: number; endLine?: number; column?: number } = {}
+  ) {
+    const chapter = chapters.find((candidate) => candidate.id === chapterId);
+    if (!chapter) return;
+    selectedId = chapterId;
+    navigationTarget = {
+      chapterId,
+      line: Math.max(1, location.line ?? 1),
+      endLine: location.endLine,
+      column: location.column,
+      nonce: (navigationTarget?.nonce ?? 0) + 1
+    };
+    await openTab({
+      id: `tab-${chapter.id}`,
+      type: 'chapter',
+      refId: chapter.id,
+      title: chapter.title
+    });
+  }
+
   function updateChapterContent(id: string, content: string) {
     const chapter = chapters.find((candidate) => candidate.id === id);
     if (!chapter || !projectId.value) return;
@@ -712,6 +774,34 @@ function createStore() {
         if (current) Object.assign(current, updated);
       }
     });
+  }
+
+  function hasPendingChapterSave(id: string): boolean {
+    const patchKey = `chapter:${id}`;
+    return patchTimers.has(patchKey) || pendingPatchInputs.has(patchKey) || inFlightPatchPromises.has(patchKey);
+  }
+
+  /** Ensure an exact WritingVersion exists before persisting a version-anchored annotation. */
+  async function flushChapterContent(id: string): Promise<Chapter | null> {
+    const chapter = chapters.find((candidate) => candidate.id === id);
+    if (!chapter || !projectId.value) return null;
+    const patchKey = `chapter:${id}`;
+    const running = inFlightPatchPromises.get(patchKey);
+    if (running) await running;
+
+    const timer = patchTimers.get(patchKey);
+    const queued = pendingPatchInputs.get(patchKey);
+    if (!timer && !queued) return chapters.find((candidate) => candidate.id === id) ?? null;
+    if (timer) clearTimeout(timer);
+    patchTimers.delete(patchKey);
+    pendingPatchInputs.delete(patchKey);
+    const version = nextEntityVersion(patchKey);
+    let saved: Chapter | null = null;
+    await persist(async () => {
+      saved = await api.updateChapter(projectId.value!, id, { content: chapter.content });
+      if (isLatestEntityVersion(patchKey, version) && saved) Object.assign(chapter, saved);
+    });
+    return saved;
   }
 
   function updateChapter(id: string, updates: UpdateChapterInput) {
@@ -998,6 +1088,66 @@ function createStore() {
     });
   }
 
+  async function createScene(chapterId: string, input: CreateSceneInput): Promise<Scene | null> {
+    if (!projectId.value) return null;
+    let created: Scene | null = null;
+    await persist(async () => {
+      created = await api.createScene(projectId.value!, chapterId, input);
+      const chapter = chapters.find((candidate) => candidate.id === chapterId);
+      if (chapter && created) {
+        chapter.scenes.push(created);
+        chapter.scenes.sort((a, b) => a.order - b.order);
+      }
+    });
+    return created;
+  }
+
+  async function updateScene(sceneId: string, chapterId: string, input: Omit<UpdateSceneInput, 'expectedRevision'>): Promise<Scene | null> {
+    if (!projectId.value) return null;
+    let updated: Scene | null = null;
+    await persist(async () => {
+      const chapter = chapters.find((candidate) => candidate.id === chapterId);
+      const existing = chapter?.scenes.find((candidate) => candidate.id === sceneId);
+      if (!existing) throw new Error('Scene is no longer available; refresh the manuscript.');
+      updated = await api.updateScene(projectId.value!, chapterId, sceneId, { ...input, expectedRevision: existing.revision });
+      const index = chapter?.scenes.findIndex((candidate) => candidate.id === sceneId) ?? -1;
+      if (chapter && index >= 0 && updated) {
+        chapter.scenes[index] = updated;
+        if (input.order !== undefined) {
+          const refreshed = await api.listScenes(projectId.value!, chapterId);
+          chapter.scenes.splice(0, chapter.scenes.length, ...refreshed);
+        } else chapter.scenes.sort((a, b) => a.order - b.order);
+      }
+    });
+    return updated;
+  }
+
+  async function reorderScenes(chapterId: string, sceneIds: string[]): Promise<Scene[]> {
+    if (!projectId.value) return [];
+    const chapter = chapters.find((candidate) => candidate.id === chapterId);
+    if (!chapter) return [];
+    let reordered: Scene[] = [];
+    await persist(async () => {
+      reordered = await api.reorderScenes(projectId.value!, chapterId, {
+        sceneIds,
+        expectedRevisions: Object.fromEntries(chapter.scenes.map((scene) => [scene.id, scene.revision]))
+      });
+      chapter.scenes.splice(0, chapter.scenes.length, ...reordered);
+    });
+    return reordered;
+  }
+
+  async function deleteScene(sceneId: string, chapterId: string) {
+    if (!projectId.value) return;
+    await persist(async () => {
+      await api.deleteScene(projectId.value!, chapterId, sceneId);
+      const chapter = chapters.find((candidate) => candidate.id === chapterId);
+      if (!chapter) return;
+      const refreshed = await api.listScenes(projectId.value!, chapterId);
+      chapter.scenes.splice(0, chapter.scenes.length, ...refreshed);
+    });
+  }
+
   async function deleteObstacle(obstacleId: string) {
     if (!projectId.value) return;
 
@@ -1099,6 +1249,10 @@ function createStore() {
       return selectedId;
     },
     setSelectedId,
+    get navigationTarget() {
+      return navigationTarget;
+    },
+    navigateToChapter,
     initialize,
     loadProject,
     refreshProject,
@@ -1163,6 +1317,8 @@ function createStore() {
     setLocationImage,
     setProjectCover,
     updateChapterContent,
+    hasPendingChapterSave,
+    flushChapterContent,
     updateChapter,
     updateCharacter,
     updateLocation,
@@ -1176,6 +1332,10 @@ function createStore() {
     deleteLocation,
     createChapter,
     deleteChapter,
+    createScene,
+    updateScene,
+    reorderScenes,
+    deleteScene,
     createObstacle,
     updateObstacle,
     deleteObstacle,

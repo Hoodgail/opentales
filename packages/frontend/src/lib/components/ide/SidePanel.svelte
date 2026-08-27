@@ -7,20 +7,32 @@
   import InboxPanel from './InboxPanel.svelte';
   import LocationsPanel from './LocationsPanel.svelte';
   import MembersPanel from './MembersPanel.svelte';
+  import NovelBuildSidePanel from './NovelBuildSidePanel.svelte';
   import OutlinePanel from './OutlinePanel.svelte';
   import PlotPanel from './PlotPanel.svelte';
   import ProblemsPanel from './ProblemsPanel.svelte';
   import SearchPanel from './SearchPanel.svelte';
   import SettingsPanel from './SettingsPanel.svelte';
   import StatsPanel from './StatsPanel.svelte';
+  import StoryBibleSidePanel from './StoryBibleSidePanel.svelte';
+  import PublishingSidePanel from './PublishingSidePanel.svelte';
+  import RevisionSnapshotsSidePanel from './RevisionSnapshotsSidePanel.svelte';
   import TrashPanel from './TrashPanel.svelte';
 </script>
 
 <aside
-  class="flex h-full w-full shrink-0 flex-col border-r border-border bg-sidebar md:w-72"
+  class="flex h-full w-full shrink-0 flex-col bg-sidebar"
 >
   {#if manuscript.activeView === 'explorer'}
     <ExplorerPanel />
+  {:else if manuscript.activeView === 'build'}
+    <NovelBuildSidePanel />
+  {:else if manuscript.activeView === 'bible'}
+    <StoryBibleSidePanel />
+  {:else if manuscript.activeView === 'publishing'}
+    <PublishingSidePanel />
+  {:else if manuscript.activeView === 'revisions'}
+    <RevisionSnapshotsSidePanel />
   {:else if manuscript.activeView === 'characters'}
     <CharactersPanel />
   {:else if manuscript.activeView === 'locations'}

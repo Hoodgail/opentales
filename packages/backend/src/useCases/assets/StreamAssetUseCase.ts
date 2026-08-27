@@ -11,10 +11,10 @@ export class StreamAssetUseCase {
   async execute(assetId: string, res: Response): Promise<void> {
     const asset = await this.prisma.asset.findUnique({
       where: { id: assetId },
-      select: { id: true, s3Bucket: true, s3Key: true, mimeType: true, sizeBytes: true }
+      select: { id: true, isPublic: true, s3Bucket: true, s3Key: true, mimeType: true, sizeBytes: true }
     });
 
-    if (!asset) {
+    if (!asset || !asset.isPublic) {
       throw new HttpError(404, 'Asset not found');
     }
 

@@ -80,6 +80,8 @@ The architecture is documented in [`docs/architecture.md`](docs/architecture.md)
    pnpm check          # frontend types
    pnpm check:backend  # backend types
    pnpm check:sdk      # sdk types
+   pnpm test           # unit, contract, integration-if-configured, docs links
+   pnpm eval           # deterministic agent/artifact/continuity evals
    pnpm build          # full build
    ```
 4. **Commit** with a descriptive message. We don't enforce a strict format, but `feat:`, `fix:`, `docs:`, `refactor:`, `chore:` prefixes are appreciated.
@@ -98,9 +100,11 @@ If your PR touches the schema, also include the Prisma migration (don't hand-edi
 
 ## Testing
 
-The repo doesn't yet have an automated test suite — see [`docs/future-directions.md`](docs/future-directions.md) for the testing roadmap. For now, please test changes manually and describe what you tested in the PR body.
+Vitest runs backend, SDK, and frontend suites. Put backend tests under `packages/backend/src/**/*.test.ts` and frontend tests next to their components or stores. `pnpm test` also validates local documentation links.
 
-If you add tests (please do!), put backend tests under `packages/backend/src/**/*.test.ts` and frontend tests next to their components.
+Novel Build, workflow, and export/import integration tests use real PostgreSQL. Set `NOVEL_BUILD_TEST_DATABASE_URL`, `AI_WORKER_TEST_DATABASE_URL`, `EXPORT_IMPORT_TEST_DATABASE_URL`, `REVISION_TEST_DATABASE_URL`, and `RENAME_REFACTOR_TEST_DATABASE_URL` to an isolated migrated database; never point them at a development or production database. CI configures these automatically.
+
+Agent changes must add outcome and behavior evidence. Use deterministic graders for schemas, permissions, state, and tool contracts; use the synthetic continuity benchmark for diagnostics; use `pnpm --dir packages/backend eval:model` only when intentionally running credentialed repeated rubric trials.
 
 ## Branch conventions
 

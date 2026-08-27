@@ -11,6 +11,7 @@ import type {
   CreateLocationInput,
   CreateObstacleInput,
   CreateSubmissionInput,
+  CreateSceneInput,
   UpdateActInput,
   UpdateBetaShareLinkInput,
   UpdateChapterInput,
@@ -20,6 +21,7 @@ import type {
   UpdateProjectAiSettingsInput,
   UpdateProjectInput,
   UpdateStructureInput
+  ,UpdateSceneInput
 } from '@opentales/sdk';
 import { tool, type Tool } from 'ai';
 import { z } from 'zod';
@@ -61,11 +63,12 @@ import { UpdateMemberRoleUseCase } from '../../members/UpdateMemberRoleUseCase.j
 import { UpdateObstacleUseCase } from '../../projects/UpdateObstacleUseCase.js';
 import { UpdateProjectUseCase } from '../../projects/UpdateProjectUseCase.js';
 import { UpdateStructureUseCase } from '../../projects/UpdateStructureUseCase.js';
+import { SceneUseCase } from '../../projects/SceneUseCase.js';
 import { UploadAssetUseCase } from '../../assets/UploadAssetUseCase.js';
 import { ProjectAssetUseCase } from '../../assets/ProjectAssetUseCase.js';
 import { ProjectFolderUseCase } from '../../projectFiles/ProjectFolderUseCase.js';
 import { WritingUseCase } from '../../writings/WritingUseCase.js';
-import { applyContentEdit, bodyOf, countWords, editContentInputSchema, toPrismaDocKind, type ToolContext } from './shared.js';
+import { applyContentEdit, bodyOf, countWords, editContentInputSchema, invocationToolCallId, toPrismaDocKind, type AgentToolInvocationContext, type ToolContext } from './shared.js';
 
 type ApprovalToolConfig = Tool<any, any>;
 
@@ -95,6 +98,36 @@ const contentEditSchema = editContentInputSchema.extend({
   oldString: z.string().min(1),
   newString: z.string()
 });
+const sceneStatusSchema = z.enum(['planned', 'draft', 'in-progress', 'review', 'revised', 'final']);
+const sceneJsonSchema = z.unknown().nullable().optional();
+const sceneMetadataShape = {
+  status: sceneStatusSchema.optional(),
+  storyDate: nullableString,
+  storyTime: nullableString,
+  estimatedWordCount: z.number().int().min(0).max(1_000_000).nullable().optional(),
+  sceneFunction: optionalString,
+  goal: optionalString,
+  obstacle: optionalString,
+  stakes: optionalString,
+  conflict: optionalString,
+  turn: optionalString,
+  revelation: optionalString,
+  outcome: optionalString,
+  emotionalValueShift: optionalString,
+  characterPresentIds: stringArray.optional(),
+  characterReferencedIds: stringArray.optional(),
+  plotThreadIds: stringArray.optional(),
+  setupPayoffIds: stringArray.optional(),
+  knowledgeDeltas: sceneJsonSchema,
+  objectTransfers: sceneJsonSchema,
+  injuryStateChanges: sceneJsonSchema,
+  worldRuleRefs: sceneJsonSchema,
+  entryState: sceneJsonSchema,
+  exitState: sceneJsonSchema,
+  summary: optionalString,
+  writerNotes: optionalString,
+  aiNotes: optionalString
+} as const;
 
 function withAtLeastOne<T extends z.ZodRawShape>(schema: z.ZodObject<T>, fields: Array<keyof T>) {
   return schema.refine((input) => fields.some((field) => (input as Record<PropertyKey, unknown>)[field] !== undefined), {
@@ -191,17 +224,19 @@ const mutationToolSchemas = {
     age: optionalString,
     occupation: optionalString,
     traits: stringArray.optional(),
+    aliases: stringArray.optional(),
     description: optionalString,
     appearance: optionalString,
     motivation: optionalString,
     arc: optionalString
-  }), ['name', 'role', 'age', 'occupation', 'traits', 'description', 'appearance', 'motivation', 'arc']),
+  }), ['name', 'role', 'age', 'occupation', 'traits', 'aliases', 'description', 'appearance', 'motivation', 'arc']),
   createCharacter: z.object({
     name: nonEmptyString,
     role: optionalString,
     age: optionalString,
     occupation: optionalString,
     traits: stringArray.optional(),
+    aliases: stringArray.optional(),
     description: optionalString,
     appearance: optionalString,
     motivation: optionalString,
@@ -223,8 +258,8 @@ const mutationToolSchemas = {
   deleteChapter: z.object({ chapterId: nonEmptyString }),
   restoreTrashChapter: z.object({ chapterId: nonEmptyString }),
   purgeTrashChapter: z.object({ chapterId: nonEmptyString }),
-  createScene: z.object({ chapterId: nonEmptyString, title: optionalString, content: optionalString, order: z.number().optional(), povCharacterId: optionalString, locationId: optionalString }),
-  updateScene: withAtLeastOne(z.object({ sceneId: nonEmptyString, title: nullableString, content: optionalString, contentEdit: contentEditSchema.optional(), order: z.number().optional(), povCharacterId: nullableString, locationId: nullableString }), ['title', 'content', 'contentEdit', 'order', 'povCharacterId', 'locationId']),
+  createScene: z.object({ chapterId: nonEmptyString, title: optionalString, content: optionalString, order: z.number().int().min(0).optional(), povCharacterId: nullableString, locationId: nullableString, ...sceneMetadataShape }),
+  updateScene: withAtLeastOne(z.object({ sceneId: nonEmptyString, title: nullableString, content: optionalString, contentEdit: contentEditSchema.optional(), order: z.number().int().min(0).optional(), povCharacterId: nullableString, locationId: nullableString, ...sceneMetadataShape }), ['title', 'content', 'contentEdit', 'order', 'povCharacterId', 'locationId', ...Object.keys(sceneMetadataShape) as Array<keyof typeof sceneMetadataShape>]),
   deleteScene: z.object({ sceneId: nonEmptyString }),
   updateStoryStructure: withAtLeastOne(z.object({ title: optionalString, genre: optionalString, perspective: optionalString, pov: optionalString, voice: optionalString, tone: optionalString, themes: stringArray.optional(), logline: optionalString, outline: optionalString, climax: optionalString }), ['title', 'genre', 'perspective', 'pov', 'voice', 'tone', 'themes', 'logline', 'outline', 'climax']),
   createObstacle: z.object({ title: nonEmptyString, type: obstacleTypeSchema, description: optionalString, resolution: optionalString }),
@@ -308,11 +343,11 @@ const mutationToolDescriptions = {
 } satisfies Record<MutatingToolName, string>;
 
 export interface ApprovalHandler {
-  handleApproval(toolName: MutatingToolName, input: unknown, execute: () => Promise<unknown>): Promise<unknown>;
+  handleApproval(toolName: MutatingToolName, input: unknown, execute: () => Promise<unknown>, toolCallId: string, abortSignal?: AbortSignal): Promise<unknown>;
 }
 
 export interface QuestionHandler {
-  handleQuestion(toolName: 'askUser', input: unknown): Promise<unknown>;
+  handleQuestion(toolName: 'askUser', input: unknown, toolCallId: string, abortSignal?: AbortSignal): Promise<unknown>;
 }
 
 export function mutationTools(
@@ -327,79 +362,79 @@ export function mutationTools(
       description:
         'Ask the user one or more questions and wait for answers before continuing. Provide answer choices, mark recommended answers when useful, and rely on the UI for custom answers.',
       inputSchema: mutationToolSchemas.askUser,
-      execute: async (input) => {
+      execute: async (input, options?: AgentToolInvocationContext) => {
         const validated = validateMutationInput('askUser', input);
-        return question.handleQuestion('askUser', validated);
+        return question.handleQuestion('askUser', validated, invocationToolCallId(options), options?.abortSignal);
       }
     }),
     updateCharacter: approvalTool({
       description:
         'Update an existing character. Only `characterId` is required; include only fields to change. The user will approve/reject the proposal in the UI.',
       inputSchema: mutationToolSchemas.updateCharacter,
-      execute: async (input) => {
+      execute: async (input, options?: AgentToolInvocationContext) => {
         const validated = validateMutationInput('updateCharacter', input);
-        return approval.handleApproval('updateCharacter', validated, () => executeMutationTool(prisma, context, 'updateCharacter', validated));
+        return approval.handleApproval('updateCharacter', validated, () => executeMutationTool(prisma, context, 'updateCharacter', validated), invocationToolCallId(options), options?.abortSignal);
       }
     }),
     createCharacter: approvalTool({
       description:
         'Create a new character. Only `name` is required. The user will approve/reject the proposal in the UI.',
       inputSchema: mutationToolSchemas.createCharacter,
-      execute: async (input) => {
+      execute: async (input, options?: AgentToolInvocationContext) => {
         const validated = validateMutationInput('createCharacter', input);
-        return approval.handleApproval('createCharacter', validated, () => executeMutationTool(prisma, context, 'createCharacter', validated));
+        return approval.handleApproval('createCharacter', validated, () => executeMutationTool(prisma, context, 'createCharacter', validated), invocationToolCallId(options), options?.abortSignal);
       }
     }),
     updateChapter: approvalTool({
       description:
         'Update chapter metadata and/or content by exact replacement. Use oldString/newString for manuscript edits instead of sending full content.',
       inputSchema: mutationToolSchemas.updateChapter,
-      execute: async (input) => {
+      execute: async (input, options?: AgentToolInvocationContext) => {
         const validated = validateMutationInput('updateChapter', input);
-        return approval.handleApproval('updateChapter', validated, () => executeMutationTool(prisma, context, 'updateChapter', validated));
+        return approval.handleApproval('updateChapter', validated, () => executeMutationTool(prisma, context, 'updateChapter', validated), invocationToolCallId(options), options?.abortSignal);
       }
     }),
     createChapter: approvalTool({
       description:
         'Create a new chapter. Only `title` is required; everything else is optional. The user will approve/reject the proposal in the UI.',
       inputSchema: mutationToolSchemas.createChapter,
-      execute: async (input) => {
+      execute: async (input, options?: AgentToolInvocationContext) => {
         const validated = validateMutationInput('createChapter', input);
-        return approval.handleApproval('createChapter', validated, () => executeMutationTool(prisma, context, 'createChapter', validated));
+        return approval.handleApproval('createChapter', validated, () => executeMutationTool(prisma, context, 'createChapter', validated), invocationToolCallId(options), options?.abortSignal);
       }
     }),
     createProjectDoc: approvalTool({
       description:
         'Create a new project document (note, brainstorm, instruction, or reference). Only `title` is required. The user will approve/reject the proposal in the UI.',
       inputSchema: mutationToolSchemas.createProjectDoc,
-      execute: async (input) => {
+      execute: async (input, options?: AgentToolInvocationContext) => {
         const validated = validateMutationInput('createProjectDoc', input);
-        return approval.handleApproval('createProjectDoc', validated, () => executeMutationTool(prisma, context, 'createProjectDoc', validated));
+        return approval.handleApproval('createProjectDoc', validated, () => executeMutationTool(prisma, context, 'createProjectDoc', validated), invocationToolCallId(options), options?.abortSignal);
       }
     }),
     updateProjectDoc: approvalTool({
       description:
         'Update document metadata and/or content by exact replacement. Use oldString/newString for body edits instead of sending full content.',
       inputSchema: mutationToolSchemas.updateProjectDoc,
-      execute: async (input) => {
+      execute: async (input, options?: AgentToolInvocationContext) => {
         const validated = validateMutationInput('updateProjectDoc', input);
-        return approval.handleApproval('updateProjectDoc', validated, () => executeMutationTool(prisma, context, 'updateProjectDoc', validated));
+        return approval.handleApproval('updateProjectDoc', validated, () => executeMutationTool(prisma, context, 'updateProjectDoc', validated), invocationToolCallId(options), options?.abortSignal);
       }
     }),
     createFolder: approvalTool({
       description: 'Create a new project folder. Folder names are unique among folders, docs, and assets in the same parent folder.',
       inputSchema: mutationToolSchemas.createFolder,
-      execute: async (input) => {
+      execute: async (input, options?: AgentToolInvocationContext) => {
         const validated = validateMutationInput('createFolder', input);
-        return approval.handleApproval('createFolder', validated, () => executeMutationTool(prisma, context, 'createFolder', validated));
+        return approval.handleApproval('createFolder', validated, () => executeMutationTool(prisma, context, 'createFolder', validated), invocationToolCallId(options), options?.abortSignal);
       }
     }),
     updateFolder: approvalTool({
       description: 'Rename or move a project folder. The user will approve/reject the proposal in the UI.',
       inputSchema: mutationToolSchemas.updateFolder,
-      execute: async (input) => {
+      execute: async (input, options?: AgentToolInvocationContext) => {
         const validated = validateMutationInput('updateFolder', input);
-        return approval.handleApproval('updateFolder', validated, () => executeMutationTool(prisma, context, 'updateFolder', validated));
+        return approval.handleApproval('updateFolder', validated, () => executeMutationTool(prisma, context, 'updateFolder', validated), invocationToolCallId(options), options?.abortSignal);
       }
     })
   } as Record<MutatingToolName, Tool<any, any>>;
@@ -416,9 +451,9 @@ function genericMutationTools(
       approvalTool({
         description: `${name}: ${mutationToolDescriptions[name]} The user will approve/reject the proposal in the UI.`,
         inputSchema: mutationToolSchemas[name],
-        execute: async (input) => {
+        execute: async (input, options?: AgentToolInvocationContext) => {
           const validated = validateMutationInput(name, input);
-          return approval.handleApproval(name, validated, () => executeMutationTool(prisma, context, name, validated));
+          return approval.handleApproval(name, validated, () => executeMutationTool(prisma, context, name, validated), invocationToolCallId(options), options?.abortSignal);
         }
       })
     ])
@@ -644,6 +679,7 @@ async function createCharacter(
     age: stringOrUndefined(input.age),
     occupation: stringOrUndefined(input.occupation),
     traits: stringArrayOrUndefined(input.traits),
+    aliases: stringArrayOrUndefined(input.aliases),
     description: stringOrUndefined(input.description),
     appearance: stringOrUndefined(input.appearance),
     motivation: stringOrUndefined(input.motivation),
@@ -665,6 +701,7 @@ async function updateCharacter(
     age: stringOrUndefined(input.age),
     occupation: stringOrUndefined(input.occupation),
     traits: stringArrayOrUndefined(input.traits),
+    aliases: stringArrayOrUndefined(input.aliases),
     description: stringOrUndefined(input.description),
     appearance: stringOrUndefined(input.appearance),
     motivation: stringOrUndefined(input.motivation),
@@ -1034,40 +1071,49 @@ async function commentSubmission(prisma: PrismaClient, context: ToolContext & { 
 }
 
 async function createScene(prisma: PrismaClient, context: ToolContext & { userId: string }, input: Record<string, unknown>) {
-  await new ProjectAccessRepository(prisma).assertPermission(context.userId, context.projectId, 'project:write');
   const chapterId = requiredString(input.chapterId, 'chapterId');
-  const chapter = await prisma.chapter.findFirst({ where: { id: chapterId, projectId: context.projectId, deletedAt: null }, select: { id: true } });
-  if (!chapter) throw new HttpError(404, 'Chapter not found');
-  const last = await prisma.scene.findFirst({ where: { chapterId }, orderBy: { order: 'desc' }, select: { order: true } });
-  return prisma.$transaction(async (tx) => {
-    const bodyWritingId = await new WritingUseCase().createWriting(tx, { projectId: context.projectId, kind: 'SCENE_BODY', body: typeof input.content === 'string' ? input.content : '', authorId: context.userId, message: 'Create scene from AI approval' });
-    return tx.scene.create({ data: { chapterId, order: numberOrUndefined(input.order) ?? (last?.order ?? -1) + 1, title: stringOrUndefined(input.title), povCharacterId: stringOrUndefined(input.povCharacterId), locationId: stringOrUndefined(input.locationId), bodyWritingId } });
-  });
+  return new SceneUseCase(prisma).create(context.userId, context.projectId, chapterId, sceneMutationInput(input));
 }
 
 async function updateScene(prisma: PrismaClient, context: ToolContext & { userId: string }, input: Record<string, unknown>) {
-  await new ProjectAccessRepository(prisma).assertPermission(context.userId, context.projectId, 'project:write');
   const sceneId = requiredString(input.sceneId, 'sceneId');
   const scene = await prisma.scene.findFirst({ where: { id: sceneId, chapter: { projectId: context.projectId, deletedAt: null } }, include: { bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } } } });
   if (!scene) throw new HttpError(404, 'Scene not found');
-  return prisma.$transaction(async (tx) => {
-    await tx.scene.update({ where: { id: sceneId }, data: { title: nullableStringOrUndefined(input.title) as string | null | undefined, order: numberOrUndefined(input.order), povCharacterId: nullableStringOrUndefined(input.povCharacterId) as string | null | undefined, locationId: nullableStringOrUndefined(input.locationId) as string | null | undefined } });
-    const body = isContentEdit(input.contentEdit) ? applyContentEdit(bodyOf(scene.bodyWriting), input.contentEdit) : typeof input.content === 'string' ? input.content : undefined;
-    if (body !== undefined) await new WritingUseCase().updateDefaultBranch(tx, { writingId: scene.bodyWritingId, body, authorId: context.userId, message: 'Update scene from AI approval' });
-    return tx.scene.findUnique({ where: { id: sceneId } });
-  });
+  const content = isContentEdit(input.contentEdit)
+    ? applyContentEdit(bodyOf(scene.bodyWriting), input.contentEdit)
+    : typeof input.content === 'string' ? input.content : undefined;
+  return new SceneUseCase(prisma).update(
+    context.userId,
+    context.projectId,
+    scene.chapterId,
+    sceneId,
+    sceneMutationInput({ ...input, content }) as UpdateSceneInput
+  );
 }
 
 async function deleteScene(prisma: PrismaClient, context: ToolContext & { userId: string }, input: Record<string, unknown>) {
-  await new ProjectAccessRepository(prisma).assertPermission(context.userId, context.projectId, 'project:write');
   const sceneId = requiredString(input.sceneId, 'sceneId');
-  return prisma.$transaction(async (tx) => {
-    const scene = await tx.scene.findFirst({ where: { id: sceneId, chapter: { projectId: context.projectId } }, select: { id: true, bodyWritingId: true } });
-    if (!scene) throw new HttpError(404, 'Scene not found');
-    await tx.scene.delete({ where: { id: sceneId } });
-    await tx.writing.delete({ where: { id: scene.bodyWritingId } });
-    return { id: sceneId, deleted: true };
-  });
+  const scene = await prisma.scene.findFirst({ where: { id: sceneId, chapter: { projectId: context.projectId, deletedAt: null } }, select: { chapterId: true } });
+  if (!scene) throw new HttpError(404, 'Scene not found');
+  return new SceneUseCase(prisma).delete(context.userId, context.projectId, scene.chapterId, sceneId);
+}
+
+function sceneMutationInput(input: Record<string, unknown>): CreateSceneInput {
+  const fields = [
+    'status', 'storyDate', 'storyTime', 'estimatedWordCount', 'sceneFunction', 'goal', 'obstacle', 'stakes',
+    'conflict', 'turn', 'revelation', 'outcome', 'emotionalValueShift', 'characterPresentIds',
+    'characterReferencedIds', 'plotThreadIds', 'setupPayoffIds', 'knowledgeDeltas', 'objectTransfers',
+    'injuryStateChanges', 'worldRuleRefs', 'entryState', 'exitState', 'summary', 'writerNotes', 'aiNotes'
+  ];
+  const data: Record<string, unknown> = {
+    title: input.title,
+    order: input.order,
+    povCharacterId: input.povCharacterId,
+    locationId: input.locationId,
+    content: input.content
+  };
+  for (const field of fields) if (input[field] !== undefined) data[field] = input[field];
+  return data as CreateSceneInput;
 }
 
 async function attachAsset(prisma: PrismaClient, context: ToolContext & { userId: string }, input: Record<string, unknown>) {

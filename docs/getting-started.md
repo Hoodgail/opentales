@@ -70,6 +70,10 @@ pnpm dev:web
 
 Open http://localhost:5173 — you'll land on the marketing page. Click **Open the editor** (or visit `/projects` directly) to log in with the demo credentials.
 
+The seeded project has AI disabled. Enable and configure a provider in Project Settings before running model-backed tasks. You can still inspect the Build, Story Bible, Outline Studio, Search, Problems, continuous manuscript, and Publish surfaces without enabling AI.
+
+To start a Novel Build, open **Build**, enter the brainstorm and target, choose an autonomy mode, set token/cost limits where appropriate, and review the generated scope. **Plan & Review** is the recommended first run: it pauses after planning and writes prose only to an isolated build manuscript after authorization. See [`novel-build.md`](novel-build.md).
+
 ## 5. (Optional) Run the Electron desktop app
 
 ```bash
@@ -98,7 +102,7 @@ opentales/
 │   ├── electron/     Desktop shell wrapping the frontend
 │   └── sdk/          TypeScript client used by frontend + Electron
 ├── docs/             You are here
-├── prisma.md         Data-model plan / design notes
+├── deep-research-report.md  Novel Build architecture research
 └── README.md
 ```
 
@@ -124,6 +128,10 @@ When you're ready to share, head to **Project settings → Visibility** and flip
 **Avatar/cover uploads return a broken image.** The backend writes to `ASSETS_DIR` and serves them via `GET /assets/:assetId`. Check that the process can write to that directory and that `PUBLIC_BASE_URL` matches where the API is reachable.
 
 **Service worker keeps serving stale assets in dev.** Open DevTools → *Application* → *Service Workers* → *Unregister*, then hard reload. The SW is registered only in production builds, but a stale registration from a previous prod build can persist.
+
+**A cost-bounded build pauses before the first model call.** OpenTales refreshes pricing automatically from models.dev and never treats an unknown price as free. Check backend access to `https://models.dev/api.json`; for a private/custom relay whose model cannot be resolved, add an explicitly sourced/versioned `AI_MODEL_PRICING_JSON` override.
+
+**A build remains paused at export preparation.** Generate the required Build-target exports in **Publish**. The final gate accepts only validated, checksum-matched export records tied to the compilation and branch heads.
 
 ## What next?
 

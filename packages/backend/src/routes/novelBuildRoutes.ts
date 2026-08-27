@@ -1,0 +1,61 @@
+import { Router } from 'express';
+import { NovelBuildController } from '../controllers/NovelBuildController.js';
+import { SceneController } from '../controllers/SceneController.js';
+import { BuildManuscriptController } from '../controllers/BuildManuscriptController.js';
+import { asyncHandler } from '../http/asyncHandler.js';
+import { requireAuth } from '../middleware/authMiddleware.js';
+
+const builds = new NovelBuildController();
+const scenes = new SceneController();
+const manuscript = new BuildManuscriptController();
+
+export const novelBuildRoutes = Router();
+novelBuildRoutes.use(requireAuth);
+
+novelBuildRoutes.get('/:projectId/chapters/:chapterId/scenes', asyncHandler(scenes.list));
+novelBuildRoutes.post('/:projectId/chapters/:chapterId/scenes', asyncHandler(scenes.create));
+novelBuildRoutes.post('/:projectId/chapters/:chapterId/scenes/reorder', asyncHandler(scenes.reorder));
+novelBuildRoutes.get('/:projectId/chapters/:chapterId/scenes/:sceneId', asyncHandler(scenes.get));
+novelBuildRoutes.patch('/:projectId/chapters/:chapterId/scenes/:sceneId', asyncHandler(scenes.update));
+novelBuildRoutes.delete('/:projectId/chapters/:chapterId/scenes/:sceneId', asyncHandler(scenes.delete));
+
+novelBuildRoutes.get('/:projectId/builds', asyncHandler(builds.list));
+novelBuildRoutes.post('/:projectId/builds', asyncHandler(builds.create));
+novelBuildRoutes.get('/:projectId/builds/:buildRunId', asyncHandler(builds.get));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/authorization', asyncHandler(builds.authorize));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/pause', asyncHandler(builds.pause));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/resume', asyncHandler(builds.resume));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/cancel', asyncHandler(builds.cancel));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/tasks/:taskId/retry', asyncHandler(builds.retry));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/tasks/:taskId/rerun', asyncHandler(builds.rerun));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/replan', asyncHandler(builds.replan));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/branches/from-checkpoint', asyncHandler(builds.branchFromCheckpoint));
+novelBuildRoutes.get('/:projectId/builds/:buildRunId/units', asyncHandler(manuscript.listUnits));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/units', asyncHandler(manuscript.createUnit));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/units/reorder', asyncHandler(manuscript.reorderUnits));
+novelBuildRoutes.get('/:projectId/builds/:buildRunId/units/:unitId', asyncHandler(manuscript.getUnit));
+novelBuildRoutes.patch('/:projectId/builds/:buildRunId/units/:unitId', asyncHandler(manuscript.patchUnit));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/compile', asyncHandler(manuscript.compile));
+novelBuildRoutes.get('/:projectId/builds/:buildRunId/compilations/:compilationId', asyncHandler(manuscript.getCompilation));
+novelBuildRoutes.get('/:projectId/builds/:buildRunId/comparison', asyncHandler(manuscript.compare));
+novelBuildRoutes.get('/:projectId/builds/:buildRunId/reviews', asyncHandler(manuscript.listReviews));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/reviews', asyncHandler(manuscript.createReview));
+novelBuildRoutes.get('/:projectId/builds/:buildRunId/reviews/:reviewId', asyncHandler(manuscript.getReview));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/reviews/:reviewId/approve', asyncHandler(manuscript.approveReview));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/reviews/:reviewId/merge', asyncHandler(manuscript.mergeReview));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/reviews/:reviewId/reject', asyncHandler(manuscript.rejectReview));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/exports', asyncHandler(manuscript.registerExport));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/pins/unpin', asyncHandler(manuscript.unpin));
+
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/checkpoints', asyncHandler(builds.createCheckpoint));
+novelBuildRoutes.get('/:projectId/builds/:buildRunId/artifacts', asyncHandler(builds.listArtifacts));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/artifacts/batch', asyncHandler(builds.artifactBatch));
+novelBuildRoutes.get('/:projectId/builds/:buildRunId/story-state', asyncHandler(builds.getState));
+novelBuildRoutes.get('/:projectId/builds/:buildRunId/story-state/delta', asyncHandler(builds.stateDelta));
+novelBuildRoutes.get('/:projectId/builds/:buildRunId/story-state/history/:entityKind/:key', asyncHandler(builds.stateHistory));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/story-state/temporal', asyncHandler(builds.temporalState));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/story-state/batch', asyncHandler(builds.stateBatch));
+novelBuildRoutes.get('/:projectId/builds/:buildRunId/observability', asyncHandler(builds.observability));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/search', asyncHandler(builds.search));
+novelBuildRoutes.post('/:projectId/builds/:buildRunId/references', asyncHandler(builds.references));
+novelBuildRoutes.get('/:projectId/builds/:buildRunId/diagnostics', asyncHandler(builds.diagnostics));

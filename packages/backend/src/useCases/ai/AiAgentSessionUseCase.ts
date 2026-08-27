@@ -2,32 +2,74 @@ import type { Response } from 'express';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import type { ToolSet } from 'ai';
 import type {
+  AiAgentApprovalMode,
   AiAgentAttachment,
   AiAgentMessage,
   AiAgentQueuedPrompt,
   AiAgentSession,
   AiAgentSessionEvent,
+  AiAgentSessionPart,
+  AiAgentSubtaskPart,
   AiAgentSessionSummary,
   AiAgentToolCall,
+  AiAgentTimelinePage,
   ApproveAiToolCallInput,
   ApproveAiToolCallsInput,
   AnswerAiQuestionInput,
   CreateAiAgentSessionInput,
-  QueueAiAgentPromptInput
+  GetAiAgentTimelineInput,
+  QueueAiAgentPromptInput,
+  UpdateAiAgentSessionInput
 } from '@opentales/sdk';
 import { stepCountIs, streamText } from 'ai';
 import { HttpError } from '../../http/HttpError.js';
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
 import { findAgent, loadAiAgents, subagentsForTask, type AiAgentInfo } from './agents.js';
-import { loadAiSkillCatalog } from './markdownCatalog.js';
+import { loadAiSkillCatalog, loadAiSkillReferences } from './markdownCatalog.js';
 import { loadAiModelForProject } from './aiModel.js';
 import { renderSystemPrompt, renderUserContext } from './prompts/promptEngine.js';
-import { buildAgentTools, bodyOf, executeMutationTool, mutatingToolNames, type MutatingToolName } from './tools/index.js';
+import { buildRecentTranscript } from './prompts/conversationHistory.js';
+import { renderInferenceLayers } from './prompts/layeredInference.js';
+import { serializeUntrustedData } from './prompts/untrustedData.js';
+import { ContextAssembler, type AssembledContextPack } from './context/ContextAssembler.js';
+import {
+  normalizeTaskContract,
+  stepLimitForTask,
+  type TaskContract
+} from './runtime/taskContract.js';
+import {
+  SessionTimelineRecorder,
+  SESSION_TIMELINE_PART_LIMIT,
+  buildSessionTimelineProjection,
+  hydrateSessionPart,
+  partText as readPartText,
+  toTextTimelinePart,
+  type StoredSessionPart
+} from './runtime/SessionTimelineRecorder.js';
+import {
+  agentMutatingToolNames,
+  buildAgentTools,
+  bodyOf,
+  executeAgentMutationTool,
+  type AgentMutatingToolName
+} from './tools/index.js';
 import type { TaskToolInput } from './tools/task.js';
 
+interface RuntimeClient {
+  res: Response;
+  ready: boolean;
+  closed: boolean;
+  buffer: AiAgentSessionEvent[];
+  heartbeat: NodeJS.Timeout;
+  dispose: () => void;
+}
+
 interface RuntimeSession {
-  clients: Set<Response>;
+  clients: Set<RuntimeClient>;
   abortController: AbortController | null;
+  drainPromise: Promise<void> | null;
+  drainAgain: boolean;
+  cancelPending: number;
 }
 
 interface PendingApproval {
@@ -44,18 +86,57 @@ interface PendingQuestion {
 }
 
 const runtimes = new Map<string, RuntimeSession>();
-const MUTATING_TOOLS = new Set<string>(mutatingToolNames);
+const MUTATING_TOOLS = new Set<string>(agentMutatingToolNames);
+const HANDLER_MANAGED_TOOLS = new Set<string>([...agentMutatingToolNames, 'askUser', 'task']);
+const DURABLE_BUILD_OUTPUT_TYPES = new Set<string>([
+  'story-brief',
+  'narrative-contract',
+  'character-bible',
+  'relationship-graph',
+  'world-bible',
+  'plot-thread',
+  'act-architecture',
+  'chapter-brief',
+  'scene-plan',
+  'timeline',
+  'setup-payoff-map',
+  'research-questions',
+  'open-questions',
+  'beat',
+  'chapter-draft',
+  'revision-issue',
+  'finale-plan',
+  'export-manifest'
+]);
+const IDEMPOTENT_APPROVAL_RECOVERY_TOOLS = new Set<string>([
+  'startNovelBuild',
+  'applyArtifactBatch',
+  'applyChapterPatch',
+  'createCheckpoint',
+  'commitCanonDelta',
+  'linkSetupPayoff'
+]);
 const pendingApprovals = new Map<string, PendingApproval>();
 const pendingQuestions = new Map<string, PendingQuestion>();
 const APPROVAL_TIMEOUT_MS = Number(process.env.AI_APPROVAL_TIMEOUT_MS ?? 10 * 60 * 1000);
 const QUESTION_TIMEOUT_MS = Number(process.env.AI_QUESTION_TIMEOUT_MS ?? APPROVAL_TIMEOUT_MS);
 const DEFAULT_CONTEXT_WINDOW = Number(process.env.AI_CONTEXT_WINDOW_TOKENS ?? 128_000);
+const TOOL_OUTPUT_SNAPSHOT_BYTES = Math.max(1_024, Number(process.env.AI_TOOL_OUTPUT_SNAPSHOT_BYTES ?? 16_384));
+
+class AgentStreamAbort extends Error {}
+class AgentStreamFailure extends Error {}
+class HandledSubtaskError extends Error {}
+class PromptClaimRaceError extends Error {}
+class PromptCompletionRaceError extends Error {}
 
 interface PromptPayload {
   prompt: string;
   model: string | null;
   attachments: AiAgentAttachment[];
   agent: string | null;
+  taskContract: TaskContract | null;
+  buildRunId: string | null;
+  approvalMode: AiAgentApprovalMode;
 }
 
 interface UsagePayload {
@@ -69,9 +150,11 @@ interface UsagePayload {
 
 export class AiAgentSessionUseCase {
   private readonly access: ProjectAccessRepository;
+  private readonly timeline: SessionTimelineRecorder;
 
   constructor(private readonly prisma: PrismaClient) {
     this.access = new ProjectAccessRepository(prisma);
+    this.timeline = new SessionTimelineRecorder(prisma);
   }
 
   async list(userId: string, projectId: string): Promise<AiAgentSessionSummary[]> {
@@ -86,6 +169,7 @@ export class AiAgentSessionUseCase {
       id: session.id,
       projectId,
       title: session.title ?? defaultSessionTitle(session.createdAt),
+      approvalMode: fromPrismaApprovalMode(session.approvalMode),
       status: toSessionStatus(session.status),
       messageCount: session._count.messages,
       createdAt: session.createdAt.toISOString(),
@@ -99,11 +183,42 @@ export class AiAgentSessionUseCase {
     input: CreateAiAgentSessionInput
   ): Promise<AiAgentSession> {
     await this.access.assertPermission(userId, projectId, 'project:write');
+    const approvalMode = normalizeApprovalMode(input.approvalMode);
+    if (approvalMode === 'auto') await this.access.assertPermission(userId, projectId, 'project:admin');
     const title = input.title?.trim() || 'New chat';
+    const activeBuildRunId = await this.validateRequestedBuildRun(projectId, input.buildRunId);
     const session = await this.prisma.projectAiAgentSession.create({
-      data: { projectId, title }
+      data: { projectId, title, activeBuildRunId, approvalMode: toPrismaApprovalMode(approvalMode) }
     });
     return this.snapshot(session.id, projectId);
+  }
+
+  async update(
+    userId: string,
+    projectId: string,
+    sessionId: string,
+    input: UpdateAiAgentSessionInput
+  ): Promise<AiAgentSession> {
+    if (input.approvalMode === undefined) throw new HttpError(400, 'approvalMode is required');
+    const approvalMode = normalizeApprovalMode(input.approvalMode);
+    await this.access.assertPermission(
+      userId,
+      projectId,
+      approvalMode === 'auto' ? 'project:admin' : 'project:write'
+    );
+    const session = await this.getSession(projectId, sessionId);
+    if (session.status === 'RUNNING') throw new HttpError(409, 'Execution mode cannot change while the agent is running');
+    const queued = await this.prisma.aiAgentPrompt.count({
+      where: { sessionId, status: { in: ['QUEUED', 'RUNNING'] } }
+    });
+    if (queued > 0) throw new HttpError(409, 'Execution mode cannot change while prompts are queued');
+    await this.prisma.projectAiAgentSession.update({
+      where: { id: sessionId },
+      data: { approvalMode: toPrismaApprovalMode(approvalMode) }
+    });
+    const snapshot = await this.snapshot(sessionId, projectId);
+    await this.broadcast(projectId, { type: 'session', session: snapshot, data: { approvalMode } });
+    return snapshot;
   }
 
   async get(userId: string, projectId: string, sessionId?: string): Promise<AiAgentSession> {
@@ -111,7 +226,76 @@ export class AiAgentSessionUseCase {
     const session = sessionId
       ? await this.getSession(projectId, sessionId)
       : await this.ensureDefaultSession(projectId);
+    await this.recoverOrphanedInteractiveSession(session.id);
     return this.snapshot(session.id, projectId);
+  }
+
+  async getToolCall(
+    userId: string,
+    projectId: string,
+    toolCallId: string,
+    sessionId?: string
+  ): Promise<AiAgentToolCall> {
+    await this.access.assertProjectAccess(userId, projectId);
+    const session = sessionId
+      ? await this.getSession(projectId, sessionId)
+      : await this.ensureDefaultSession(projectId);
+    await this.recoverOrphanedInteractiveSession(session.id);
+    const toolCall = await this.prisma.aiAgentToolCall.findFirst({
+      where: { sessionId: session.id, OR: [{ id: toolCallId }, { toolCallId }] }
+    });
+    if (!toolCall) throw new HttpError(404, 'Tool call not found');
+    return toToolCall(toolCall, { fullOutput: true, fullInput: true });
+  }
+
+  async getTimeline(
+    userId: string,
+    projectId: string,
+    input: GetAiAgentTimelineInput = {},
+    sessionId?: string
+  ): Promise<AiAgentTimelinePage> {
+    await this.access.assertProjectAccess(userId, projectId);
+    const session = sessionId
+      ? await this.getSession(projectId, sessionId)
+      : await this.ensureDefaultSession(projectId);
+    await this.recoverOrphanedInteractiveSession(session.id);
+    const limit = Math.min(Math.max(input.limit ?? 100, 1), 200);
+    const beforeSequence = typeof input.beforeSequence === 'number' && Number.isInteger(input.beforeSequence)
+      ? input.beforeSequence
+      : undefined;
+    const rows = await this.prisma.aiAgentSessionPart.findMany({
+      where: {
+        sessionId: session.id,
+        ...(beforeSequence === undefined ? {} : { sequence: { lt: beforeSequence } })
+      },
+      orderBy: { sequence: 'desc' },
+      take: limit + 1
+    });
+    const selected = rows.slice(0, limit);
+    if (selected.length) {
+      const messageIds = [...new Set(selected.flatMap((part) => part.messageId ? [part.messageId] : []))];
+      const toolCallIds = [...new Set(selected.flatMap((part) => part.toolCallId ? [part.toolCallId] : []))];
+      const [messages, toolCalls, legacyMessage, legacyTool] = await Promise.all([
+        messageIds.length ? this.prisma.aiAgentMessage.findMany({ where: { sessionId: session.id, id: { in: messageIds } } }) : [],
+        toolCallIds.length ? this.prisma.aiAgentToolCall.findMany({ where: { sessionId: session.id, id: { in: toolCallIds } } }) : [],
+        rows.length <= limit ? this.prisma.aiAgentMessage.findFirst({ where: { sessionId: session.id, parts: { none: {} } }, select: { id: true } }) : null,
+        rows.length <= limit ? this.prisma.aiAgentToolCall.findFirst({ where: { sessionId: session.id, parts: { none: {} } }, select: { id: true } }) : null
+      ]);
+      const hasMore = rows.length > limit || Boolean(legacyMessage || legacyTool);
+      const projection = buildSessionTimelineProjection(
+        selected,
+        messages.map(toMessage),
+        toolCalls.map((toolCall) => toToolCall(toolCall)),
+        { maxPersistedParts: limit, hasMoreBefore: hasMore }
+      );
+      return {
+        parts: projection.timeline,
+        timelineInfo: projection.timelineInfo,
+        nextBeforeSequence: hasMore ? Math.min(...selected.map((part) => part.sequence)) : null,
+        hasMore
+      };
+    }
+    return this.legacyTimelinePage(session.id, beforeSequence, limit, input.legacyCursor);
   }
 
   async queuePrompt(
@@ -123,28 +307,40 @@ export class AiAgentSessionUseCase {
     await this.access.assertPermission(userId, projectId, 'project:write');
     await loadAiModelForProject(this.prisma, projectId, input.model);
 
+    const session = sessionId
+      ? await this.getSession(projectId, sessionId)
+      : await this.ensureDefaultSession(projectId);
+    if (session.approvalMode === 'AUTO') {
+      await this.access.assertPermission(userId, projectId, 'project:admin');
+    }
     const prompt = input.prompt?.trim();
     if (!prompt) throw new HttpError(400, 'Prompt is required');
+    const activeBuildRunId = await this.resolveActiveBuildRun(
+      projectId,
+      session.id,
+      input.buildRunId
+    );
     const payload = normalizePromptPayload({
       prompt,
       model: typeof input.model === 'string' ? input.model.trim() || null : null,
       attachments: sanitizeAttachments(input.attachments),
-      agent: null
+      agent: null,
+      taskContract: null,
+      buildRunId: activeBuildRunId,
+      approvalMode: fromPrismaApprovalMode(session.approvalMode)
     });
-
-    const session = sessionId
-      ? await this.getSession(projectId, sessionId)
-      : await this.ensureDefaultSession(projectId);
     const runtime = getRuntime(session.id);
     if (input.interrupt && runtime.abortController) {
       runtime.abortController.abort();
-      await this.prisma.aiAgentPrompt.updateMany({
-        where: { sessionId: session.id, status: 'RUNNING' },
-        data: { status: 'CANCELLED' }
-      });
-      await this.prisma.projectAiAgentSession.update({
-        where: { id: session.id },
-        data: { status: 'CANCELLED', activePromptId: null }
+      await this.prisma.$transaction(async (tx) => {
+        await tx.aiAgentPrompt.updateMany({
+          where: { sessionId: session.id, status: 'RUNNING' },
+          data: { status: 'CANCELLED' }
+        });
+        await tx.projectAiAgentSession.update({
+          where: { id: session.id },
+          data: { status: 'CANCELLED', activePromptId: null }
+        });
       });
     }
 
@@ -166,7 +362,7 @@ export class AiAgentSessionUseCase {
       session: await this.snapshot(session.id, projectId),
       data: toQueuedPrompt(queued)
     });
-    void this.drain(userId, projectId, session.id);
+    void this.drain(userId, projectId, session.id).catch(() => undefined);
     return this.snapshot(session.id, projectId);
   }
 
@@ -176,17 +372,25 @@ export class AiAgentSessionUseCase {
       ? await this.getSession(projectId, sessionId)
       : await this.ensureDefaultSession(projectId);
     const runtime = getRuntime(session.id);
-    if (runtime.abortController) runtime.abortController.abort();
-    await this.prisma.aiAgentPrompt.updateMany({
-      where: { sessionId: session.id, status: { in: ['QUEUED', 'RUNNING'] } },
-      data: { status: 'CANCELLED' }
-    });
-    await this.prisma.projectAiAgentSession.update({
-      where: { id: session.id },
-      data: { status: 'CANCELLED', activePromptId: null }
-    });
+    runtime.cancelPending += 1;
+    runtime.abortController?.abort();
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.aiAgentPrompt.updateMany({
+          where: { sessionId: session.id, status: { in: ['QUEUED', 'RUNNING'] } },
+          data: { status: 'CANCELLED' }
+        });
+        await tx.projectAiAgentSession.update({
+          where: { id: session.id },
+          data: { status: 'CANCELLED', activePromptId: null, lastError: null }
+        });
+      });
+    } finally {
+      runtime.cancelPending = Math.max(0, runtime.cancelPending - 1);
+    }
     const snapshot = await this.snapshot(session.id, projectId);
     await this.broadcast(projectId, { type: 'session', session: snapshot, data: { cancelled: true } });
+    void this.drain(userId, projectId, session.id).catch(() => undefined);
     return snapshot;
   }
 
@@ -204,8 +408,15 @@ export class AiAgentSessionUseCase {
     const toolCall = await this.prisma.aiAgentToolCall.findFirst({
       where: {
         sessionId: session.id,
-        status: 'PENDING_APPROVAL',
-        OR: [{ id: toolCallId }, { toolCallId }]
+        AND: [
+          { OR: [{ id: toolCallId }, { toolCallId }] },
+          {
+            OR: [
+              { status: 'PENDING_APPROVAL' },
+              { status: { in: ['APPROVED', 'RUNNING'] }, toolName: { in: [...agentMutatingToolNames] } }
+            ]
+          }
+        ]
       }
     });
     if (!toolCall) throw new HttpError(404, 'Pending tool call not found');
@@ -236,8 +447,15 @@ export class AiAgentSessionUseCase {
     const toolCalls = await this.prisma.aiAgentToolCall.findMany({
       where: {
         sessionId: session.id,
-        status: 'PENDING_APPROVAL',
-        OR: [{ id: { in: ids } }, { toolCallId: { in: ids } }]
+        AND: [
+          { OR: [{ id: { in: ids } }, { toolCallId: { in: ids } }] },
+          {
+            OR: [
+              { status: 'PENDING_APPROVAL' },
+              { status: { in: ['APPROVED', 'RUNNING'] }, toolName: { in: [...agentMutatingToolNames] } }
+            ]
+          }
+        ]
       },
       orderBy: { createdAt: 'asc' }
     });
@@ -278,9 +496,10 @@ export class AiAgentSessionUseCase {
     if (!toolCall) throw new HttpError(404, 'Pending question not found');
 
     const answers = normalizeQuestionAnswers(input.answers);
+    validateQuestionAnswers(toolCall.input, answers);
     const output = questionOutput(toolCall.input, answers);
-    await this.prisma.aiAgentToolCall.update({
-      where: { id: toolCall.id },
+    const claimed = await this.prisma.aiAgentToolCall.updateMany({
+      where: { id: toolCall.id, status: 'PENDING_APPROVAL' },
       data: {
         status: 'EXECUTED',
         output: output as Prisma.InputJsonValue,
@@ -288,25 +507,39 @@ export class AiAgentSessionUseCase {
         decidedById: userId
       }
     });
+    if (claimed.count !== 1) throw new HttpError(409, 'Question was already answered or dismissed');
+    const answeredToolCall = await this.prisma.aiAgentToolCall.findUniqueOrThrow({ where: { id: toolCall.id } });
     const pending = pendingQuestions.get(toolCall.id);
     if (pending) {
       clearTimeout(pending.timeout);
       pendingQuestions.delete(toolCall.id);
       pending.resolve(output);
+    } else {
+      await this.failOrphanedInteractiveRun(
+        session.id,
+        toolCall.promptId,
+        'The answer was recorded, but the interrupted model turn cannot continue after a backend restart. Send a new prompt to proceed.'
+      );
     }
-    await this.prisma.aiAgentMessage.create({
+    const toolMessage = await this.prisma.aiAgentMessage.create({
       data: {
         sessionId: session.id,
         role: 'TOOL',
         content: questionToolMessage(output)
       }
     });
+    const resultPart = await this.ensureToolTimelinePart(session.id, toolCall.promptId, 'tool-result', answeredToolCall.id);
+    await this.createMessagePart(session.id, toolCall.promptId, toolMessage);
 
     const snapshot = await this.snapshot(session.id, projectId);
     await this.broadcast(projectId, {
       type: 'question-answered',
       session: snapshot,
-      data: { toolCallId: toolCall.id, answers }
+      data: {
+        toolCallId: toolCall.id,
+        answers,
+        part: await this.hydrateSinglePart(resultPart)
+      }
     });
     return snapshot;
   }
@@ -316,47 +549,145 @@ export class AiAgentSessionUseCase {
     const session = sessionId
       ? await this.getSession(projectId, sessionId)
       : await this.ensureDefaultSession(projectId);
+    await this.recoverOrphanedInteractiveSession(session.id);
     res.setHeader('content-type', 'text/event-stream');
     res.setHeader('cache-control', 'no-cache, no-transform');
     res.setHeader('connection', 'keep-alive');
     res.flushHeaders?.();
     const runtime = getRuntime(session.id);
-    runtime.clients.add(res);
-    writeEvent(res, { type: 'session', session: await this.snapshot(session.id, projectId) });
-    res.on('close', () => runtime.clients.delete(res));
+    const client: RuntimeClient = {
+      res,
+      ready: false,
+      closed: false,
+      buffer: [],
+      dispose: () => undefined,
+      heartbeat: setInterval(() => {
+        if (!client.ready || res.writableEnded) return;
+        try {
+          if (!res.write(': heartbeat\n\n')) client.ready = false;
+        } catch {
+          client.dispose();
+        }
+      }, 15_000)
+    };
+    client.dispose = () => {
+      if (client.closed) return;
+      client.closed = true;
+      client.buffer.length = 0;
+      clearInterval(client.heartbeat);
+      runtime.clients.delete(client);
+    };
+    runtime.clients.add(client);
+    res.on('drain', () => flushRuntimeClient(client));
+    res.on('close', client.dispose);
+    const initial = await this.snapshot(session.id, projectId);
+    if (client.closed) return;
+    const initialWritten = safeWriteRuntimeEvent(client, { type: 'session', session: initial });
+    if (initialWritten === null) return;
+    client.ready = initialWritten;
+    if (client.ready) flushRuntimeClient(client);
   }
 
-  private async drain(userId: string, projectId: string, sessionId: string): Promise<void> {
-    const session = await this.getSession(projectId, sessionId);
-    const current = await this.prisma.projectAiAgentSession.findUniqueOrThrow({
-      where: { id: session.id },
-      select: { status: true }
+  private drain(userId: string, projectId: string, sessionId: string, upstreamAbortSignal?: AbortSignal): Promise<void> {
+    const runtime = getRuntime(sessionId);
+    if (runtime.drainPromise) {
+      runtime.drainAgain = true;
+      return runtime.drainPromise;
+    }
+    runtime.drainAgain = false;
+    const abortFromUpstream = () => runtime.abortController?.abort();
+    upstreamAbortSignal?.addEventListener('abort', abortFromUpstream);
+    const promise = this.drainOwned(userId, projectId, sessionId, upstreamAbortSignal).finally(() => {
+      upstreamAbortSignal?.removeEventListener('abort', abortFromUpstream);
+      if (runtime.drainPromise === promise) runtime.drainPromise = null;
+      const drainAgain = runtime.drainAgain;
+      runtime.drainAgain = false;
+      if (drainAgain) {
+        queueMicrotask(() => {
+          void this.drain(userId, projectId, sessionId, upstreamAbortSignal).catch(() => undefined);
+        });
+      }
     });
-    if (current.status === 'RUNNING') return;
+    runtime.drainPromise = promise;
+    return promise;
+  }
+
+  private async drainOwned(
+    userId: string,
+    projectId: string,
+    sessionId: string,
+    upstreamAbortSignal?: AbortSignal
+  ): Promise<void> {
+    const runtime = getRuntime(sessionId);
+    if (runtime.abortController || runtime.cancelPending) return;
+    const controllerState = { current: new AbortController() };
+    runtime.abortController = controllerState.current;
+    if (upstreamAbortSignal?.aborted) controllerState.current.abort();
+    try {
+      await this.drainControlled(
+        userId,
+        projectId,
+        sessionId,
+        runtime,
+        controllerState,
+        upstreamAbortSignal
+      );
+    } finally {
+      if (runtime.abortController === controllerState.current) {
+        runtime.abortController = null;
+      }
+    }
+  }
+
+  private async drainControlled(
+    userId: string,
+    projectId: string,
+    sessionId: string,
+    runtime: RuntimeSession,
+    controllerState: { current: AbortController },
+    upstreamAbortSignal?: AbortSignal
+  ): Promise<void> {
+    const session = await this.getSession(projectId, sessionId);
+    await this.recoverOrphanedInteractiveSession(session.id, true);
 
     while (true) {
+      if (runtime.cancelPending || controllerState.current.signal.aborted) return;
       const queued = await this.prisma.aiAgentPrompt.findFirst({
         where: { sessionId: session.id, status: 'QUEUED' },
         orderBy: [{ order: 'asc' }, { createdAt: 'asc' }]
       });
       if (!queued) return;
 
-      const runtime = getRuntime(session.id);
-      runtime.abortController = new AbortController();
-      await this.prisma.aiAgentPrompt.update({
-        where: { id: queued.id },
-        data: { status: 'RUNNING' }
-      });
-      await this.prisma.projectAiAgentSession.update({
-        where: { id: session.id },
-        data: { status: 'RUNNING', activePromptId: queued.id, lastError: null }
-      });
-      await this.prisma.aiAgentMessage.create({
+      const claimed = await this.claimQueuedPrompt(session.id, queued.id);
+      if (!claimed) return;
+      const controller = controllerState.current;
+      if (runtime.cancelPending || controller.signal.aborted) {
+        await this.abandonClaimedPromptBeforeExecution(session.id, queued.id);
+        return;
+      }
+      const activeUserMessage = await this.prisma.aiAgentMessage.create({
         data: { sessionId: session.id, role: 'USER', content: queued.prompt }
       });
       const assistantMessage = await this.prisma.aiAgentMessage.create({
         data: { sessionId: session.id, role: 'ASSISTANT', content: '' }
       });
+      if (runtime.cancelPending || controller.signal.aborted) {
+        await this.abandonClaimedPromptBeforeExecution(
+          session.id,
+          queued.id,
+          [activeUserMessage.id, assistantMessage.id]
+        );
+        return;
+      }
+      await this.createMessagePart(session.id, queued.id, activeUserMessage);
+      if (runtime.cancelPending || controller.signal.aborted) {
+        await this.abandonClaimedPromptBeforeExecution(
+          session.id,
+          queued.id,
+          [activeUserMessage.id, assistantMessage.id]
+        );
+        return;
+      }
 
       await this.broadcast(projectId, {
         type: 'prompt-started',
@@ -365,99 +696,192 @@ export class AiAgentSessionUseCase {
       });
 
       let assistantText = '';
+      let activeTextPart: StoredSessionPart | null = null;
+      let pendingText = '';
+      let lastTextFlushAt = Date.now();
+      const outerOwnedToolCalls = new Set<string>();
+      const flushText = async (force: boolean): Promise<void> => {
+        if (!pendingText) return;
+        if (!force && pendingText.length < 64 && (Date.now() - lastTextFlushAt < 250 || pendingText.length < 8)) return;
+        const delta = pendingText;
+        pendingText = '';
+        await this.prisma.aiAgentMessage.update({
+          where: { id: assistantMessage.id },
+          data: { content: assistantText }
+        });
+        activeTextPart = activeTextPart
+          ? await this.updateTextPart(activeTextPart, readPartText(activeTextPart) + delta, true)
+          : await this.createTextPart(session.id, queued.id, assistantMessage.id, delta);
+        lastTextFlushAt = Date.now();
+        await this.broadcast(projectId, {
+          type: 'text-delta',
+          data: { promptId: queued.id, text: delta, part: toTextTimelinePart(activeTextPart) }
+        }, session.id);
+      };
       const promptPayload = parsePromptPayload(queued.prompt);
       try {
+        if (controller.signal.aborted) {
+          throw new AgentStreamAbort('Agent prompt was cancelled before execution');
+        }
         const agents = await loadAiAgents(this.prisma, projectId);
         const activeAgent = promptPayload.agent ? findAgent(agents, promptPayload.agent) : undefined;
-        const model = await loadAiModelForProject(this.prisma, projectId, activeAgent?.model ?? promptPayload.model);
-        const { systemPrompt, userPrompt } = await this.buildPrompts(
+        const selectedModelId = activeAgent?.model ?? promptPayload.model;
+        const model = await loadAiModelForProject(this.prisma, projectId, selectedModelId);
+        const { systemPrompt, userPrompt, skillAllowedTools } = await this.buildPrompts(
           projectId,
           session.id,
           promptPayload.prompt,
           promptPayload.attachments,
           activeAgent,
-          agents
+          agents,
+          activeUserMessage.id,
+          assistantMessage.id,
+          promptPayload.taskContract,
+          promptPayload.buildRunId,
+          promptPayload.approvalMode
         );
         const messagePrompt = modelContent(userPrompt, promptPayload.attachments);
         const messages = [{ role: 'user' as const, content: messagePrompt }] as NonNullable<Parameters<typeof streamText>[0]['messages']>;
+        if (controller.signal.aborted) {
+          throw new AgentStreamAbort('Agent prompt was cancelled before execution');
+        }
         const result = streamText({
           model,
-          abortSignal: runtime.abortController.signal,
-          tools: this.buildAgentTools(projectId, session.id, queued.id, userId, agents, activeAgent),
-          stopWhen: stepCountIs(8),
+          abortSignal: controller.signal,
+          tools: this.buildAgentTools(projectId, session.id, queued.id, userId, agents, activeAgent, promptPayload.taskContract, skillAllowedTools, promptPayload.buildRunId, promptPayload.approvalMode),
+          stopWhen: stepCountIs(stepLimitForTask(promptPayload.taskContract)),
           system: systemPrompt,
           messages
         });
 
         for await (const part of result.fullStream) {
           const type = String(part.type);
+          const terminal = classifyAgentStreamTerminal(part);
+          if (terminal?.kind === 'abort') throw new AgentStreamAbort(terminal.message);
+          if (terminal?.kind === 'error') throw new AgentStreamFailure(terminal.message);
           if (type === 'text-delta') {
             const text = readTextDelta(part);
             if (!text) continue;
             assistantText += text;
-            await this.prisma.aiAgentMessage.update({
-              where: { id: assistantMessage.id },
-              data: { content: assistantText }
-            });
-            await this.broadcast(projectId, {
-              type: 'text-delta',
-              session: await this.snapshot(session.id, projectId),
-              data: { promptId: queued.id, text }
-            });
+            pendingText += text;
+            await flushText(false);
           } else if (
             type === 'tool-call' ||
             type === 'tool-input-available' ||
             type === 'tool-approval-request'
           ) {
+            await flushText(true);
+            if (activeTextPart) {
+              await this.finishTextPart(activeTextPart);
+              activeTextPart = null;
+            }
+            const parsedTool = parseToolPart(part);
+            const invalidToolCall = objectRecord(part)?.invalid === true;
+            const handlerOwned = Boolean(parsedTool && isHandlerManagedTool(parsedTool.toolName) && !invalidToolCall);
+            if (parsedTool && !shouldBroadcastOuterToolEvent(parsedTool.toolName, type, handlerOwned)) continue;
             const persisted = await this.persistToolCall(session.id, queued.id, part);
+            if (parsedTool?.toolCallId && isHandlerManagedTool(parsedTool.toolName) && !handlerOwned) {
+              outerOwnedToolCalls.add(parsedTool.toolCallId);
+            }
+            const timelinePart = persisted
+              ? await this.ensureToolTimelinePart(session.id, queued.id, 'tool-call', persisted.id)
+              : null;
             await this.broadcast(projectId, {
               type: 'tool-call',
               session: await this.snapshot(session.id, projectId),
-              data: persisted ?? part
+              data: mergeEventPart(persisted ?? part, timelinePart ? await this.hydrateSinglePart(timelinePart) : null)
             });
-          } else if (type === 'tool-result' || type === 'tool-output-available') {
-            await this.persistToolResult(part);
+          } else if (
+            type === 'tool-result' ||
+            type === 'tool-output-available' ||
+            type === 'tool-error' ||
+            type === 'tool-output-error' ||
+            type === 'tool-input-error' ||
+            type === 'tool-output-denied'
+          ) {
+            await flushText(true);
+            if (activeTextPart) {
+              await this.finishTextPart(activeTextPart);
+              activeTextPart = null;
+            }
+            if (type === 'tool-input-error') await this.persistToolCall(session.id, queued.id, part);
+            const parsedResult = parseToolResultPart(part);
+            let handlerCall = parsedResult?.toolCallId
+              ? await this.prisma.aiAgentToolCall.findFirst({
+                  where: { sessionId: session.id, toolCallId: parsedResult.toolCallId },
+                  select: { toolName: true }
+                })
+              : null;
+            const eventToolName = stringValue(objectRecord(part)?.toolName) ?? handlerCall?.toolName ?? null;
+            const handlerOwned = Boolean(handlerCall)
+              && Boolean(parsedResult?.toolCallId)
+              && !outerOwnedToolCalls.has(parsedResult!.toolCallId!);
+            if (eventToolName && !shouldBroadcastOuterToolEvent(eventToolName, type, handlerOwned)) continue;
+            if (!handlerCall && parsedResult?.toolCallId) {
+              await this.persistToolCall(session.id, queued.id, part);
+              handlerCall = await this.prisma.aiAgentToolCall.findFirst({
+                where: { sessionId: session.id, toolCallId: parsedResult.toolCallId },
+                select: { toolName: true }
+              });
+            }
+            const persisted = await this.persistToolResult(
+              session.id,
+              part,
+              type !== 'tool-result' && type !== 'tool-output-available'
+            );
+            if (parsedResult?.toolCallId) outerOwnedToolCalls.delete(parsedResult.toolCallId);
+            const timelinePart = persisted
+              ? await this.ensureToolTimelinePart(session.id, queued.id, 'tool-result', persisted.id)
+              : null;
             await this.broadcast(projectId, {
               type: 'tool-result',
               session: await this.snapshot(session.id, projectId),
-              data: part
+              data: mergeEventPart(persisted ?? part, timelinePart ? await this.hydrateSinglePart(timelinePart) : null)
             });
           } else if (type === 'finish' || type === 'finish-step') {
-            const usage = usageFromPart(part, promptPayload.model);
+            const usage = usageFromPart(part, selectedModelId);
             if (usage) await this.saveContextUsage(session.id, usage);
           }
         }
 
-        await this.prisma.aiAgentPrompt.update({
-          where: { id: queued.id },
-          data: { status: 'COMPLETED' }
-        });
-        await this.prisma.projectAiAgentSession.update({
-          where: { id: session.id },
-          data: { status: 'IDLE', activePromptId: null }
-        });
-        runtime.abortController = null;
+        await flushText(true);
+        if (activeTextPart) {
+          await this.finishTextPart(activeTextPart);
+          activeTextPart = null;
+        }
+
+        if (controller.signal.aborted) {
+          throw new AgentStreamAbort('Agent prompt was cancelled before completion');
+        }
+        const completed = await this.completeClaimedPrompt(session.id, queued.id);
+        if (!completed) {
+          throw new AgentStreamAbort('Agent prompt was cancelled before completion');
+        }
         await this.broadcast(projectId, {
           type: 'prompt-finished',
           session: await this.snapshot(session.id, projectId),
           data: { promptId: queued.id }
         });
       } catch (error) {
-        const aborted = runtime.abortController?.signal.aborted;
-        runtime.abortController = null;
-        await this.prisma.aiAgentPrompt.update({
-          where: { id: queued.id },
+        await flushText(true);
+        if (activeTextPart) await this.finishTextPart(activeTextPart);
+        const aborted = controller.signal.aborted || error instanceof AgentStreamAbort;
+        await this.failRunningToolCalls(session.id, queued.id, aborted ? 'Agent prompt was cancelled' : errorMessage(error));
+        await this.prisma.aiAgentPrompt.updateMany({
+          where: { id: queued.id, sessionId: session.id, status: 'RUNNING' },
           data: { status: aborted ? 'CANCELLED' : 'ERROR' }
         });
-        await this.prisma.projectAiAgentSession.update({
-          where: { id: session.id },
+        await this.prisma.projectAiAgentSession.updateMany({
+          where: { id: session.id, status: 'RUNNING', activePromptId: queued.id },
           data: {
             status: aborted ? 'CANCELLED' : 'ERROR',
             activePromptId: null,
-            lastError: mergeSessionMeta(null, {
-              error: errorMessage(error),
-              contextUsage: usageFromError(error, promptPayload.model)
-            })
+            lastError: aborted
+              ? null
+              : mergeSessionMeta(null, {
+                  error: errorMessage(error),
+                  contextUsage: usageFromError(error, promptPayload.model)
+                })
           }
         });
         const snapshot = await this.snapshot(session.id, projectId);
@@ -471,7 +895,84 @@ export class AiAgentSessionUseCase {
           }
         });
       }
+      if (!this.rotateDrainController(runtime, controllerState, upstreamAbortSignal)) return;
     }
+  }
+
+  private claimQueuedPrompt(sessionId: string, promptId: string): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const promptClaim = await tx.aiAgentPrompt.updateMany({
+        where: { id: promptId, sessionId, status: 'QUEUED' },
+        data: { status: 'RUNNING' }
+      });
+      if (promptClaim.count !== 1) return false;
+      const sessionClaim = await tx.projectAiAgentSession.updateMany({
+        where: { id: sessionId, status: { not: 'RUNNING' }, activePromptId: null },
+        data: { status: 'RUNNING', activePromptId: promptId, lastError: null }
+      });
+      if (sessionClaim.count !== 1) throw new PromptClaimRaceError();
+      return true;
+    }).catch((error) => {
+      if (error instanceof PromptClaimRaceError) return false;
+      throw error;
+    });
+  }
+
+  private completeClaimedPrompt(sessionId: string, promptId: string): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const promptCompletion = await tx.aiAgentPrompt.updateMany({
+        where: { id: promptId, sessionId, status: 'RUNNING' },
+        data: { status: 'COMPLETED' }
+      });
+      if (promptCompletion.count !== 1) throw new PromptCompletionRaceError();
+      const sessionCompletion = await tx.projectAiAgentSession.updateMany({
+        where: { id: sessionId, status: 'RUNNING', activePromptId: promptId },
+        data: { status: 'IDLE', activePromptId: null }
+      });
+      if (sessionCompletion.count !== 1) throw new PromptCompletionRaceError();
+      return true;
+    }).catch((error) => {
+      if (error instanceof PromptCompletionRaceError) return false;
+      throw error;
+    });
+  }
+
+  private async abandonClaimedPromptBeforeExecution(
+    sessionId: string,
+    promptId: string,
+    messageIds: string[] = []
+  ): Promise<void> {
+    if (messageIds.length) {
+      await this.prisma.aiAgentSessionPart.deleteMany({
+        where: { sessionId, promptId, messageId: { in: messageIds } }
+      });
+      await this.prisma.aiAgentMessage.deleteMany({
+        where: { sessionId, id: { in: messageIds } }
+      });
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.aiAgentPrompt.updateMany({
+        where: { id: promptId, sessionId, status: 'RUNNING' },
+        data: { status: 'CANCELLED' }
+      });
+      await tx.projectAiAgentSession.updateMany({
+        where: { id: sessionId, status: 'RUNNING', activePromptId: promptId },
+        data: { status: 'CANCELLED', activePromptId: null, lastError: null }
+      });
+    });
+  }
+
+  private rotateDrainController(
+    runtime: RuntimeSession,
+    controllerState: { current: AbortController },
+    upstreamAbortSignal?: AbortSignal
+  ): boolean {
+    if (runtime.cancelPending) return false;
+    const nextController = new AbortController();
+    if (upstreamAbortSignal?.aborted) nextController.abort();
+    controllerState.current = nextController;
+    runtime.abortController = nextController;
+    return true;
   }
 
   private async ensureDefaultSession(projectId: string) {
@@ -494,12 +995,12 @@ export class AiAgentSessionUseCase {
   }
 
   private async snapshot(sessionId: string, projectId: string): Promise<AiAgentSession> {
-    const [session, messages, prompts, pendingToolCalls, recentToolCalls] = await Promise.all([
+    const [session, messages, prompts, pendingToolCalls, recentToolCalls, parts] = await Promise.all([
       this.prisma.projectAiAgentSession.findUniqueOrThrow({ where: { id: sessionId } }),
       this.prisma.aiAgentMessage.findMany({
         where: { sessionId },
-        orderBy: { createdAt: 'asc' },
-        take: 200
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: 201
       }),
       this.prisma.aiAgentPrompt.findMany({
         where: { sessionId, status: { in: ['QUEUED', 'RUNNING'] } },
@@ -511,28 +1012,140 @@ export class AiAgentSessionUseCase {
       }),
       this.prisma.aiAgentToolCall.findMany({
         where: { sessionId },
-        orderBy: { createdAt: 'asc' },
-        take: 200
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: 201
+      }),
+      this.prisma.aiAgentSessionPart.findMany({
+        where: { sessionId },
+        orderBy: { sequence: 'desc' },
+        take: SESSION_TIMELINE_PART_LIMIT + 1
       })
     ]);
+    const messagesTruncated = messages.length > 200;
+    const toolsTruncated = recentToolCalls.length > 200;
+    const recentMessages = messages.slice(0, 200);
+    const recentTools = recentToolCalls.slice(0, 200);
+    const messageIds = [...new Set(parts.flatMap((part) => part.messageId ? [part.messageId] : []))];
+    const toolCallIds = [...new Set(parts.flatMap((part) => part.toolCallId ? [part.toolCallId] : []))];
+    const [referencedMessages, referencedToolCalls] = await Promise.all([
+      messageIds.length ? this.prisma.aiAgentMessage.findMany({ where: { sessionId, id: { in: messageIds } } }) : [],
+      toolCallIds.length ? this.prisma.aiAgentToolCall.findMany({ where: { sessionId, id: { in: toolCallIds } } }) : []
+    ]);
+    const mappedMessages = [...recentMessages].reverse().map(toMessage);
+    const mappedToolCalls = [...recentTools].reverse().map((toolCall) => toToolCall(toolCall));
+    const hydrationMessages = dedupeById([...recentMessages, ...referencedMessages]).map(toMessage);
+    const hydrationToolCalls = dedupeById([...recentTools, ...referencedToolCalls]).map((toolCall) => toToolCall(toolCall));
+    const compatibilityHasMore = hasUncoveredTruncatedCompatibility(
+      parts,
+      messages,
+      recentToolCalls,
+      messagesTruncated,
+      toolsTruncated
+    );
+    const projection = buildSessionTimelineProjection(parts, hydrationMessages, hydrationToolCalls, {
+      maxPersistedParts: SESSION_TIMELINE_PART_LIMIT,
+      hasMoreBefore: compatibilityHasMore
+    });
     return {
       id: session.id,
       projectId,
       title: session.title ?? defaultSessionTitle(session.createdAt),
+      approvalMode: fromPrismaApprovalMode(session.approvalMode),
       status: toSessionStatus(session.status),
       activePromptId: session.activePromptId,
       queue: prompts.map(toQueuedPrompt),
-      messages: messages.map(toMessage),
-      toolCalls: recentToolCalls.map(toToolCall),
-      pendingToolCalls: pendingToolCalls.map(toToolCall),
+      messages: mappedMessages,
+      toolCalls: mappedToolCalls,
+      timeline: projection.timeline,
+      timelineInfo: {
+        ...projection.timelineInfo,
+        legacyCursor: compatibilityHasMore
+          ? legacyCursorForUncoveredCompatibility(parts, recentMessages, recentTools, projection.timelineInfo.earliestSequence ?? 0)
+            ?? legacyCursorForCompatibilityBoundary(recentMessages, recentTools, projection.timelineInfo.earliestSequence ?? 0)
+          : null
+      },
+      pendingToolCalls: pendingToolCalls.map((toolCall) => toToolCall(toolCall)),
+      activeBuildRunId: session.activeBuildRunId,
       contextUsage: contextUsageFromSession(session.lastError),
       error: sessionErrorFromSession(session.lastError),
       updatedAt: session.updatedAt.toISOString()
     };
   }
 
-  private async broadcast(_projectId: string, event: AiAgentSessionEvent): Promise<void> {
-    for (const client of getRuntime(event.session.id).clients) writeEvent(client, event);
+  private async legacyTimelinePage(
+    sessionId: string,
+    beforeSequence: number | undefined,
+    limit: number,
+    legacyCursor?: string
+  ): Promise<AiAgentTimelinePage> {
+    const cursor = parseLegacyTimelineCursor(legacyCursor);
+    const sourceLimit = Math.max(1, Math.floor(limit / 2));
+    const cursorWhere = cursor
+      ? {
+          OR: [
+            { createdAt: { lt: cursor.createdAt } },
+            { createdAt: cursor.createdAt, id: { lt: cursor.id } }
+          ]
+        }
+      : {};
+    const [messageRows, toolRows] = await Promise.all([
+      this.prisma.aiAgentMessage.findMany({
+        where: { sessionId, parts: { none: {} }, ...cursorWhere },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: sourceLimit + 1
+      }),
+      this.prisma.aiAgentToolCall.findMany({
+        where: { sessionId, parts: { none: {} }, ...cursorWhere },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: sourceLimit + 1
+      })
+    ]);
+    const sources = [
+      ...messageRows.map((row) => ({ kind: 'message' as const, id: row.id, createdAt: row.createdAt, row })),
+      ...toolRows.map((row) => ({ kind: 'tool' as const, id: row.id, createdAt: row.createdAt, row }))
+    ].sort((left, right) =>
+      right.createdAt.getTime() - left.createdAt.getTime() || right.id.localeCompare(left.id)
+    );
+    const selectedSources = sources.slice(0, sourceLimit);
+    const selectedMessageIds = new Set(selectedSources.filter((source) => source.kind === 'message').map((source) => source.id));
+    const selectedToolIds = new Set(selectedSources.filter((source) => source.kind === 'tool').map((source) => source.id));
+    const hasMore = sources.length > sourceLimit;
+    const projection = buildSessionTimelineProjection(
+      [],
+      messageRows.filter((row) => selectedMessageIds.has(row.id)).reverse().map(toMessage),
+      toolRows.filter((row) => selectedToolIds.has(row.id)).reverse().map((toolCall) => toToolCall(toolCall))
+    );
+    // A legacy tool source can project to both call and result. Keep that pair
+    // indivisible even when the requested part limit is one.
+    const rawParts = projection.timeline;
+    const anchor = beforeSequence ?? cursor?.beforeSequence ?? 0;
+    const parts = rawParts.map((part, index) => ({
+      ...part,
+      sequence: anchor - rawParts.length + index
+    }));
+    const oldestSource = selectedSources.at(-1);
+    const nextLegacyCursor = hasMore && oldestSource
+      ? serializeLegacyTimelineCursor(oldestSource.createdAt, oldestSource.id, parts[0]?.sequence ?? anchor)
+      : null;
+    return {
+      parts,
+      timelineInfo: {
+        mode: 'approximate',
+        truncated: hasMore,
+        earliestSequence: parts[0]?.sequence ?? null,
+        hasMoreBefore: hasMore,
+        legacyCursor: nextLegacyCursor
+      },
+      nextBeforeSequence: hasMore && parts.length ? parts[0]!.sequence : null,
+      nextLegacyCursor,
+      hasMore,
+      limitation: 'legacy-history-best-effort'
+    };
+  }
+
+  private async broadcast(_projectId: string, event: AiAgentSessionEvent, sessionId = event.session?.id): Promise<void> {
+    if (!sessionId) return;
+    for (const client of getRuntime(sessionId).clients) queueRuntimeEvent(client, event);
   }
 
   private async buildPrompts(
@@ -541,8 +1154,13 @@ export class AiAgentSessionUseCase {
     prompt: string,
     attachments: AiAgentAttachment[],
     activeAgent: AiAgentInfo | undefined,
-    agents: AiAgentInfo[]
-  ): Promise<{ systemPrompt: string; userPrompt: string }> {
+    agents: AiAgentInfo[],
+    activeUserMessageId: string,
+    activeAssistantMessageId: string,
+    taskContract: TaskContract | null,
+    activeBuildRunId: string | null,
+    approvalMode: AiAgentApprovalMode
+  ): Promise<{ systemPrompt: string; userPrompt: string; contextPack: AssembledContextPack; skillAllowedTools: string[] | null }> {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
       select: {
@@ -566,55 +1184,71 @@ export class AiAgentSessionUseCase {
     const messages = await this.prisma.aiAgentMessage.findMany({
       where: { sessionId },
       orderBy: { createdAt: 'desc' },
-      take: 20
+      // The separately rendered active request and its empty assistant row are
+      // removed by id below, leaving at most twenty genuine history messages.
+      take: 22
     });
     const skills = await loadAiSkillCatalog(this.prisma, projectId);
-    const transcript = messages
-      .reverse()
-      .map((message) => {
-        const role = toMessageRole(message.role);
-        const payload = role === 'user' ? parsePromptPayload(message.content) : null;
-        const suffix = payload?.attachments.length ? `\nAttachments: ${payload.attachments.map(attachmentLabel).join(', ')}` : '';
-        return `${role}: ${payload?.prompt ?? message.content}${suffix}`;
-      })
-      .join('\n');
+    const transcript = serializeUntrustedData('conversation-history', buildRecentTranscript(messages.reverse(), [activeUserMessageId, activeAssistantMessageId], (content) => {
+      const payload = parsePromptPayload(content);
+      return {
+        prompt: payload.prompt,
+        attachmentLabels: payload.attachments.map(attachmentLabel)
+      };
+    }));
 
     const systemPrompt = renderSystemPrompt({
       project: {
-        title: project?.title ?? '',
-        genre: project?.genre ?? '',
-        tone: project?.tone ?? '',
-        voice: project?.voice ?? '',
-        perspective: project?.perspective ?? '',
-        pov: project?.pov ?? ''
+        title: '', genre: '', tone: '', voice: '', perspective: '', pov: ''
       },
-      themes: project?.themes?.join(', ') ?? '',
-      instructionDocs: instructionDocs.map((doc) => ({
-        title: doc.title,
-        content: bodyOf(doc.bodyWriting)
-      })),
-      skills: skills.map((skill) => ({ name: skill.name, description: skill.description })),
-      subagents: subagentsForTask(agents).map((agent) => ({
-        name: agent.name,
-        description: agent.description
-      }))
+      themes: '',
+      instructionDocs: [],
+      // Catalog descriptions can be project-authored. The runtime discovers
+      // them through bounded tools and activates full instructions only in C.
+      skills: [],
+      subagents: []
+    });
+    const activeSkills = selectActiveSkills(skills, taskContract, activeAgent);
+    for (const skill of activeSkills) {
+      if (!skill.manifest.runtimeRoles.includes(activeAgent?.runtimeRole ?? 'orchestrator')) {
+        throw new Error(`Skill ${skill.name}@${skill.manifest.version} does not authorize runtime role ${activeAgent?.runtimeRole ?? 'orchestrator'}`);
+      }
+    }
+    const contextPack = await new ContextAssembler(this.prisma).assemble({
+      projectId,
+      task: taskContract,
+      tokenBudget: Math.min(
+        taskContract?.budget.maxInputTokens ?? 24_000,
+        ...activeSkills.map((skill) => skill.manifest.context.maxTokens),
+        80_000
+      ),
+      sectionKinds: [...new Set(activeSkills.flatMap((skill) => skill.manifest.context.sections))]
     });
     const agentPrompt = activeAgent?.prompt?.trim();
-    const agentName = activeAgent?.name;
-    const finalSystemPrompt = agentPrompt
-      ? `${systemPrompt}\n\n## Active agent instructions: ${agentName ?? 'subagent'}\n\n${agentPrompt}`
-      : systemPrompt;
+    const finalSystemPrompt = renderInferenceLayers({
+      role: activeAgent?.runtimeRole ?? 'orchestrator',
+      task: taskContract,
+      activeSkills: activeSkills.map((skill) => ({ manifest: skill.manifest, content: skill.content, references: loadAiSkillReferences(skill) })),
+      contextPack,
+      runtimeInstructions: systemPrompt,
+      activeAgentInstructions: agentPrompt,
+      activeBuildRunId,
+      approvalMode,
+      userAuthority: JSON.stringify({
+        explicitOwnerInstructionDocs: instructionDocs.map((doc) => ({ title: doc.title, content: bodyOf(doc.bodyWriting) }))
+      }, null, 2)
+    });
 
     const attachmentContext = await this.buildAttachmentContext(projectId, attachments);
     const uploadAttachments = attachments.filter((attachment) => !attachment.reference);
     const userPrompt = renderUserContext({
       transcript,
       prompt: attachmentContext || uploadAttachments.length
-        ? `${prompt}${uploadAttachments.length ? `\n\nAttached files:\n${uploadAttachments.map((attachment) => `- ${attachmentLabel(attachment)}`).join('\n')}` : ''}${attachmentContext ? `\n\nAttached project context:\n${attachmentContext}` : ''}`
+        ? `${prompt}${uploadAttachments.length ? `\n\n${serializeUntrustedData('attachment-labels', uploadAttachments.map(attachmentLabel))}` : ''}${attachmentContext ? `\n\n${serializeUntrustedData('attachment-context', attachmentContext)}` : ''}`
         : prompt
     });
 
-    return { systemPrompt: finalSystemPrompt, userPrompt };
+    return { systemPrompt: finalSystemPrompt, userPrompt, contextPack, skillAllowedTools: activeSkills.length ? [...new Set(activeSkills.flatMap((skill) => skill.manifest.allowedTools))] : null };
   }
 
   private async buildAttachmentContext(projectId: string, attachments: AiAgentAttachment[]): Promise<string> {
@@ -700,74 +1334,242 @@ export class AiAgentSessionUseCase {
     promptId: string,
     userId: string,
     agents: AiAgentInfo[],
-    activeAgent: AiAgentInfo | undefined
+    activeAgent: AiAgentInfo | undefined,
+    taskContract: TaskContract | null,
+    skillAllowedTools: readonly string[] | null,
+    activeBuildRunId: string | null,
+    approvalMode: AiAgentApprovalMode
   ): ToolSet {
+    const delegated = Boolean(activeAgent && taskContract);
     return buildAgentTools(this.prisma, { projectId, userId }, {
-      handleApproval: (toolName, input, execute) =>
-        this.handleApproval(sessionId, promptId, projectId, toolName, input, execute)
+      handleApproval: (toolName, input, execute, toolCallId, abortSignal) =>
+        this.handleApproval(sessionId, promptId, projectId, toolName, input, execute, toolCallId, abortSignal, approvalMode)
     }, {
-      handleQuestion: (toolName, input) =>
-        this.handleQuestion(sessionId, promptId, projectId, toolName, input)
+      handleQuestion: (toolName, input, toolCallId, abortSignal) =>
+        this.handleQuestion(sessionId, promptId, projectId, toolName, input, toolCallId, abortSignal)
     }, {
-      handleTask: (input) =>
-        this.handleTask(projectId, sessionId, userId, input, agents, activeAgent)
-    }, activeAgent?.mode === 'subagent' ? [] : subagentsForTask(agents)) as unknown as ToolSet;
+      handleTask: (input, toolCallId, abortSignal) =>
+        this.handleTask(projectId, sessionId, promptId, userId, input, agents, activeAgent, taskContract, activeBuildRunId, toolCallId, abortSignal, approvalMode)
+    }, delegated ? [] : subagentsForTask(agents), {
+      role: activeAgent?.runtimeRole ?? 'orchestrator',
+      taskContract,
+      primary: !delegated,
+      skillAllowedTools,
+      approvalMode
+    }) as unknown as ToolSet;
   }
 
   private async handleTask(
     projectId: string,
-    _parentSessionId: string,
+    parentSessionId: string,
+    parentPromptId: string,
     userId: string,
     input: TaskToolInput,
     agents: AiAgentInfo[],
-    activeAgent: AiAgentInfo | undefined
+    activeAgent: AiAgentInfo | undefined,
+    parentTaskContract: TaskContract | null,
+    activeBuildRunId: string | null,
+    toolCallId: string,
+    abortSignal?: AbortSignal,
+    approvalMode: AiAgentApprovalMode = 'manual'
   ): Promise<unknown> {
-    if (activeAgent?.mode === 'subagent') throw new HttpError(403, 'Subagents cannot invoke other subagents');
-    const agent = findAgent(agents, input.subagent_type);
-    if (!agent || (agent.mode !== 'subagent' && agent.mode !== 'all')) throw new HttpError(400, `Unknown subagent type: ${input.subagent_type}`);
-    const session = input.task_id
-      ? await this.getSession(projectId, input.task_id)
-      : await this.prisma.projectAiAgentSession.create({
-          data: {
-            projectId,
-            title: `${input.description} (@${agent.name} subagent)`
-          }
-        });
-    const payload = normalizePromptPayload({
-      prompt: input.prompt,
-      model: agent.model ?? null,
-      attachments: [],
-      agent: agent.name
+    const parentToolCall = await this.createProviderToolCall(
+      parentSessionId,
+      parentPromptId,
+      toolCallId,
+      'task',
+      input,
+      'RUNNING'
+    );
+    const callPart = await this.ensureToolTimelinePart(parentSessionId, parentPromptId, 'tool-call', parentToolCall.id);
+    await this.broadcast(projectId, {
+      type: 'tool-call',
+      session: await this.snapshot(parentSessionId, projectId),
+      data: mergeEventPart(toToolCall(parentToolCall), await this.hydrateSinglePart(callPart))
     });
-    const last = await this.prisma.aiAgentPrompt.findFirst({
-      where: { sessionId: session.id },
-      orderBy: { order: 'desc' },
-      select: { order: true }
-    });
-    await this.prisma.aiAgentPrompt.create({
-      data: {
-        sessionId: session.id,
-        prompt: serializePromptPayload(payload),
-        order: (last?.order ?? 0) + 1
+    const { agent, contract, session, payload } = await (async () => {
+      if (activeAgent && parentTaskContract) throw new HttpError(403, 'Delegated workers cannot invoke other subagents');
+      const selectedAgent = findAgent(agents, input.subagent_type);
+      if (!selectedAgent || (selectedAgent.mode !== 'subagent' && selectedAgent.mode !== 'all')) {
+        throw new HttpError(400, `Unknown subagent type: ${input.subagent_type}`);
       }
+      const currentBuildRunId = await this.resolveActiveBuildRun(projectId, parentSessionId, undefined);
+      const inheritedBuildRunId = currentBuildRunId ?? activeBuildRunId;
+      const selectedContract = inheritBuildRun(input.contract ?? normalizeTaskContract(input), inheritedBuildRunId);
+      if (selectedContract.scope.buildRunId) {
+        await this.validateRequestedBuildRun(projectId, selectedContract.scope.buildRunId);
+      }
+      assertNoInteractiveBuildArtifactDelegation(selectedContract);
+      const selectedSession = input.task_id
+        ? await this.getSession(projectId, input.task_id)
+        : await this.prisma.projectAiAgentSession.create({
+            data: {
+              projectId,
+              activeBuildRunId: selectedContract.scope.buildRunId ?? inheritedBuildRunId,
+              approvalMode: toPrismaApprovalMode(approvalMode),
+              title: `${input.description} (@${selectedAgent.name} subagent)`
+            }
+          });
+      const selectedPayload = normalizePromptPayload({
+        prompt: selectedContract.objective,
+        model: selectedContract.modelPolicy.preferred ?? selectedAgent.model ?? null,
+        attachments: [],
+        agent: selectedAgent.name,
+        taskContract: selectedContract,
+        buildRunId: selectedContract.scope.buildRunId ?? inheritedBuildRunId,
+        approvalMode
+      });
+      return { agent: selectedAgent, contract: selectedContract, session: selectedSession, payload: selectedPayload };
+    })().catch(async (error) => {
+      await this.finalizeHandlerToolCall(parentToolCall, projectId, 'ERROR', null, errorMessage(error));
+      throw error;
     });
-    await this.drain(userId, projectId, session.id);
-    const result = await this.prisma.aiAgentMessage.findFirst({
-      where: { sessionId: session.id, role: 'ASSISTANT' },
-      orderBy: { createdAt: 'desc' },
-      select: { content: true }
-    });
-    return {
-      title: input.description,
-      task_id: session.id,
-      output: [
-        `task_id: ${session.id} (for resuming to continue this task if needed)`,
-        '',
-        '<task_result>',
-        result?.content ?? '',
-        '</task_result>'
-      ].join('\n')
+    let parentAborted = abortSignal?.aborted ?? false;
+    const abortChild = () => {
+      parentAborted = true;
+      getRuntime(session.id).abortController?.abort();
     };
+    abortSignal?.addEventListener('abort', abortChild);
+    if (abortSignal?.aborted) abortChild();
+    const existingChildMode = fromPrismaApprovalMode(session.approvalMode ?? 'MANUAL');
+    if (input.task_id && (payload.buildRunId || existingChildMode !== approvalMode)) {
+      await this.prisma.projectAiAgentSession.update({
+        where: { id: session.id },
+        data: {
+          activeBuildRunId: payload.buildRunId,
+          approvalMode: toPrismaApprovalMode(approvalMode)
+        }
+      });
+    }
+    const startedPart = await this.createTaskPart(parentSessionId, parentPromptId, {
+      sessionId: session.id,
+      description: input.description,
+      subagentType: agent.name,
+      status: 'running',
+      toolCallId
+    } as AiAgentSubtaskPart);
+    await this.broadcast(projectId, {
+      type: 'subtask-started',
+      session: await this.snapshot(parentSessionId, projectId),
+      data: { taskId: session.id, part: await this.hydrateSinglePart(startedPart) }
+    });
+    try {
+      if (parentAborted) throw new AgentStreamAbort('Parent agent prompt was cancelled');
+      const last = await this.prisma.aiAgentPrompt.findFirst({
+        where: { sessionId: session.id },
+        orderBy: { order: 'desc' },
+        select: { order: true }
+      });
+      const childPrompt = await this.prisma.aiAgentPrompt.create({
+        data: {
+          sessionId: session.id,
+          prompt: serializePromptPayload(payload),
+          order: (last?.order ?? 0) + 1
+        }
+      });
+      await this.drain(userId, projectId, session.id, abortSignal);
+      if (parentAborted || abortSignal?.aborted) throw new AgentStreamAbort('Parent agent prompt was cancelled');
+      const [result, completedSession, completedPrompt] = await Promise.all([
+        this.prisma.aiAgentMessage.findFirst({
+          where: { sessionId: session.id, role: 'ASSISTANT' },
+          orderBy: { createdAt: 'desc' },
+          select: { content: true }
+        }),
+        this.prisma.projectAiAgentSession.findUniqueOrThrow({ where: { id: session.id } }),
+        this.prisma.aiAgentPrompt.findUniqueOrThrow({ where: { id: childPrompt.id } })
+      ]);
+      if (completedSession.status === 'CANCELLED' || completedPrompt.status === 'CANCELLED') {
+        const message = 'Subagent was cancelled before completing its assigned task';
+        const cancelledPart = await this.createTaskPart(parentSessionId, parentPromptId, {
+          sessionId: session.id,
+          description: input.description,
+          subagentType: agent.name,
+          status: 'cancelled',
+          error: message,
+          toolCallId
+        } as unknown as AiAgentSubtaskPart);
+        await this.broadcast(projectId, {
+          type: 'subtask-finished',
+          session: await this.snapshot(parentSessionId, projectId),
+          data: { taskId: session.id, cancelled: true, part: await this.hydrateSinglePart(cancelledPart) }
+        });
+        await this.finalizeHandlerToolCall(parentToolCall, projectId, 'ERROR', null, message);
+        throw new HandledSubtaskError(message);
+      }
+      if (completedSession.status !== 'IDLE' || completedPrompt.status !== 'COMPLETED') {
+        throw new Error(
+          completedSession.status === 'ERROR' || completedPrompt.status === 'ERROR'
+            ? sessionErrorFromSession(completedSession.lastError) ?? 'Subagent failed'
+            : `Subagent did not reach terminal success (session ${completedSession.status}, prompt ${completedPrompt.status})`
+        );
+      }
+      const taskResult = {
+        title: input.description,
+        task_id: session.id,
+        contractVersion: contract.version,
+        acceptanceCriteria: contract.acceptanceCriteria,
+        output: [
+          `task_id: ${session.id} (subagent session id; use only to resume this subtask)`,
+          '',
+          '<task_result>',
+          result?.content ?? '',
+          '</task_result>'
+        ].join('\n')
+      };
+      const finishedPart = await this.createTaskPart(parentSessionId, parentPromptId, {
+        sessionId: session.id,
+        description: input.description,
+        subagentType: agent.name,
+        status: 'completed',
+        output: taskResult,
+        toolCallId
+      } as AiAgentSubtaskPart);
+      await this.broadcast(projectId, {
+        type: 'subtask-finished',
+        session: await this.snapshot(parentSessionId, projectId),
+        data: { taskId: session.id, part: await this.hydrateSinglePart(finishedPart) }
+      });
+      await this.finalizeHandlerToolCall(parentToolCall, projectId, 'EXECUTED', taskResult, null);
+      return taskResult;
+    } catch (error) {
+      if (error instanceof HandledSubtaskError) throw error;
+      if (error instanceof AgentStreamAbort) {
+        const message = error.message || 'Parent agent prompt was cancelled';
+        const cancelledPart = await this.createTaskPart(parentSessionId, parentPromptId, {
+          sessionId: session.id,
+          description: input.description,
+          subagentType: agent.name,
+          status: 'cancelled',
+          error: message,
+          toolCallId
+        });
+        await this.broadcast(projectId, {
+          type: 'subtask-finished',
+          session: await this.snapshot(parentSessionId, projectId),
+          data: { taskId: session.id, cancelled: true, part: await this.hydrateSinglePart(cancelledPart) }
+        });
+        await this.finalizeHandlerToolCall(parentToolCall, projectId, 'ERROR', null, message);
+        throw new HandledSubtaskError(message);
+      }
+      const message = errorMessage(error);
+      const failedPart = await this.createTaskPart(parentSessionId, parentPromptId, {
+        sessionId: session.id,
+        description: input.description,
+        subagentType: agent.name,
+        status: 'error',
+        error: message,
+        toolCallId
+      } as AiAgentSubtaskPart);
+      await this.broadcast(projectId, {
+        type: 'subtask-finished',
+        session: await this.snapshot(parentSessionId, projectId),
+        data: { taskId: session.id, error: message, part: await this.hydrateSinglePart(failedPart) }
+      });
+      await this.finalizeHandlerToolCall(parentToolCall, projectId, 'ERROR', null, message);
+      throw error;
+    } finally {
+      abortSignal?.removeEventListener('abort', abortChild);
+    }
   }
 
   private async handleQuestion(
@@ -775,39 +1577,51 @@ export class AiAgentSessionUseCase {
     promptId: string,
     projectId: string,
     toolName: 'askUser',
-    input: unknown
+    input: unknown,
+    toolCallId: string,
+    abortSignal?: AbortSignal
   ): Promise<unknown> {
-    const toolCall = await this.prisma.aiAgentToolCall.create({
-      data: {
-        sessionId,
-        promptId,
-        toolName,
-        input: input as Prisma.InputJsonValue,
-        status: 'PENDING_APPROVAL'
-      }
-    });
+    const toolCall = await this.createProviderToolCall(sessionId, promptId, toolCallId, toolName, input, 'PENDING_APPROVAL');
+    const timelinePart = await this.ensureToolTimelinePart(sessionId, promptId, 'tool-call', toolCall.id);
     await this.broadcast(projectId, {
       type: 'question-asked',
       session: await this.snapshot(sessionId, projectId),
-      data: toToolCall(toolCall)
+      data: mergeEventPart(toToolCall(toolCall), await this.hydrateSinglePart(timelinePart))
     });
     return new Promise((resolve, reject) => {
+      let abortHandled = false;
+      const cleanup = () => abortSignal?.removeEventListener('abort', onAbort);
+      const resolveWithCleanup = (value: unknown) => { cleanup(); resolve(value); };
+      const rejectWithCleanup = (error: Error) => { cleanup(); reject(error); };
+      const onAbort = () => {
+        if (abortHandled) return;
+        abortHandled = true;
+        const message = 'Question cancelled with the active agent prompt';
+        clearTimeout(timeout);
+        pendingQuestions.delete(toolCall.id);
+        void this.finalizeHandlerToolCall(toolCall, projectId, 'ERROR', null, message);
+        rejectWithCleanup(new AgentStreamAbort(message));
+      };
       const timeout = setTimeout(() => {
+        cleanup();
         pendingQuestions.delete(toolCall.id);
         void (async () => {
-          await this.prisma.aiAgentToolCall.update({
+          const failedCall = await this.prisma.aiAgentToolCall.update({
             where: { id: toolCall.id },
             data: { status: 'ERROR', error: 'Question timed out' }
           });
+          const resultPart = await this.ensureToolTimelinePart(sessionId, promptId, 'tool-result', failedCall.id);
           await this.broadcast(projectId, {
             type: 'error',
             session: await this.snapshot(sessionId, projectId),
-            data: { toolCallId: toolCall.id, message: 'Question timed out' }
+            data: { toolCallId: toolCall.id, message: 'Question timed out', part: await this.hydrateSinglePart(resultPart) }
           });
         })();
         reject(new Error('Question timed out'));
       }, QUESTION_TIMEOUT_MS);
-      pendingQuestions.set(toolCall.id, { resolve, reject, timeout });
+      abortSignal?.addEventListener('abort', onAbort, { once: true });
+      pendingQuestions.set(toolCall.id, { resolve: resolveWithCleanup, reject: rejectWithCleanup, timeout });
+      if (abortSignal?.aborted) onAbort();
     });
   }
 
@@ -815,41 +1629,114 @@ export class AiAgentSessionUseCase {
     sessionId: string,
     promptId: string,
     projectId: string,
-    toolName: MutatingToolName,
+    toolName: AgentMutatingToolName,
     input: unknown,
-    execute: () => Promise<unknown>
+    execute: () => Promise<unknown>,
+    toolCallId: string,
+    abortSignal?: AbortSignal,
+    approvalMode: AiAgentApprovalMode = 'manual'
   ): Promise<unknown> {
-    const toolCall = await this.prisma.aiAgentToolCall.create({
-      data: {
+    if (approvalMode === 'auto') {
+      return this.executeAutomaticTool(
         sessionId,
         promptId,
+        projectId,
         toolName,
-        input: input as Prisma.InputJsonValue,
-        status: 'PENDING_APPROVAL'
-      }
-    });
+        input,
+        execute,
+        toolCallId,
+        abortSignal
+      );
+    }
+    const toolCall = await this.createProviderToolCall(sessionId, promptId, toolCallId, toolName, input, 'PENDING_APPROVAL');
+    const timelinePart = await this.ensureToolTimelinePart(sessionId, promptId, 'tool-call', toolCall.id);
     await this.broadcast(projectId, {
       type: 'tool-call',
       session: await this.snapshot(sessionId, projectId),
-      data: toToolCall(toolCall)
+      data: mergeEventPart(toToolCall(toolCall), await this.hydrateSinglePart(timelinePart))
     });
     return new Promise((resolve, reject) => {
+      let abortHandled = false;
+      const cleanup = () => abortSignal?.removeEventListener('abort', onAbort);
+      const resolveWithCleanup = (value: unknown) => { cleanup(); resolve(value); };
+      const rejectWithCleanup = (error: Error) => { cleanup(); reject(error); };
+      const onAbort = () => {
+        if (abortHandled) return;
+        abortHandled = true;
+        const message = `${toolName} approval was cancelled with the active agent prompt`;
+        clearTimeout(timeout);
+        pendingApprovals.delete(toolCall.id);
+        void this.finalizeHandlerToolCall(toolCall, projectId, 'ERROR', null, message);
+        rejectWithCleanup(new AgentStreamAbort(message));
+      };
       const timeout = setTimeout(() => {
+        cleanup();
         pendingApprovals.delete(toolCall.id);
         void (async () => {
-          await this.prisma.aiAgentToolCall.update({
+          const failedCall = await this.prisma.aiAgentToolCall.update({
             where: { id: toolCall.id },
             data: { status: 'ERROR', error: 'Approval timed out' }
           });
+          const resultPart = await this.ensureToolTimelinePart(sessionId, promptId, 'tool-result', failedCall.id);
           await this.broadcast(projectId, {
             type: 'error',
             session: await this.snapshot(sessionId, projectId),
-            data: { toolCallId: toolCall.id, message: 'Approval timed out' }
+            data: { toolCallId: toolCall.id, message: 'Approval timed out', part: await this.hydrateSinglePart(resultPart) }
           });
         })();
         reject(new Error('Approval timed out'));
       }, APPROVAL_TIMEOUT_MS);
-      pendingApprovals.set(toolCall.id, { resolve, reject, execute, timeout });
+      abortSignal?.addEventListener('abort', onAbort, { once: true });
+      pendingApprovals.set(toolCall.id, { resolve: resolveWithCleanup, reject: rejectWithCleanup, execute, timeout });
+      if (abortSignal?.aborted) onAbort();
+    });
+  }
+
+  private async executeAutomaticTool(
+    sessionId: string,
+    promptId: string,
+    projectId: string,
+    toolName: AgentMutatingToolName,
+    input: unknown,
+    execute: () => Promise<unknown>,
+    toolCallId: string,
+    abortSignal?: AbortSignal
+  ): Promise<unknown> {
+    abortSignal?.throwIfAborted();
+    const toolCall = await this.createProviderToolCall(
+      sessionId,
+      promptId,
+      toolCallId,
+      toolName,
+      input,
+      'RUNNING'
+    );
+    const callPart = await this.ensureToolTimelinePart(sessionId, promptId, 'tool-call', toolCall.id);
+    await this.broadcast(projectId, {
+      type: 'tool-call',
+      session: await this.snapshot(sessionId, projectId),
+      data: mergeEventPart(toToolCall(toolCall), await this.hydrateSinglePart(callPart))
+    });
+    try {
+      abortSignal?.throwIfAborted();
+      const output = await execute();
+      if (toolName === 'startNovelBuild') await this.bindStartedBuild(projectId, sessionId, output);
+      await this.finalizeHandlerToolCall(toolCall, projectId, 'EXECUTED', output, null);
+      return output;
+    } catch (error) {
+      const message = errorMessage(error);
+      await this.finalizeHandlerToolCall(toolCall, projectId, 'ERROR', null, message);
+      throw error;
+    }
+  }
+
+  private async bindStartedBuild(projectId: string, sessionId: string, output: unknown): Promise<void> {
+    const buildRunId = stringValue(objectRecord(output)?.id);
+    if (!buildRunId) return;
+    await this.validateRequestedBuildRun(projectId, buildRunId);
+    await this.prisma.projectAiAgentSession.update({
+      where: { id: sessionId },
+      data: { activeBuildRunId: buildRunId }
     });
   }
 
@@ -857,14 +1744,38 @@ export class AiAgentSessionUseCase {
     userId: string,
     projectId: string,
     sessionId: string,
-    toolCall: { id: string; toolName: string; input: unknown },
+    toolCall: { id: string; promptId: string | null; toolName: string; input: unknown },
     approved: boolean
   ): Promise<void> {
+    const pendingRuntime = pendingApprovals.get(toolCall.id);
+    const claimed = await this.prisma.aiAgentToolCall.updateMany({
+      where: { id: toolCall.id, status: 'PENDING_APPROVAL' },
+      data: {
+        status: approved ? 'APPROVED' : 'REJECTED',
+        decidedAt: new Date(),
+        decidedById: userId
+      }
+    });
+    if (claimed.count !== 1) {
+      const current = await this.prisma.aiAgentToolCall.findUniqueOrThrow({ where: { id: toolCall.id } });
+      if (
+        approved
+        && !pendingRuntime
+        && (current.status === 'APPROVED' || current.status === 'RUNNING')
+        && IDEMPOTENT_APPROVAL_RECOVERY_TOOLS.has(current.toolName)
+      ) {
+        await this.recoverApprovedToolCall(userId, projectId, sessionId, current);
+        return;
+      }
+      if (!pendingRuntime && (current.status === 'APPROVED' || current.status === 'RUNNING')) {
+        const message = `${current.toolName} was interrupted after approval and cannot be replayed safely. Submit the action again in a new prompt.`;
+        await this.failOrphanedInteractiveRun(sessionId, current.promptId, message, current.id);
+      }
+      throw new HttpError(409, `Tool call was already ${current.status.toLowerCase().replaceAll('_', ' ')}`);
+    }
+
     if (!approved) {
-      await this.prisma.aiAgentToolCall.update({
-        where: { id: toolCall.id },
-        data: { status: 'REJECTED', decidedAt: new Date(), decidedById: userId }
-      });
+      const rejectedCall = await this.prisma.aiAgentToolCall.findUniqueOrThrow({ where: { id: toolCall.id } });
       const pendingQuestion = pendingQuestions.get(toolCall.id);
       if (pendingQuestion) {
         clearTimeout(pendingQuestion.timeout);
@@ -877,110 +1788,467 @@ export class AiAgentSessionUseCase {
         pendingApprovals.delete(toolCall.id);
         pending.reject(new Error(`Rejected ${toolCall.toolName}`));
       }
-      await this.prisma.aiAgentMessage.create({
+      const toolMessage = await this.prisma.aiAgentMessage.create({
         data: {
           sessionId,
           role: 'TOOL',
           content: `Rejected ${toolCall.toolName}`
         }
       });
+      const resultPart = await this.ensureToolTimelinePart(sessionId, toolCall.promptId, 'tool-result', rejectedCall.id);
+      await this.createMessagePart(sessionId, toolCall.promptId, toolMessage);
+      await this.broadcast(projectId, {
+        type: 'tool-result',
+        session: await this.snapshot(sessionId, projectId),
+        data: mergeEventPart(toToolCall(rejectedCall), await this.hydrateSinglePart(resultPart))
+      });
+      if (!pendingRuntime) {
+        await this.failOrphanedInteractiveRun(
+          sessionId,
+          toolCall.promptId,
+          `${toolCall.toolName} was rejected, but the interrupted model turn cannot continue after a backend restart. Send a new prompt to proceed.`
+        );
+      }
       return;
     }
 
-    await this.prisma.aiAgentToolCall.update({
-      where: { id: toolCall.id },
-      data: { status: 'APPROVED', decidedAt: new Date(), decidedById: userId }
-    });
+    if (!pendingRuntime) {
+      const approvedCall = await this.prisma.aiAgentToolCall.findUniqueOrThrow({ where: { id: toolCall.id } });
+      if (IDEMPOTENT_APPROVAL_RECOVERY_TOOLS.has(approvedCall.toolName)) {
+        await this.recoverApprovedToolCall(userId, projectId, sessionId, approvedCall);
+        return;
+      }
+      const message = `${approvedCall.toolName} was approved after its model turn was interrupted, but it cannot be replayed safely. Submit the action again in a new prompt.`;
+      await this.failOrphanedInteractiveRun(sessionId, approvedCall.promptId, message, approvedCall.id);
+      throw new HttpError(409, message);
+    }
+
+    const pending = pendingRuntime;
     try {
-      const pending = pendingApprovals.get(toolCall.id);
       if (pending) {
         clearTimeout(pending.timeout);
-        pendingApprovals.delete(toolCall.id);
       }
       const output = pending
         ? await pending.execute()
-        : await executeMutationTool(this.prisma, { projectId, userId }, toolCall.toolName, inputRecord(toolCall.input as Prisma.JsonValue));
-      await this.prisma.aiAgentToolCall.update({
+        : await executeAgentMutationTool(this.prisma, { projectId, userId }, toolCall.toolName, inputRecord(toolCall.input as Prisma.JsonValue));
+      if (toolCall.toolName === 'startNovelBuild') {
+        const result = objectRecord(output);
+        const buildRunId = stringValue(result?.id);
+        if (buildRunId) {
+          await this.validateRequestedBuildRun(projectId, buildRunId);
+          await this.prisma.projectAiAgentSession.update({
+            where: { id: sessionId },
+            data: { activeBuildRunId: buildRunId }
+          });
+        }
+      }
+      const executedCall = await this.prisma.aiAgentToolCall.update({
         where: { id: toolCall.id },
         data: { status: 'EXECUTED', output: output as Prisma.InputJsonValue }
       });
+      pendingApprovals.delete(toolCall.id);
       pending?.resolve(output);
-      await this.prisma.aiAgentMessage.create({
+      const toolMessage = await this.prisma.aiAgentMessage.create({
         data: {
           sessionId,
           role: 'TOOL',
           content: `${toolCall.toolName} approved and executed.`
         }
       });
+      const resultPart = await this.ensureToolTimelinePart(sessionId, toolCall.promptId, 'tool-result', executedCall.id);
+      await this.createMessagePart(sessionId, toolCall.promptId, toolMessage);
+      await this.broadcast(projectId, {
+        type: 'tool-result',
+        session: await this.snapshot(sessionId, projectId),
+        data: mergeEventPart(toToolCall(executedCall), await this.hydrateSinglePart(resultPart))
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Tool execution failed';
-      await this.prisma.aiAgentToolCall.update({
+      const failedCall = await this.prisma.aiAgentToolCall.update({
         where: { id: toolCall.id },
         data: {
           status: 'ERROR',
           error: message
         }
       });
-      const pending = pendingApprovals.get(toolCall.id);
       if (pending) {
         clearTimeout(pending.timeout);
         pendingApprovals.delete(toolCall.id);
         pending.reject(error instanceof Error ? error : new Error(message));
       }
-      await this.prisma.aiAgentMessage.create({
+      const toolMessage = await this.prisma.aiAgentMessage.create({
         data: {
           sessionId,
           role: 'TOOL',
           content: `${toolCall.toolName} approval failed: ${message}`
         }
       });
+      const resultPart = await this.ensureToolTimelinePart(sessionId, toolCall.promptId, 'tool-result', failedCall.id);
+      await this.createMessagePart(sessionId, toolCall.promptId, toolMessage);
+      await this.broadcast(projectId, {
+        type: 'tool-result',
+        session: await this.snapshot(sessionId, projectId),
+        data: mergeEventPart(toToolCall(failedCall), await this.hydrateSinglePart(resultPart))
+      });
       throw new HttpError(400, `${toolCall.toolName} approval failed: ${message}`);
     }
   }
 
-  private async persistToolCall(sessionId: string, promptId: string, part: unknown) {
-    const parsed = parseToolPart(part);
-    if (!parsed) return null;
-    if (MUTATING_TOOLS.has(parsed.toolName)) return null;
-    const status = MUTATING_TOOLS.has(parsed.toolName) ? 'PENDING_APPROVAL' : 'EXECUTED';
-    const existing = parsed.toolCallId
-      ? await this.prisma.aiAgentToolCall.findFirst({
-          where: { sessionId, toolCallId: parsed.toolCallId }
-        })
-      : null;
+  private async createProviderToolCall(
+    sessionId: string,
+    promptId: string,
+    toolCallId: string,
+    toolName: string,
+    input: unknown,
+    status: 'PENDING_APPROVAL' | 'RUNNING'
+  ) {
+    const existing = await this.prisma.aiAgentToolCall.findFirst({
+      where: { sessionId, toolCallId }
+    });
     if (existing) {
-      const updated = await this.prisma.aiAgentToolCall.update({
+      if (existing.promptId !== promptId || existing.toolName !== toolName) {
+        throw new HttpError(409, `Provider tool call ${toolCallId} is already bound to another invocation`);
+      }
+      return this.prisma.aiAgentToolCall.update({
         where: { id: existing.id },
+        data: { input: input as Prisma.InputJsonValue }
+      });
+    }
+    try {
+      return await this.prisma.aiAgentToolCall.create({
         data: {
-          input: parsed.input as Prisma.InputJsonValue,
-          status: MUTATING_TOOLS.has(parsed.toolName) ? 'PENDING_APPROVAL' : existing.status
+          sessionId,
+          promptId,
+          toolCallId,
+          toolName,
+          input: input as Prisma.InputJsonValue,
+          status
         }
       });
-      return toToolCall(updated);
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) throw error;
+      const raced = await this.prisma.aiAgentToolCall.findFirst({ where: { sessionId, toolCallId } });
+      if (!raced || raced.promptId !== promptId || raced.toolName !== toolName) throw error;
+      return raced;
     }
-    const created = await this.prisma.aiAgentToolCall.create({
-      data: {
-        sessionId,
-        promptId,
-        toolCallId: parsed.toolCallId,
-        toolName: parsed.toolName,
-        input: parsed.input as Prisma.InputJsonValue,
-        status
-      }
-    });
-    return toToolCall(created);
   }
 
-  private async persistToolResult(part: unknown): Promise<void> {
-    const parsed = parseToolResultPart(part);
-    if (!parsed?.toolCallId) return;
-    await this.prisma.aiAgentToolCall.updateMany({
-      where: { toolCallId: parsed.toolCallId },
+  private async recoverApprovedToolCall(
+    userId: string,
+    projectId: string,
+    sessionId: string,
+    toolCall: {
+      id: string;
+      promptId: string | null;
+      toolName: string;
+      input: Prisma.JsonValue;
+    }
+  ): Promise<void> {
+    try {
+      const output = await executeAgentMutationTool(
+        this.prisma,
+        { projectId, userId },
+        toolCall.toolName,
+        inputRecord(toolCall.input)
+      );
+      const executed = await this.prisma.aiAgentToolCall.update({
+        where: { id: toolCall.id },
+        data: { status: 'EXECUTED', output: output as Prisma.InputJsonValue, error: null }
+      });
+      if (toolCall.toolName === 'startNovelBuild') {
+        const buildRunId = stringValue(objectRecord(output)?.id);
+        if (buildRunId) {
+          await this.validateRequestedBuildRun(projectId, buildRunId);
+          await this.prisma.projectAiAgentSession.update({
+            where: { id: sessionId },
+            data: { activeBuildRunId: buildRunId }
+          });
+        }
+      }
+      const resultPart = await this.ensureToolTimelinePart(sessionId, toolCall.promptId, 'tool-result', executed.id);
+      const message = `${toolCall.toolName} completed after backend recovery, but the interrupted model turn cannot continue. Send a new prompt to proceed.`;
+      await this.failOrphanedInteractiveRun(sessionId, toolCall.promptId, message);
+      await this.broadcast(projectId, {
+        type: 'tool-result',
+        session: await this.snapshot(sessionId, projectId),
+        data: mergeEventPart(toToolCall(executed), await this.hydrateSinglePart(resultPart))
+      });
+    } catch (error) {
+      const message = `${toolCall.toolName} recovery failed: ${errorMessage(error)}`;
+      await this.failOrphanedInteractiveRun(sessionId, toolCall.promptId, message, toolCall.id);
+      throw new HttpError(409, message);
+    }
+  }
+
+  private async failOrphanedInteractiveRun(
+    sessionId: string,
+    promptId: string | null,
+    message: string,
+    toolCallId?: string
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      if (toolCallId) {
+        await tx.aiAgentToolCall.updateMany({
+          where: { id: toolCallId, status: { in: ['APPROVED', 'RUNNING'] } },
+          data: { status: 'ERROR', error: message, decidedAt: new Date() }
+        });
+      }
+      if (promptId) {
+        await tx.aiAgentPrompt.updateMany({
+          where: { id: promptId, sessionId, status: 'RUNNING' },
+          data: { status: 'ERROR' }
+        });
+      }
+      const session = await tx.projectAiAgentSession.findUnique({
+        where: { id: sessionId },
+        select: { lastError: true }
+      });
+      await tx.projectAiAgentSession.update({
+        where: { id: sessionId },
+        data: {
+          status: 'ERROR',
+          activePromptId: null,
+          lastError: mergeSessionMeta(session?.lastError ?? null, { error: message })
+        }
+      });
+    });
+  }
+
+  private async finalizeHandlerToolCall(
+    toolCall: { id: string; sessionId: string; promptId: string | null },
+    projectId: string,
+    status: 'EXECUTED' | 'ERROR',
+    output: unknown,
+    error: string | null
+  ): Promise<void> {
+    const updated = await this.prisma.aiAgentToolCall.update({
+      where: { id: toolCall.id },
       data: {
-        status: 'EXECUTED',
-        output: parsed.output as Prisma.InputJsonValue
+        status,
+        output: status === 'EXECUTED' ? output as Prisma.InputJsonValue : undefined,
+        error,
+        decidedAt: new Date()
       }
     });
+    const resultPart = await this.ensureToolTimelinePart(
+      toolCall.sessionId,
+      toolCall.promptId,
+      'tool-result',
+      toolCall.id
+    );
+    await this.broadcast(projectId, {
+      type: 'tool-result',
+      session: await this.snapshot(toolCall.sessionId, projectId),
+      data: mergeEventPart(toToolCall(updated), await this.hydrateSinglePart(resultPart))
+    });
+  }
+
+  private createMessagePart(
+    sessionId: string,
+    promptId: string | null,
+    message: { id: string }
+  ): Promise<StoredSessionPart> {
+    return this.timeline.message(sessionId, promptId, message.id);
+  }
+
+  private createTextPart(
+    sessionId: string,
+    promptId: string,
+    messageId: string,
+    content: string
+  ): Promise<StoredSessionPart> {
+    return this.timeline.text(sessionId, promptId, messageId, content);
+  }
+
+  private updateTextPart(
+    part: StoredSessionPart,
+    content: string,
+    streaming: boolean
+  ): Promise<StoredSessionPart> {
+    return this.timeline.updateText(part.id, content, streaming);
+  }
+
+  private finishTextPart(part: StoredSessionPart): Promise<StoredSessionPart> {
+    return this.timeline.finishText(part);
+  }
+
+  private ensureToolTimelinePart(
+    sessionId: string,
+    promptId: string | null,
+    kind: 'tool-call' | 'tool-result',
+    toolCallId: string
+  ): Promise<StoredSessionPart> {
+    return this.timeline.tool(sessionId, promptId, kind, toolCallId);
+  }
+
+  private createTaskPart(
+    sessionId: string,
+    promptId: string,
+    task: AiAgentSubtaskPart
+  ): Promise<StoredSessionPart> {
+    return this.timeline.task(sessionId, promptId, task);
+  }
+
+  private async hydrateSinglePart(part: StoredSessionPart): Promise<AiAgentSessionPart | null> {
+    const [message, toolCall] = await Promise.all([
+      part.messageId
+        ? this.prisma.aiAgentMessage.findUnique({ where: { id: part.messageId } })
+        : null,
+      part.toolCallId
+        ? this.prisma.aiAgentToolCall.findUnique({ where: { id: part.toolCallId } })
+        : null
+    ]);
+    return hydrateSessionPart(
+      part,
+      new Map(message ? [[message.id, toMessage(message)]] : []),
+      new Map(toolCall ? [[toolCall.id, toToolCall(toolCall)]] : [])
+    );
+  }
+
+  private async validateRequestedBuildRun(
+    projectId: string,
+    requested: string | null | undefined
+  ): Promise<string | null> {
+    if (requested === null) return null;
+    if (typeof requested === 'string' && requested.trim()) {
+      const buildRunId = requested.trim();
+      const exists = await this.prisma.buildRun.findFirst({
+        where: { id: buildRunId, projectId },
+        select: { id: true }
+      });
+      if (!exists) throw new HttpError(404, 'Novel Build not found for this project');
+      return exists.id;
+    }
+    const active = await this.prisma.buildRun.findFirst({
+      where: { projectId, status: { in: ['PLANNING', 'DRAFTING', 'REVISING', 'PAUSED'] } },
+      orderBy: { updatedAt: 'desc' },
+      select: { id: true }
+    });
+    return active?.id ?? null;
+  }
+
+  private async resolveActiveBuildRun(
+    projectId: string,
+    sessionId: string,
+    requested: string | null | undefined
+  ): Promise<string | null> {
+    if (requested === null) {
+      await this.prisma.projectAiAgentSession.update({
+        where: { id: sessionId },
+        data: { activeBuildRunId: null }
+      });
+      return null;
+    }
+    if (typeof requested === 'string' && requested.trim()) {
+      const buildRunId = await this.validateRequestedBuildRun(projectId, requested);
+      await this.prisma.projectAiAgentSession.update({
+        where: { id: sessionId },
+        data: { activeBuildRunId: buildRunId }
+      });
+      return buildRunId;
+    }
+    const session = await this.prisma.projectAiAgentSession.findUniqueOrThrow({
+      where: { id: sessionId },
+      select: { activeBuildRunId: true }
+    });
+    if (session.activeBuildRunId) {
+      const current = await this.prisma.buildRun.findFirst({
+        where: {
+          id: session.activeBuildRunId,
+          projectId,
+          status: { in: ['PLANNING', 'DRAFTING', 'REVISING', 'PAUSED'] }
+        },
+        select: { id: true }
+      });
+      if (current) return current.id;
+    }
+    const inferred = await this.validateRequestedBuildRun(projectId, undefined);
+    if (inferred !== session.activeBuildRunId) {
+      await this.prisma.projectAiAgentSession.update({
+        where: { id: sessionId },
+        data: { activeBuildRunId: inferred }
+      });
+    }
+    return inferred;
+  }
+
+  private async recoverOrphanedInteractiveSession(
+    sessionId: string,
+    ignoreRuntimeController = false
+  ): Promise<boolean> {
+    const current = await this.prisma.projectAiAgentSession.findUniqueOrThrow({
+      where: { id: sessionId },
+      select: { status: true, activePromptId: true, lastError: true }
+    });
+    if (
+      current.status !== 'RUNNING'
+      || (!ignoreRuntimeController && getRuntime(sessionId).abortController)
+    ) return false;
+    const message = 'The previous interactive model turn was interrupted by a backend restart. Its persisted trace is available; send or continue with a new prompt.';
+    if (current.activePromptId) {
+      await this.failRunningToolCalls(sessionId, current.activePromptId, message);
+      await this.prisma.aiAgentPrompt.updateMany({
+        where: { id: current.activePromptId, sessionId, status: 'RUNNING' },
+        data: { status: 'ERROR' }
+      });
+    }
+    const recovered = await this.prisma.projectAiAgentSession.updateMany({
+      where: { id: sessionId, status: 'RUNNING', activePromptId: current.activePromptId },
+      data: {
+        status: 'ERROR',
+        activePromptId: null,
+        lastError: mergeSessionMeta(current.lastError, { error: message })
+      }
+    });
+    return recovered.count === 1;
+  }
+
+  private async persistToolCall(sessionId: string, promptId: string, part: unknown) {
+    const parsed = parseToolPart(part);
+    if (!parsed?.toolCallId) return null;
+    const approvalRequired = MUTATING_TOOLS.has(parsed.toolName) || parsed.toolName === 'askUser';
+    return toToolCall(await this.createProviderToolCall(
+      sessionId,
+      promptId,
+      parsed.toolCallId,
+      parsed.toolName,
+      parsed.input,
+      approvalRequired ? 'PENDING_APPROVAL' : 'RUNNING'
+    ));
+  }
+
+  private async persistToolResult(sessionId: string, part: unknown, failed = false) {
+    const parsed = parseToolResultPart(part);
+    if (!parsed?.toolCallId) return null;
+    const existing = await this.prisma.aiAgentToolCall.findFirst({
+      where: { sessionId, toolCallId: parsed.toolCallId },
+      orderBy: { createdAt: 'desc' }
+    });
+    if (!existing) return null;
+    const updated = await this.prisma.aiAgentToolCall.update({
+      where: { id: existing.id },
+      data: {
+        status: failed ? 'ERROR' : 'EXECUTED',
+        output: failed ? undefined : parsed.output as Prisma.InputJsonValue,
+        error: failed ? parsed.error ?? errorMessage(parsed.output) : null,
+        decidedAt: existing.decidedAt ?? new Date()
+      }
+    });
+    return toToolCall(updated);
+  }
+
+  private async failRunningToolCalls(sessionId: string, promptId: string, message: string): Promise<void> {
+    const running = await this.prisma.aiAgentToolCall.findMany({
+      where: { sessionId, promptId, status: 'RUNNING' },
+      select: { id: true }
+    });
+    for (const toolCall of running) {
+      await this.prisma.aiAgentToolCall.update({
+        where: { id: toolCall.id },
+        data: { status: 'ERROR', error: message, decidedAt: new Date() }
+      });
+      await this.ensureToolTimelinePart(sessionId, promptId, 'tool-result', toolCall.id);
+    }
   }
 
   private async saveContextUsage(sessionId: string, usage: UsagePayload): Promise<void> {
@@ -999,17 +2267,68 @@ export class AiAgentSessionUseCase {
 function getRuntime(sessionId: string): RuntimeSession {
   const existing = runtimes.get(sessionId);
   if (existing) return existing;
-  const runtime: RuntimeSession = { clients: new Set(), abortController: null };
+  const runtime: RuntimeSession = {
+    clients: new Set(),
+    abortController: null,
+    drainPromise: null,
+    drainAgain: false,
+    cancelPending: 0
+  };
   runtimes.set(sessionId, runtime);
   return runtime;
+}
+
+export function assertNoInteractiveBuildArtifactDelegation(contract: TaskContract): void {
+  if (
+    contract.scope.buildRunId &&
+    contract.outputs.some((output) => DURABLE_BUILD_OUTPUT_TYPES.has(output.type))
+  ) {
+    throw new HttpError(
+      409,
+      'Persisted Novel Build tasks must run through the authorized durable worker; do not delegate them through the generic task tool.'
+    );
+  }
 }
 
 function defaultSessionTitle(createdAt: Date): string {
   return `Chat ${createdAt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
 }
 
-function writeEvent(res: Response, event: AiAgentSessionEvent): void {
-  res.write(`data: ${JSON.stringify(event)}\n\n`);
+function writeEvent(res: Response, event: AiAgentSessionEvent): boolean {
+  return res.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+function safeWriteRuntimeEvent(client: RuntimeClient, event: AiAgentSessionEvent): boolean | null {
+  try {
+    return writeEvent(client.res, event);
+  } catch {
+    client.dispose();
+    return null;
+  }
+}
+
+function queueRuntimeEvent(client: RuntimeClient, event: AiAgentSessionEvent): void {
+  if (client.closed) return;
+  if (!client.ready) {
+    if (client.buffer.length >= 256) {
+      const deltaIndex = client.buffer.findIndex((candidate) => candidate.type === 'text-delta');
+      client.buffer.splice(deltaIndex >= 0 ? deltaIndex : 0, 1);
+    }
+    client.buffer.push(event);
+    return;
+  }
+  const written = safeWriteRuntimeEvent(client, event);
+  if (written !== true) client.ready = false;
+}
+
+function flushRuntimeClient(client: RuntimeClient): void {
+  if (client.closed) return;
+  client.ready = true;
+  while (client.ready && client.buffer.length) {
+    const event = client.buffer.shift()!;
+    const written = safeWriteRuntimeEvent(client, event);
+    if (written !== true) client.ready = false;
+  }
 }
 
 function toQueuedPrompt(prompt: {
@@ -1047,27 +2366,80 @@ function toMessage(message: {
   };
 }
 
-function toToolCall(toolCall: {
+export function toToolCall(toolCall: {
   id: string;
   toolCallId: string | null;
   toolName: string;
   input: Prisma.JsonValue;
-  status: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'EXECUTED' | 'ERROR';
+  status: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'RUNNING' | 'EXECUTED' | 'ERROR';
   output: Prisma.JsonValue | null;
   error: string | null;
   createdAt: Date;
   decidedAt: Date | null;
-}): AiAgentToolCall {
+}, options: { fullOutput?: boolean; fullInput?: boolean } = {}): AiAgentToolCall {
+  const projectedInput = projectToolInput(toolCall.input, options.fullInput === true);
+  const projected = projectToolOutput(toolCall.output, options.fullOutput === true);
   return {
     id: toolCall.id,
     toolCallId: toolCall.toolCallId,
     toolName: toolCall.toolName,
-    input: toolCall.input,
+    input: projectedInput.value,
+    inputTruncated: projectedInput.truncated,
+    inputBytes: projectedInput.bytes,
     status: toToolCallStatus(toolCall.status),
-    output: toolCall.output,
+    output: projected.output,
+    outputTruncated: projected.truncated,
+    outputBytes: projected.bytes,
     error: toolCall.error,
     createdAt: toolCall.createdAt.toISOString(),
     decidedAt: toolCall.decidedAt ? toolCall.decidedAt.toISOString() : null
+  };
+}
+
+export function projectToolOutput(output: Prisma.JsonValue | null | undefined, full: boolean): {
+  output: unknown;
+  truncated: boolean;
+  bytes: number;
+} {
+  if (output == null) return { output: null, truncated: false, bytes: 0 };
+  const serialized = JSON.stringify(output);
+  const bytes = Buffer.byteLength(serialized, 'utf8');
+  if (full || bytes <= TOOL_OUTPUT_SNAPSHOT_BYTES) return { output, truncated: false, bytes };
+  return {
+    output: {
+      type: 'opentales.truncatedToolOutput',
+      preview: serialized.slice(0, TOOL_OUTPUT_SNAPSHOT_BYTES),
+      message: `Tool output truncated in session snapshots (${bytes} bytes). Fetch tool-call detail for the full output.`
+    },
+    truncated: true,
+    bytes
+  };
+}
+
+export function projectToolInput(input: Prisma.JsonValue, full: boolean): {
+  value: unknown;
+  truncated: boolean;
+  bytes: number;
+} {
+  return projectToolValue(input, full, 'input');
+}
+
+function projectToolValue(
+  value: Prisma.JsonValue,
+  full: boolean,
+  label: 'input' | 'output'
+): { value: unknown; truncated: boolean; bytes: number } {
+  const serialized = JSON.stringify(value);
+  const bytes = Buffer.byteLength(serialized, 'utf8');
+  if (full || bytes <= TOOL_OUTPUT_SNAPSHOT_BYTES) return { value, truncated: false, bytes };
+  return {
+    value: {
+      type: `opentales.truncatedTool${label === 'input' ? 'Input' : 'Output'}`,
+      preview: serialized.slice(0, TOOL_OUTPUT_SNAPSHOT_BYTES),
+      message: `Tool ${label} truncated in session snapshots (${bytes} bytes). Fetch tool-call detail for the full value.`
+    },
+    truncated: true,
+    bytes
   };
 }
 
@@ -1094,12 +2466,13 @@ function toPromptStatus(status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'CANCELLED'
 }
 
 function toToolCallStatus(
-  status: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'EXECUTED' | 'ERROR'
+  status: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'RUNNING' | 'EXECUTED' | 'ERROR'
 ): AiAgentToolCall['status'] {
   const map = {
     PENDING_APPROVAL: 'pending-approval',
     APPROVED: 'approved',
     REJECTED: 'rejected',
+    RUNNING: 'running',
     EXECUTED: 'executed',
     ERROR: 'error'
   } as const;
@@ -1146,16 +2519,100 @@ function parseToolPart(part: unknown):
   return { toolCallId, toolName, input };
 }
 
-function parseToolResultPart(part: unknown): { toolCallId: string | null; output: unknown } | null {
+export function parseToolResultPart(part: unknown): { toolCallId: string | null; output: unknown; error: string | null } | null {
   if (!part || typeof part !== 'object') return null;
   const record = part as Record<string, unknown>;
   const toolCallId = typeof record.toolCallId === 'string' ? record.toolCallId : null;
   const output = record.output ?? record.result ?? null;
-  return { toolCallId, output };
+  const error = stringValue(record.errorText)
+    ?? (record.error instanceof Error ? record.error.message : stringValue(record.error))
+    ?? stringValue(objectRecord(record.error)?.message)
+    ?? (record.type === 'tool-output-denied' ? 'Tool output was denied' : null);
+  return { toolCallId, output, error };
 }
 
 function inputRecord(input: Prisma.JsonValue): Record<string, unknown> {
   return input && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+}
+
+function dedupeById<T extends { id: string }>(items: T[]): T[] {
+  return [...new Map(items.map((item) => [item.id, item])).values()];
+}
+
+export function hasUncoveredTruncatedCompatibility(
+  parts: StoredSessionPart[],
+  messages: Array<{ id: string }>,
+  toolCalls: Array<{ id: string; status: string }>,
+  messagesTruncated: boolean,
+  toolsTruncated: boolean
+): boolean {
+  const coveredMessages = new Set(parts.flatMap((part) => part.messageId ? [part.messageId] : []));
+  const coveredCalls = new Set(parts.flatMap((part) => part.kind === 'tool-call' && part.toolCallId ? [part.toolCallId] : []));
+  const coveredResults = new Set(parts.flatMap((part) => part.kind === 'tool-result' && part.toolCallId ? [part.toolCallId] : []));
+  const uncoveredMessage = messages.some((message) => !coveredMessages.has(message.id));
+  const uncoveredTool = toolCalls.some((toolCall) =>
+    !coveredCalls.has(toolCall.id)
+    || (!['RUNNING', 'PENDING_APPROVAL', 'APPROVED'].includes(toolCall.status) && !coveredResults.has(toolCall.id))
+  );
+  return (messagesTruncated && uncoveredMessage) || (toolsTruncated && uncoveredTool);
+}
+
+function legacyCursorForUncoveredCompatibility(
+  parts: StoredSessionPart[],
+  messages: Array<{ id: string; createdAt: Date }>,
+  toolCalls: Array<{ id: string; status: string; createdAt: Date }>,
+  beforeSequence: number
+): string | null {
+  const coveredMessages = new Set(parts.flatMap((part) => part.messageId ? [part.messageId] : []));
+  const coveredCalls = new Set(parts.flatMap((part) => part.kind === 'tool-call' && part.toolCallId ? [part.toolCallId] : []));
+  const coveredResults = new Set(parts.flatMap((part) => part.kind === 'tool-result' && part.toolCallId ? [part.toolCallId] : []));
+  const sources = [
+    ...messages.filter((message) => !coveredMessages.has(message.id)).map((message) => ({ id: message.id, createdAt: message.createdAt })),
+    ...toolCalls.filter((toolCall) =>
+      !coveredCalls.has(toolCall.id)
+      || (!['RUNNING', 'PENDING_APPROVAL', 'APPROVED'].includes(toolCall.status) && !coveredResults.has(toolCall.id))
+    ).map((toolCall) => ({ id: toolCall.id, createdAt: toolCall.createdAt }))
+  ].sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime() || left.id.localeCompare(right.id));
+  const oldest = sources[0];
+  return oldest ? serializeLegacyTimelineCursor(oldest.createdAt, oldest.id, beforeSequence) : null;
+}
+
+function legacyCursorForCompatibilityBoundary(
+  messages: Array<{ id: string; createdAt: Date }>,
+  toolCalls: Array<{ id: string; createdAt: Date }>,
+  beforeSequence: number
+): string | null {
+  const oldest = [...messages, ...toolCalls]
+    .map((item) => ({ id: item.id, createdAt: item.createdAt }))
+    .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime() || left.id.localeCompare(right.id))[0];
+  return oldest ? serializeLegacyTimelineCursor(oldest.createdAt, oldest.id, beforeSequence) : null;
+}
+
+function serializeLegacyTimelineCursor(createdAt: Date, id: string, beforeSequence: number): string {
+  return Buffer.from(JSON.stringify({ v: 1, createdAt: createdAt.toISOString(), id, beforeSequence }), 'utf8').toString('base64url');
+}
+
+function parseLegacyTimelineCursor(value: string | undefined): { createdAt: Date; id: string; beforeSequence: number | null } | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Record<string, unknown>;
+    const createdAt = typeof parsed.createdAt === 'string' ? new Date(parsed.createdAt) : null;
+    const id = typeof parsed.id === 'string' ? parsed.id : '';
+    if (parsed.v !== 1 || !createdAt || Number.isNaN(createdAt.getTime()) || !id) throw new Error('invalid');
+    const beforeSequence = typeof parsed.beforeSequence === 'number' && Number.isSafeInteger(parsed.beforeSequence)
+      ? parsed.beforeSequence
+      : null;
+    return { createdAt, id, beforeSequence };
+  } catch {
+    throw new HttpError(400, 'legacyCursor is invalid');
+  }
+}
+
+function mergeEventPart(value: unknown, part: AiAgentSessionPart | null): Record<string, unknown> {
+  const record = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : { value };
+  return part ? { ...record, part } : record;
 }
 
 function normalizeQuestionAnswers(value: unknown): string[][] {
@@ -1167,6 +2624,15 @@ function normalizeQuestionAnswers(value: unknown): string[][] {
       .map((item) => item.trim())
       .filter(Boolean);
   });
+}
+
+function validateQuestionAnswers(input: unknown, answers: string[][]): void {
+  const questions = inputRecord(input as Prisma.JsonValue).questions;
+  const expected = Array.isArray(questions) ? questions.length : 0;
+  if (expected === 0) throw new HttpError(400, 'Question payload is malformed and cannot be answered');
+  if (answers.length !== expected || answers.some((answer) => answer.length === 0)) {
+    throw new HttpError(400, 'Every question requires at least one answer');
+  }
 }
 
 function questionOutput(input: unknown, answers: string[][]): Prisma.JsonObject {
@@ -1199,12 +2665,15 @@ function normalizePromptPayload(payload: PromptPayload): PromptPayload {
     prompt: payload.prompt.trim(),
     model: payload.model?.trim() || null,
     attachments: sanitizeAttachments(payload.attachments),
-    agent: payload.agent?.trim() || null
+    agent: payload.agent?.trim() || null,
+    taskContract: payload.taskContract,
+    buildRunId: payload.buildRunId?.trim() || null,
+    approvalMode: normalizeApprovalMode(payload.approvalMode)
   };
 }
 
 function serializePromptPayload(payload: PromptPayload): string {
-  if (!payload.model && !payload.agent && payload.attachments.length === 0) return payload.prompt;
+  if (!payload.model && !payload.agent && !payload.taskContract && !payload.buildRunId && payload.approvalMode === 'manual' && payload.attachments.length === 0) return payload.prompt;
   return JSON.stringify({
     type: 'opentales.aiPrompt',
     version: 1,
@@ -1220,11 +2689,78 @@ function parsePromptPayload(value: string): PromptPayload {
       prompt: typeof parsed.prompt === 'string' ? parsed.prompt : value,
       model: typeof parsed.model === 'string' ? parsed.model : null,
       attachments: sanitizeAttachments(parsed.attachments),
-      agent: typeof parsed.agent === 'string' ? parsed.agent : null
+      agent: typeof parsed.agent === 'string' ? parsed.agent : null,
+      taskContract: parseTaskContract(parsed.taskContract),
+      buildRunId: typeof parsed.buildRunId === 'string' ? parsed.buildRunId : null,
+      approvalMode: parsed.approvalMode === 'auto' ? 'auto' : 'manual'
     });
   } catch {
-    return { prompt: value, model: null, attachments: [], agent: null };
+    return { prompt: value, model: null, attachments: [], agent: null, taskContract: null, buildRunId: null, approvalMode: 'manual' };
   }
+}
+
+function normalizeApprovalMode(value: unknown): AiAgentApprovalMode {
+  if (value === undefined || value === null || value === 'manual') return 'manual';
+  if (value === 'auto') return 'auto';
+  throw new HttpError(400, 'approvalMode must be manual or auto');
+}
+
+function toPrismaApprovalMode(value: AiAgentApprovalMode): 'MANUAL' | 'AUTO' {
+  return value === 'auto' ? 'AUTO' : 'MANUAL';
+}
+
+function fromPrismaApprovalMode(value: 'MANUAL' | 'AUTO'): AiAgentApprovalMode {
+  return value === 'AUTO' ? 'auto' : 'manual';
+}
+
+function parseTaskContract(value: unknown): TaskContract | null {
+  if (value === null || value === undefined) return null;
+  try {
+    return normalizeTaskContract({
+      description: 'Persisted task',
+      subagent_type: 'persisted',
+      contract: value
+    });
+  } catch {
+    return null;
+  }
+}
+
+function inheritBuildRun(contract: TaskContract, activeBuildRunId: string | null): TaskContract {
+  if (!activeBuildRunId || contract.scope.buildRunId) return contract;
+  return normalizeTaskContract({
+    description: 'Build-scoped delegated task',
+    subagent_type: 'inherited',
+    contract: {
+      ...contract,
+      scope: { ...contract.scope, buildRunId: activeBuildRunId }
+    }
+  });
+}
+
+function selectActiveSkills<T extends { name: string; manifest: { version: string; kind?: string } }>(
+  skills: T[],
+  task: TaskContract | null,
+  agent: AiAgentInfo | undefined
+): T[] {
+  const declared = Object.entries(task?.skillVersions ?? {});
+  if (declared.length) return declared.map(([name, version]) => {
+    const skill = skills.find((candidate) => candidate.name === name);
+    if (!skill) throw new Error(`Pinned skill ${name}@${version} is unavailable`);
+    if (skill.manifest.version !== version) throw new Error(`Pinned skill ${name}@${version} resolved to ${skill.manifest.version}`);
+    return skill;
+  });
+  const inferred = agentSkillName(agent?.name);
+  const skill = inferred ? skills.find((candidate) => candidate.name === inferred) : undefined;
+  return skill ? [skill] : [];
+}
+
+function agentSkillName(agentName: string | undefined): string | null {
+  if (!agentName) return null;
+  if (agentName.includes('chapter-writer') || agentName.includes('chapter-continuity')) return 'novel-chapters';
+  if (agentName.includes('critic')) return 'novel-critic';
+  const match = agentName.match(/^(idea|characters|settings|perspective|voice|obstacles|outline|climax)-runner$/);
+  return match ? `novel-${match[1]}` : null;
 }
 
 function sanitizeAttachments(value: unknown): AiAgentAttachment[] {
@@ -1323,8 +2859,14 @@ function usageFromPart(part: unknown, model: string | null): UsagePayload | null
   const record = part as Record<string, unknown>;
   const usage = objectRecord(record.totalUsage) ?? objectRecord(record.usage);
   if (!usage) return null;
-  const inputTokens = numberValue(usage.inputTokens) ?? numberValue(usage.promptTokens) ?? 0;
-  const outputTokens = numberValue(usage.outputTokens) ?? numberValue(usage.completionTokens) ?? 0;
+  const inputTokens = numberValue(usage.inputTokens)
+    ?? numberValue(objectRecord(usage.inputTokens)?.total)
+    ?? numberValue(usage.promptTokens)
+    ?? 0;
+  const outputTokens = numberValue(usage.outputTokens)
+    ?? numberValue(objectRecord(usage.outputTokens)?.total)
+    ?? numberValue(usage.completionTokens)
+    ?? 0;
   const totalTokens = numberValue(usage.totalTokens) ?? inputTokens + outputTokens;
   const maxTokens = contextWindowForModel(model);
   return {
@@ -1335,6 +2877,46 @@ function usageFromPart(part: unknown, model: string | null): UsagePayload | null
     percentage: Math.min(100, Math.round((totalTokens / maxTokens) * 1000) / 10),
     model
   };
+}
+
+function streamPartError(part: unknown): string | null {
+  const record = objectRecord(part);
+  if (!record) return null;
+  return stringValue(record.reason)
+    ?? stringValue(record.errorText)
+    ?? (record.error instanceof Error ? record.error.message : stringValue(record.error))
+    ?? stringValue(objectRecord(record.error)?.message);
+}
+
+function finishReason(part: unknown): string | null {
+  return stringValue(objectRecord(part)?.finishReason);
+}
+
+export function classifyAgentStreamTerminal(part: unknown): { kind: 'abort' | 'error'; message: string } | null {
+  const type = stringValue(objectRecord(part)?.type);
+  if (type === 'abort') return { kind: 'abort', message: streamPartError(part) ?? 'Model stream aborted' };
+  if (type === 'error') return { kind: 'error', message: streamPartError(part) ?? 'Model stream failed' };
+  if (type === 'finish' && finishReason(part) === 'error') {
+    return { kind: 'error', message: 'Model stream finished with an error' };
+  }
+  return null;
+}
+
+export function isHandlerManagedTool(toolName: string): boolean {
+  return HANDLER_MANAGED_TOOLS.has(toolName);
+}
+
+export function shouldBroadcastOuterToolEvent(
+  toolName: string,
+  eventType?: string,
+  handlerOwned = false
+): boolean {
+  if (eventType === 'tool-input-error') return true;
+  return !isHandlerManagedTool(toolName) || !handlerOwned;
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && (error as { code?: unknown }).code === 'P2002');
 }
 
 function objectRecord(value: unknown): Record<string, unknown> | null {
@@ -1353,6 +2935,7 @@ function contextWindowForModel(model: string | null): number {
 }
 
 function errorMessage(error: unknown): string {
+  if (typeof error === 'string' && error.trim()) return error;
   if (!error || typeof error !== 'object') return error instanceof Error ? error.message : 'AI agent failed';
   const record = error as Record<string, unknown>;
   const data = objectRecord(record.data);

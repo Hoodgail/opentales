@@ -66,6 +66,7 @@ Important DTOs:
 - `ProjectFileTree`
 - `ProjectStorageUsage`
 - `ProjectAiSkill`
+- `AiAgentSession`, `AiAgentSessionPart`, `AiAgentToolCall`
 - `Character`
 - `Location`
 - `Chapter`
@@ -74,6 +75,9 @@ Important DTOs:
 - `UpdateCharacterInput`
 - `UpdateLocationInput`
 - `UpdateStructureInput`
+- `BuildRun`, `BuildTask`, `StoryArtifact`, `StoryStateSnapshot`
+- `BuildManuscriptUnit`, `BuildCompilation`, `BuildReview`, `BuildObservability`
+- `ProjectExport`, `ProjectImportPreview`
 
 ## Client Methods
 
@@ -103,5 +107,9 @@ Important DTOs:
 | `updateProjectAiSkill(projectId, skillId, input)` | `PATCH /projects/:projectId/ai/skills/:skillId` |
 | `deleteProjectAiSkill(projectId, skillId)` | `DELETE /projects/:projectId/ai/skills/:skillId` |
 | `answerAiQuestion(projectId, toolCallId, input, sessionId?)` | `POST /projects/:projectId/ai/agent-session/tool-calls/:toolCallId/answer` |
+
+Agent session snapshots include the additive `timeline` projection: stable, sequenced `message`, contiguous `text`, `tool-call`, `tool-result`, and `task` parts. `timelineInfo` reports exact, approximate legacy, or mixed chronology plus truncation. Consumers should prefer the timeline, fall back to `messages`/`toolCalls` against older backends, and retain the current snapshot when an incremental stream event omits `session`. Load older durable parts with `beforeSequence`; best-effort legacy pages use `legacyCursor` (the response returns both next cursors). `createAiAgentSession` accepts optional `buildRunId` and `approvalMode`; `updateAiAgentSession` switches an idle session between `manual` and admin-only `auto`. Auto executes available in-scope mutations immediately and removes `askUser`; each queued prompt captures the current mode. Snapshots expose the resolved `activeBuildRunId`. Large tool inputs/outputs—including pending approvals—and parent task results are previewed; call `getAiAgentToolCall` or open the child session for full values.
+
+Novel Build methods include `createBuildRun`, authorization/lifecycle/replan, manuscript-unit CRUD/reorder, compile/compare, review approve/merge/reject, artifact and versioned story-state operations, observability, search/references, and diagnostics. Publishing methods include secure export create/list/download/regenerate/delete and import preview/apply. Consult [`../../docs/novel-build.md`](../../docs/novel-build.md) for workflow semantics and required idempotency/revision fields.
 
 Project docs are path-based through folders. `ProjectDoc.kind` is only metadata for filtering and AI behavior; use `folderId` to place docs in the tree. Assets appear in the tree only when they have a `folderId`.

@@ -1,7 +1,13 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import type { Dirent } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { PrismaClient } from '@prisma/client';
+import {
+  legacySkillManifest,
+  parseSkillManifest,
+  type SkillManifest
+} from './skills/skillManifest.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -20,6 +26,7 @@ export interface BuiltInAiSkill {
   createdAt: Date;
   updatedAt: Date;
   native: true;
+  manifest: SkillManifest;
 }
 
 export interface AiSkillCatalogItem {
@@ -28,32 +35,46 @@ export interface AiSkillCatalogItem {
   content: string;
   updatedAt: Date;
   native?: boolean;
+  manifest: SkillManifest;
 }
 
 const builtInSkillCache = new Map<string, BuiltInAiSkill[]>();
 
-export function loadMarkdownFiles(folderName: 'agents' | 'skills'): Array<{ filename: string; markdown: string }> {
+export function loadMarkdownFiles(folderName: 'agents' | 'skills'): Array<{ filename: string; markdown: string; manifest?: SkillManifest }> {
   const folderPath = resolve(__dirname, folderName);
+  let entries: Dirent[];
   try {
-    return readdirSync(folderPath, { withFileTypes: true })
-      .flatMap((entry) => {
+    entries = readdirSync(folderPath, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries
+    .flatMap((entry) => {
         if (entry.isFile() && entry.name.endsWith('.md')) {
           return [{ filename: entry.name, markdown: readFileSync(resolve(folderPath, entry.name), 'utf-8') }];
         }
         if (entry.isDirectory()) {
           const skillPath = resolve(folderPath, entry.name, 'SKILL.md');
           try {
-            return [{ filename: `${entry.name}/SKILL.md`, markdown: readFileSync(skillPath, 'utf-8') }];
-          } catch {
+            const markdown = readFileSync(skillPath, 'utf-8');
+            let manifest: SkillManifest | undefined;
+            const manifestPath = resolve(folderPath, entry.name, 'skill.json');
+            if (existsSync(manifestPath)) {
+              const raw = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+              manifest = parseSkillManifest(raw, `${entry.name}/skill.json`);
+              if (manifest.name !== safeCatalogName(entry.name)) {
+                throw new Error(`Invalid ${entry.name}/skill.json: name must match its directory`);
+              }
+            }
+            return [{ filename: `${entry.name}/SKILL.md`, markdown, manifest }];
+          } catch (error) {
+            if (existsSync(skillPath) && existsSync(resolve(folderPath, entry.name, 'skill.json'))) throw error;
             return [];
           }
         }
         return [];
       })
       .sort((a, b) => a.filename.localeCompare(b.filename));
-  } catch {
-    return [];
-  }
 }
 
 export function loadBuiltInAiSkills(projectId = '__built_in__'): BuiltInAiSkill[] {
@@ -62,7 +83,7 @@ export function loadBuiltInAiSkills(projectId = '__built_in__'): BuiltInAiSkill[
 
   const now = new Date(0);
   const skills = loadMarkdownFiles('skills')
-    .map(({ filename, markdown }) => {
+    .map(({ filename, markdown, manifest }) => {
       const parsed = parseMarkdownWithFrontmatter(markdown);
       const fallbackName = filename.replace(/\/SKILL\.md$/i, '').replace(/\.md$/i, '');
       const name = safeCatalogName(String(parsed.frontmatter.name ?? fallbackName));
@@ -77,7 +98,8 @@ export function loadBuiltInAiSkills(projectId = '__built_in__'): BuiltInAiSkill[
         enabled: true,
         createdAt: now,
         updatedAt: now,
-        native: true as const
+        native: true as const,
+        manifest: manifest ?? legacySkillManifest(name, description)
       };
     })
     .filter((skill): skill is BuiltInAiSkill => Boolean(skill));
@@ -105,7 +127,8 @@ export async function loadAiSkillCatalog(prisma: PrismaClient, projectId: string
       name: skill.name,
       description: skill.description,
       content: skill.content,
-      updatedAt: skill.updatedAt
+      updatedAt: skill.updatedAt,
+      manifest: projectSkillManifest(skill.name, skill.description, skill.content)
     };
   }
 
@@ -128,11 +151,52 @@ export async function readAiSkillFromCatalog(
         name: projectSkill.name,
         description: projectSkill.description,
         content: projectSkill.content,
-        updatedAt: projectSkill.updatedAt
+        updatedAt: projectSkill.updatedAt,
+        manifest: projectSkillManifest(projectSkill.name, projectSkill.description, projectSkill.content)
       }
       : undefined;
   }
   return loadBuiltInAiSkills(projectId).find((skill) => skill.name === normalized);
+}
+
+export function loadAiSkillReferences(skill: Pick<AiSkillCatalogItem, 'name' | 'manifest' | 'native'>): Array<{ name: string; content: string }> {
+  if (!skill.manifest.references.length) return [];
+  if (!skill.native) throw new Error(`Project skill ${skill.name} declares external references, but project skill resources are not installed`);
+  const skillRoot = resolve(__dirname, 'skills', skill.name);
+  return skill.manifest.references.map((name) => {
+    if (!name || name.startsWith('/') || name.includes('..') || name.includes('\\')) throw new Error(`Skill ${skill.name} has unsafe reference path '${name}'`);
+    const path = resolve(skillRoot, name);
+    if (!path.startsWith(`${skillRoot}/`)) throw new Error(`Skill ${skill.name} reference escapes its package`);
+    return { name, content: readFileSync(path, 'utf8') };
+  });
+}
+
+export function projectSkillManifest(name: string, description: string, content: string): SkillManifest {
+  const parsed = parseMarkdownWithFrontmatter(content);
+  const declaredName = stringValue(parsed.frontmatter.name);
+  if (declaredName && safeCatalogName(declaredName) !== name) throw new Error(`Project skill manifest name '${declaredName}' does not match '${name}'`);
+  const version = stringValue(parsed.frontmatter.version);
+  if (!version) return legacySkillManifest(name, description);
+  const declaredContext = recordValue(parsed.frontmatter.context);
+  return parseSkillManifest({
+    schemaVersion: 1,
+    name,
+    version,
+    description,
+    kind: stringValue(parsed.frontmatter.kind) ?? 'planning',
+    inputs: stringListValue(parsed.frontmatter.inputs),
+    outputs: stringListValue(parsed.frontmatter.outputs),
+    runtimeRoles: stringListValue(parsed.frontmatter.runtimeRoles, ['creator']),
+    allowedTools: stringListValue(parsed.frontmatter.allowedTools, ['readProjectAiSkill']),
+    maxIterations: numberValue(parsed.frontmatter.maxIterations) ?? 1,
+    context: {
+      maxTokens: numberValue(declaredContext.maxTokens) ?? 24_000,
+      sections: stringListValue(declaredContext.sections, ['story-brief', 'active-task'])
+    },
+    rubric: stringValue(parsed.frontmatter.rubric),
+    procedure: stringListValue(parsed.frontmatter.procedure, ['Follow the project-owned SKILL.md within the declared runtime capability boundary.']),
+    references: stringListValue(parsed.frontmatter.references)
+  }, `project skill ${name}`);
 }
 
 export function parseMarkdownWithFrontmatter(markdown: string): ParsedMarkdownDoc {
@@ -187,5 +251,21 @@ function parseScalar(value: string): unknown {
   if (unquoted === 'true') return true;
   if (unquoted === 'false') return false;
   if (unquoted === 'null') return null;
+  if (/^-?\d+(?:\.\d+)?$/.test(unquoted)) return Number(unquoted);
+  if ((unquoted.startsWith('[') && unquoted.endsWith(']')) || (unquoted.startsWith('{') && unquoted.endsWith('}'))) {
+    try { return JSON.parse(unquoted); } catch { return unquoted; }
+  }
   return unquoted;
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function stringListValue(value: unknown, fallback: string[] = []): string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : fallback;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }

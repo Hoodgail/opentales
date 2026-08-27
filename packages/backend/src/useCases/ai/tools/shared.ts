@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
 import { HttpError } from '../../../http/HttpError.js';
 
 export const paginationInputSchema = z.object({
@@ -24,6 +25,16 @@ export const editContentInputSchema = z.object({
 
 export interface ToolContext {
   projectId: string;
+}
+
+export interface AgentToolInvocationContext {
+  toolCallId?: string;
+  abortSignal?: AbortSignal;
+}
+
+export function invocationToolCallId(options: AgentToolInvocationContext | undefined): string {
+  const providerId = options?.toolCallId?.trim();
+  return providerId || `manual-${randomUUID()}`;
 }
 
 export function pagination(input: { page?: number; limit?: number } = {}) {

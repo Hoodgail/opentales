@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: opentales
+          POSTGRES_PASSWORD: opentales
+          POSTGRES_DB: opentales_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U opentales -d opentales_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://opentales:opentales@127.0.0.1:5432/opentales_test?schema=public
+      AI_WORKER_TEST_DATABASE_URL: postgresql://opentales:opentales@127.0.0.1:5432/opentales_test?schema=public
+      NOVEL_BUILD_TEST_DATABASE_URL: postgresql://opentales:opentales@127.0.0.1:5432/opentales_test?schema=public
+      EXPORT_IMPORT_TEST_DATABASE_URL: postgresql://opentales:opentales@127.0.0.1:5432/opentales_test?schema=public
+      REVISION_TEST_DATABASE_URL: postgresql://opentales:opentales@127.0.0.1:5432/opentales_test?schema=public
+      RENAME_REFACTOR_TEST_DATABASE_URL: postgresql://opentales:opentales@127.0.0.1:5432/opentales_test?schema=public
+      JWT_SECRET: ci-only-secret-that-is-long-enough
+      CORS_ORIGIN: http://localhost:5173
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir packages/backend exec prisma migrate deploy
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm eval
+      - run: pnpm --dir packages/backend test:critical-coverage
+      - run: pnpm build

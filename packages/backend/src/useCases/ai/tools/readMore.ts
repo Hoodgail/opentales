@@ -349,6 +349,9 @@ export function listProjectAiSkillsTool(prisma: PrismaClient, context: ToolConte
         skills: skills.map((skill) => ({
           name: skill.name,
           description: skill.description,
+          version: skill.manifest.version,
+          kind: skill.manifest.kind,
+          runtimeRoles: skill.manifest.runtimeRoles,
           updatedAt: skill.updatedAt.toISOString(),
           native: Boolean(skill.native)
         }))
@@ -368,6 +371,7 @@ export function readProjectAiSkillTool(prisma: PrismaClient, context: ToolContex
         skillContent: `<skill_content name="${escapeAttribute(skill.name)}">\n${skill.content}\n</skill_content>`,
         name: skill.name,
         description: skill.description,
+        manifest: skill.manifest,
         updatedAt: skill.updatedAt.toISOString(),
         native: Boolean(skill.native)
       };

@@ -13,6 +13,10 @@ Express API for OpenTales. It uses Prisma with PostgreSQL and keeps business log
 - Project-scoped AI settings and Agent Skills
 - Project storage usage accounting across assets and writing content
 - Versioned prose through `Writing`, `WritingBranch`, and `WritingVersion`
+- Durable, restart-safe Novel Build task graphs with scoped leases, checkpoints, traces, and evaluations
+- Structured Story IR, immutable canon/state history, temporal queries, and evidence-backed diagnostics
+- Sandboxed scene/chapter manuscript units with compilation and owner approve/merge/reject
+- Validated private DOCX/PDF/EPUB/Markdown/text/HTML/archive export and safe import preview/apply
 - Demo seed data converted from the current frontend manuscript fixture
 
 ## Setup
@@ -52,6 +56,9 @@ pnpm dev
 | `pnpm dev` | Run the API with `tsx watch` |
 | `pnpm build` | Generate Prisma Client and compile TypeScript |
 | `pnpm check` | Typecheck without emitting files |
+| `pnpm test` | Run unit and contract tests; database suites run when their test URLs are set |
+| `pnpm eval` | Run deterministic artifact/behavior and continuity evals |
+| `pnpm test:critical-coverage` | Enforce coverage thresholds over the workflow security/runtime core |
 | `pnpm start` | Run the compiled API |
 | `pnpm prisma:generate` | Generate Prisma Client |
 | `pnpm prisma:migrate` | Create/apply a development migration |
@@ -95,6 +102,10 @@ Project routes require `Authorization: Bearer <token>`.
 | `GET` | `/projects/:projectId/storage` | Calculate total project storage usage |
 
 AI skill routes under `/projects/:projectId/ai/skills` let project admins list, create, update, and delete project-scoped Agent Skills. Enabled skills are disclosed to agent sessions as a compact catalog and loaded on demand with read-only AI tools.
+
+Novel Build routes under `/projects/:projectId/builds` expose human controls and reads: intake/authorization/lifecycle/replan, sandbox manuscript units, compilation/comparison, reviews, artifacts, versioned story state, observability, search/references, and diagnostics. Claim/heartbeat/task-result/trace/branch-patch operations remain backend-internal.
+
+Publishing routes under `/projects/:projectId/exports` and `/imports` generate private artifacts or preview/apply supported imports. Build completion accepts only verified export records whose bytes, checksums, compilation, and branch heads match.
 
 Folders use Linux-like case-sensitive names. A folder cannot contain two child items with the same name across folders, docs, and foldered assets. The backend enforces this in transactions with PostgreSQL advisory locks scoped to the project and parent folder, so cross-table sibling checks do not race.
 

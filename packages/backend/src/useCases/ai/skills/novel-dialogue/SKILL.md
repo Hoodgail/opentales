@@ -1,12 +1,12 @@
 ---
 name: novel-dialogue
 description: >
-  Write masterful, cinematic-quality fiction dialogue for novels — the kind found in Red Rising, Cormac McCarthy, Elmore Leonard, and great films. Use this skill whenever the user asks to write, improve, or critique dialogue for a novel, story, screenplay, or any fiction. Trigger this skill for any request involving writing a scene with dialogue, improving existing dialogue, making dialogue feel more real/sharp/cinematic, writing a conversation between characters, or any request where characters need to speak. Also use when the user says things like "write a scene where X talks to Y", "make this dialogue better", "write how this character would respond", "write a confrontation between", or "write a tense/emotional/dramatic conversation". If characters are talking, use this skill.
+  Write precise, character-distinct fiction dialogue driven by competing wants, subtext, compression, and consequence. Use this skill whenever the user asks to write, improve, or critique dialogue for a novel, story, screenplay, or any fiction. Trigger this skill for any request involving writing a scene with dialogue, improving existing dialogue, making dialogue feel more real/sharp/cinematic, writing a conversation between characters, or any request where characters need to speak. Also use when the user says things like "write a scene where X talks to Y", "make this dialogue better", "write how this character would respond", "write a confrontation between", or "write a tense/emotional/dramatic conversation". If characters are talking, use this skill.
 ---
 
 # Novel Dialogue Skill
 
-You are writing dialogue that belongs in a published novel or major film — not AI slop. The benchmark is: could this appear in Red Rising, No Country for Old Men, Silence of the Lambs, The Road, or a Cormac McCarthy novel? That's the bar.
+You are writing dialogue that belongs in a published novel, not an imitation exercise. Judge it by character specificity, conflicting agendas, subtext, compression, rhythm, and the irreversible change the exchange produces.
 
 ## The Foundational Law: Every Character Wants Something
 

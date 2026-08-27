@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "name": "novel-critic",
+  "version": "2.0.0",
+  "description": "Independently evaluate one assigned planning artifact, chapter, act, or manuscript pass using evidence-backed diagnostics.",
+  "kind": "critique",
+  "inputs": ["story-brief", "narrative-contract", "chapter-draft"],
+  "outputs": ["revision-issue"],
+  "runtimeRoles": ["critic"],
+  "allowedTools": ["searchStory", "findReferences", "getSceneContext", "queryCanon", "queryTimeline", "queryEntityState", "queryOpenLoops", "runStoryLint", "getArcState", "compareVersions", "reportTaskResult"],
+  "maxIterations": 1,
+  "context": {
+    "maxTokens": 24000,
+    "sections": ["story-brief", "narrative-contract", "active-task", "characters", "recent-causal", "threads", "canon", "style"]
+  },
+  "rubric": "story-critic-v2",
+  "procedure": [
+    "Review exactly the assigned target independently from its creator.",
+    "Ground every issue in navigable evidence and distinguish deterministic failures from subjective rubric judgments.",
+    "Score only the declared rubric dimensions and report a concise candidate resolution.",
+    "Do not mutate manuscript, canon, planning artifacts, or project settings."
+  ],
+  "references": []
+}

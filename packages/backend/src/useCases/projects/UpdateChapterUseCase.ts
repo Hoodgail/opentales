@@ -76,7 +76,11 @@ export class UpdateChapterUseCase {
     const chapter = await this.prisma.chapter.findUniqueOrThrow({
       where: { id: chapterId },
       include: {
-        bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } }
+        bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } },
+        scenes: {
+          orderBy: { order: 'asc' },
+          include: { bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } } }
+        }
       }
     });
     return toChapter(chapter);

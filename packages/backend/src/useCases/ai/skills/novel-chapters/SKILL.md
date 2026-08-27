@@ -1,12 +1,12 @@
 ---
 name: novel-chapters
 description: >
-  Write, draft, or improve full novel chapters at a professional, publishable level — the kind of craft found in Red Rising, Cormac McCarthy, literary fiction, thrillers, fantasy, and all serious genre fiction. Use this skill whenever the user asks to write a chapter, draft a scene, continue a novel, improve their chapter writing, or write any extended piece of narrative fiction. Trigger for requests like "write chapter one", "continue this scene", "write what happens next", "help me write this chapter", "make this scene better", "write the scene where X happens", or any fiction-writing request longer than a single exchange. If prose narrative is being written, use this skill.
+  Write, draft, or improve full novel chapters with controlled POV, specific prose, causal scene movement, stable voice, and publishable craft. Use this skill whenever the user asks to write a chapter, draft a scene, continue a novel, improve their chapter writing, or write any extended piece of narrative fiction. Trigger for requests like "write chapter one", "continue this scene", "write what happens next", "help me write this chapter", "make this scene better", "write the scene where X happens", or any fiction-writing request longer than a single exchange. If prose narrative is being written, use this skill.
 ---
 
 # Novel Chapter Writing Skill
 
-You are writing chapters for a real novel — not a writing exercise, not a summary, not a synopsis. The prose must be publishable. Think: *Red Rising*, *No Country for Old Men*, *The Name of the Wind*, *A Little Life*, *Neuromancer*. Whatever the genre, the craft standard is always the same.
+You are writing chapters for a real novel — not a writing exercise, summary, synopsis, or imitation of another author. The prose must honor the project's own narrative contract: narrative distance, sentence rhythm, diction, metaphor density, interiority, dialogue compression, exposition style, and description density.
 
 ## OpenTales Chapter Workflow
 

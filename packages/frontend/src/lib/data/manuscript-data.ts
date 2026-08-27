@@ -3,6 +3,7 @@ import type { Character, Location, Chapter, Act, StoryStructure } from "./manusc
 export const initialCharacters: Character[] = [
   {
     id: "char-elena",
+    aliases: ["Elena", "Ms. Voss"],
     name: "Elena Voss",
     role: "Protagonist",
     age: "32",
@@ -25,6 +26,7 @@ export const initialCharacters: Character[] = [
   },
   {
     id: "char-marcus",
+    aliases: ["Marcus", "Judge Hale"],
     name: "Marcus Hale",
     role: "Mentor",
     age: "58",
@@ -45,6 +47,7 @@ export const initialCharacters: Character[] = [
   },
   {
     id: "char-iris",
+    aliases: ["Iris"],
     name: "Iris Thorne",
     role: "Ally",
     age: "27",
@@ -61,6 +64,7 @@ export const initialCharacters: Character[] = [
   },
   {
     id: "char-silas",
+    aliases: ["Silas", "Mr. Crane"],
     name: "Silas Crane",
     role: "Antagonist",
     age: "54",
@@ -84,6 +88,7 @@ export const initialLocations: Location[] = [
   {
     id: "loc-blackwood",
     name: "Blackwood Manor",
+    aliases: [],
     type: "Primary Residence",
     image: "/locations/blackwood-manor.jpg",
     description:
@@ -98,6 +103,7 @@ export const initialLocations: Location[] = [
   {
     id: "loc-docks",
     name: "Oldgate Harbor",
+    aliases: [],
     type: "Town District",
     image: "/locations/harbor-docks.jpg",
     description:
@@ -109,6 +115,7 @@ export const initialLocations: Location[] = [
   {
     id: "loc-library",
     name: "Oldgate Public Library",
+    aliases: [],
     type: "Public Building",
     image: "/locations/oldgate-library.jpg",
     description:
@@ -122,6 +129,9 @@ export const initialLocations: Location[] = [
 export const initialChapters: Chapter[] = [
   {
     id: "ch-prologue",
+    writingId: "writing-ch-prologue",
+    branchId: "branch-ch-prologue-main",
+    headVersionId: "version-ch-prologue-1",
     number: 0,
     title: "Prologue: The Letter",
     status: "final",
@@ -129,6 +139,7 @@ export const initialChapters: Chapter[] = [
     locationId: "loc-blackwood",
     summary: "Elena receives news of her grandmother's death and a letter she was never meant to read.",
     publishedAt: null,
+    scenes: [],
     wordCount: 1840,
     content: `# Prologue: The Letter
 
@@ -160,6 +171,9 @@ That was the first thing that was wrong.`,
   },
   {
     id: "ch-1",
+    writingId: "writing-ch-1",
+    branchId: "branch-ch-1-main",
+    headVersionId: "version-ch-1-1",
     number: 1,
     title: "The House That Waited",
     status: "in-progress",
@@ -167,6 +181,7 @@ That was the first thing that was wrong.`,
     locationId: "loc-blackwood",
     summary: "Elena arrives at Blackwood Manor and meets Marcus, who has been waiting for her.",
     publishedAt: null,
+    scenes: [],
     wordCount: 3210,
     content: `# Chapter 1: The House That Waited
 
@@ -198,6 +213,9 @@ Marcus considered her over the rim of his glass. He had her grandmother's eyes â
   },
   {
     id: "ch-2",
+    writingId: "writing-ch-2",
+    branchId: "branch-ch-2-main",
+    headVersionId: "version-ch-2-1",
     number: 2,
     title: "Cipher in the Stacks",
     status: "draft",
@@ -206,6 +224,7 @@ Marcus considered her over the rim of his glass. He had her grandmother's eyes â
     summary:
       "Elena visits the library to research her grandmother's last weeks and meets Iris, who recognizes the family seal.",
     publishedAt: null,
+    scenes: [],
     wordCount: 1120,
     content: `# Chapter 2: Cipher in the Stacks
 
@@ -223,6 +242,9 @@ Elena followed her in.`,
   },
   {
     id: "ch-3",
+    writingId: "writing-ch-3",
+    branchId: "branch-ch-3-main",
+    headVersionId: "version-ch-3-1",
     number: 3,
     title: "Crane at the Door",
     status: "review",
@@ -230,6 +252,7 @@ Elena followed her in.`,
     locationId: "loc-blackwood",
     summary: "Silas Crane arrives at Blackwood with an offer, a threat, and a name Elena has not heard since childhood.",
     publishedAt: null,
+    scenes: [],
     wordCount: 2640,
     content: `# Chapter 3: Crane at the Door
 
@@ -247,6 +270,9 @@ His smile deepened. "Then I shall be brief."`,
   },
   {
     id: "ch-4",
+    writingId: "writing-ch-4",
+    branchId: "branch-ch-4-main",
+    headVersionId: "version-ch-4-1",
     number: 4,
     title: "The Locked Study",
     status: "draft",
@@ -254,6 +280,7 @@ His smile deepened. "Then I shall be brief."`,
     locationId: "loc-blackwood",
     summary: "Elena finally opens the door her grandmother kept locked, and finds the first piece of the puzzle.",
     publishedAt: null,
+    scenes: [],
     wordCount: 0,
     content: `# Chapter 4: The Locked Study
 
@@ -269,6 +296,9 @@ His smile deepened. "Then I shall be brief."`,
   },
   {
     id: "ch-5",
+    writingId: "writing-ch-5",
+    branchId: "branch-ch-5-main",
+    headVersionId: "version-ch-5-1",
     number: 5,
     title: "Things Marcus Knew",
     status: "draft",
@@ -276,6 +306,7 @@ His smile deepened. "Then I shall be brief."`,
     locationId: "loc-blackwood",
     summary: "A POV shift to Marcus, twenty years earlier, and the promise that started everything.",
     publishedAt: null,
+    scenes: [],
     wordCount: 0,
     content: `# Chapter 5: Things Marcus Knew
 

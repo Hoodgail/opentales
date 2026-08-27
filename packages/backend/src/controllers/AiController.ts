@@ -4,11 +4,13 @@ import type {
   ApproveAiToolCallsInput,
   AnswerAiQuestionInput,
   CreateAiAgentSessionInput,
+  GetAiAgentTimelineInput,
   CreateAiCharacterDialogueInput,
   CreateAiOutlineExpansionInput,
   CreateProjectAiSkillInput,
   CreateAiRewriteSuggestionInput,
   QueueAiAgentPromptInput,
+  UpdateAiAgentSessionInput,
   UpdateProjectAiSkillInput,
   UpdateProjectAiSettingsInput
 } from '@opentales/sdk';
@@ -144,6 +146,15 @@ export class AiController {
     );
   };
 
+  updateAgentSession = async (req: Request, res: Response) => {
+    res.json(await this.agentSessionUseCase.update(
+      this.userId(req),
+      req.params.projectId,
+      req.params.sessionId,
+      req.body as UpdateAiAgentSessionInput
+    ));
+  };
+
   agentSessionEvents = async (req: Request, res: Response) => {
     await this.agentSessionUseCase.subscribe(
       this.userId(req),
@@ -151,6 +162,17 @@ export class AiController {
       res,
       req.params.sessionId
     );
+  };
+
+  agentSessionTimeline = async (req: Request, res: Response) => {
+    const input: GetAiAgentTimelineInput = {
+      beforeSequence: optionalInteger(req.query.beforeSequence, 'beforeSequence'),
+      limit: optionalInteger(req.query.limit, 'limit'),
+      legacyCursor: typeof req.query.legacyCursor === 'string' ? req.query.legacyCursor : undefined
+    };
+    res.json(await this.agentSessionUseCase.getTimeline(
+      this.userId(req), req.params.projectId, input, req.params.sessionId
+    ));
   };
 
   queueAgentPrompt = async (req: Request, res: Response) => {
@@ -184,6 +206,15 @@ export class AiController {
         req.params.sessionId
       )
     );
+  };
+
+  getToolCall = async (req: Request, res: Response) => {
+    res.json(await this.agentSessionUseCase.getToolCall(
+      this.userId(req),
+      req.params.projectId,
+      req.params.toolCallId,
+      req.params.sessionId
+    ));
   };
 
   approveToolCalls = async (req: Request, res: Response) => {
@@ -228,4 +259,12 @@ export class AiController {
     if (!req.user) throw new HttpError(401, 'Authentication required');
     return req.user.id;
   }
+}
+
+function optionalInteger(value: unknown, name: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !/^-?\d+$/.test(value)) throw new HttpError(400, `${name} must be an integer`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) throw new HttpError(400, `${name} must be a safe integer`);
+  return parsed;
 }

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "name": "novel-outline",
+  "version": "2.0.0",
+  "description": "Construct causal plot threads, acts, chapter briefs, beats, and scene plans as schema-valid story artifacts.",
+  "kind": "planning",
+  "inputs": ["story-brief", "character-bible", "world-bible"],
+  "outputs": ["plot-thread", "act-architecture", "chapter-brief", "scene-plan", "beat"],
+  "runtimeRoles": ["creator"],
+  "allowedTools": ["searchStory", "queryCanon", "queryOpenLoops", "applyArtifactBatch", "reportTaskResult"],
+  "maxIterations": 2,
+  "context": {
+    "maxTokens": 24000,
+    "sections": ["story-brief", "narrative-contract", "active-task", "characters", "world", "threads", "canon"]
+  },
+  "rubric": "complete-book-plan-v1",
+  "procedure": [
+    "Translate premise and constraints into causal plot threads and irreversible act transitions.",
+    "Decompose acts into ordered chapter briefs and scenes with explicit dependencies, goals, conflict, turns, and outcomes.",
+    "Cross-link threads, character pressure, timeline, and setup/payoff obligations with stable keys.",
+    "Persist schema-valid VALIDATED artifacts atomically and report their identifiers."
+  ],
+  "references": []
+}

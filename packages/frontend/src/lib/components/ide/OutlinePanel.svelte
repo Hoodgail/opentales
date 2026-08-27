@@ -1,7 +1,9 @@
 <script lang="ts">
-  import { Sparkles } from 'lucide-svelte';
+  import { Activity, CalendarClock, Columns3, GitBranch, LayoutList, Network, Sparkles } from 'lucide-svelte';
   import { ai } from '$lib/stores/ai.svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
+  import { storyIde } from '$lib/stores/storyIde.svelte';
+  import { storyUi, type OutlineProjection } from '$lib/stores/storyUi.svelte';
   import { pacingSeries, readingTime } from '$lib/data/pacing';
   import { cn } from '$lib/utils';
   import AiOutlineDialog from './AiOutlineDialog.svelte';
@@ -9,6 +11,18 @@
   import PanelHeader from './PanelHeader.svelte';
 
   let showOutlineExpand = $state(false);
+  let loadedProjectId = $state<string | null>(null);
+
+  $effect(() => {
+    const projectId = manuscript.projectId;
+    if (projectId && loadedProjectId !== projectId) {
+      loadedProjectId = projectId;
+      void storyIde.loadRuns(projectId).then(() => {
+        const first = storyIde.runs[0];
+        if (!storyIde.selectedRunId && first) void storyIde.selectRun(projectId, first.id);
+      });
+    }
+  });
 
   const summary = $derived(
     manuscript.structure.outline.split('\n').find((l) => l.trim() && !l.startsWith('#')) ??
@@ -32,6 +46,25 @@
     void manuscript.updateStructure({ outline: next });
     showOutlineExpand = false;
   }
+
+  function openStudio(projection: OutlineProjection) {
+    storyUi.setOutlineProjection(projection);
+    void manuscript.openTab({
+      id: 'tab-outline-studio',
+      type: 'outline-studio',
+      refId: storyIde.selectedRunId ?? 'outline',
+      title: 'Semantic Outline'
+    });
+  }
+
+  const projections = [
+    { id: 'hierarchy', label: 'Hierarchy', icon: LayoutList },
+    { id: 'corkboard', label: 'Corkboard', icon: Columns3 },
+    { id: 'plot-grid', label: 'Plot grid', icon: Network },
+    { id: 'timeline', label: 'Timeline', icon: CalendarClock },
+    { id: 'arc', label: 'Arcs', icon: GitBranch },
+    { id: 'tension', label: 'Tension', icon: Activity }
+  ] as const;
 </script>
 
 <div class="flex h-full flex-col">
@@ -40,10 +73,16 @@
       {#if ai.settings?.enabled}
         <HeaderButton icon={Sparkles} label="AI Expand" onclick={openOutlineExpand} />
       {/if}
+      <HeaderButton icon={Network} label="Open semantic outline" onclick={() => openStudio('hierarchy')} />
     {/snippet}
   </PanelHeader>
 
   <div class="flex-1 overflow-y-auto p-3">
+    <div class="mb-3 grid grid-cols-3 gap-px overflow-hidden rounded border border-border bg-border">
+      {#each projections as projection (projection.id)}
+        <button type="button" onclick={() => openStudio(projection.id)} class="flex min-h-12 flex-col items-center justify-center gap-1 bg-sidebar px-1 text-[9px] text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"><projection.icon class="size-3.5 text-accent/80" />{projection.label}</button>
+      {/each}
+    </div>
     {#if series.length > 0}
       <div class="mb-3 rounded-md border border-border bg-card p-3">
         <div class="flex items-baseline justify-between">

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "name": "novel-dialogue",
+  "version": "2.0.0",
+  "description": "Draft or revise dialogue inside an assigned scene while preserving character knowledge, voice, agenda, and subtext.",
+  "kind": "drafting",
+  "inputs": ["narrative-contract", "character-bible", "scene-plan"],
+  "outputs": ["chapter-draft"],
+  "runtimeRoles": ["drafter", "reviser"],
+  "allowedTools": ["getSceneContext", "queryCanon", "queryEntityState", "applyChapterPatch", "updateChapter", "updateScene", "reportTaskResult"],
+  "maxIterations": 2,
+  "context": {
+    "maxTokens": 16000,
+    "sections": ["narrative-contract", "active-task", "characters", "recent-causal", "canon", "style"]
+  },
+  "rubric": "dialogue-quality-v1",
+  "procedure": [
+    "Identify each speaker's current knowledge, agenda, leverage, and forbidden disclosures.",
+    "Write compressed dialogue in which competing wants alter the scene state.",
+    "Apply changes only within the assigned chapter/scene scope and report evidence."
+  ],
+  "references": []
+}

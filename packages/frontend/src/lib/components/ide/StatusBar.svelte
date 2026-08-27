@@ -1,8 +1,11 @@
 <script lang="ts">
   import { Check, Circle, Flame, FileText, GitBranch, Target, Wifi } from 'lucide-svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
+  import { storyIde } from '$lib/stores/storyIde.svelte';
   import { preferences } from '$lib/stores/preferences.svelte';
   import { runLint } from '$lib/lint/engine';
+  import { mergeDiagnostics } from '$lib/lint/merge';
+  import type { Diagnostic } from '$lib/lint/types';
   import { readingTime } from '$lib/data/pacing';
 
   const activeTab = $derived(
@@ -25,7 +28,24 @@
   const diagnostics = $derived(
     runLint({ chapters: manuscript.chapters, characters: manuscript.characters })
   );
-  const issueCount = $derived(diagnostics.length);
+  const semanticDiagnostics = $derived((storyIde.diagnostics?.diagnostics ?? []).map((diagnostic): Diagnostic => ({
+    ruleId: diagnostic.code,
+    severity: diagnostic.severity,
+    category: diagnostic.category,
+    chapterId: diagnostic.evidence.find((item) => item.chapterId)?.chapterId ?? '',
+    chapterTitle: 'Story graph',
+    message: diagnostic.message,
+    source: 'semantic',
+    evidence: diagnostic.evidence.map((item) => ({
+      unitId: item.unitId,
+      chapterId: item.chapterId,
+      sceneId: item.sceneId,
+      artifactId: item.artifactId,
+      excerpt: item.quote
+    }))
+  })));
+  const issueCount = $derived(mergeDiagnostics(diagnostics, semanticDiagnostics).length);
+  const branchLabel = $derived(['build', 'story-bible', 'outline-studio'].includes(activeTab?.type ?? '') && storyIde.selectedRun ? storyIde.selectedRun.branchName : 'main');
 
   const goal = $derived(preferences.dailyWordGoal);
   const written = $derived(preferences.getTodayProgress());
@@ -39,7 +59,7 @@
   <div class="flex items-center divide-x divide-accent-foreground/10">
     <div class="flex items-center gap-1.5 px-3 py-0.5">
       <GitBranch class="size-3" />
-      <span>main</span>
+      <span>{branchLabel}</span>
     </div>
     <button
       type="button"
@@ -93,9 +113,9 @@
     <div class="flex items-center gap-1.5 px-3 py-0.5">
       <span>Total: {totalWords.toLocaleString()} · {totalReading.label}</span>
     </div>
-    <div class="flex items-center gap-1.5 px-3 py-0.5">
+    <div class="flex items-center gap-1.5 px-3 py-0.5" title={manuscript.error ?? storyIde.error ?? (storyIde.connection === 'stale' ? 'Novel Build data is stale' : 'All changes synchronized')}>
       <Wifi class="size-3" />
-      <span>{manuscript.saving ? 'Saving...' : manuscript.error ? 'Save failed' : 'Synced'}</span>
+      <span>{manuscript.saving ? 'Saving...' : manuscript.error ? 'Save failed' : storyIde.connection === 'reconnecting' ? 'Reconnecting' : storyIde.connection === 'stale' ? 'Build stale' : 'Synced'}</span>
     </div>
   </div>
 </footer>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Check, FileJson, GitCompare, LayoutGrid, X } from 'lucide-svelte';
+  import { Check, FileJson, GitCompare, LayoutGrid, Loader2, X } from 'lucide-svelte';
   import { deleteAiApprovalDoc, getAiApprovalDoc } from '$lib/data/ai-approval-docs';
   import { ai } from '$lib/stores/ai.svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
@@ -14,25 +14,26 @@
 
   const doc = $derived(getAiApprovalDoc(approvalId));
   const projectId = $derived(manuscript.projectId);
+  const actionState = $derived(doc ? ai.toolActionStates[doc.toolCall.id] : undefined);
+  const actionError = $derived(doc ? ai.toolActionErrors[doc.toolCall.id] : undefined);
   let showRaw = $state(false);
 
-  function approve() {
+  async function approve() {
     if (!projectId || !doc) return;
     const pid = projectId;
-    void ai
-      .approveToolCall(pid, doc.toolCall.id, true, doc.sessionId)
-      .then(() => manuscript.refreshProject(pid))
-      .then(() => {
-        deleteAiApprovalDoc(doc.id);
-        void manuscript.closeTab(`tab-ai-approval-${doc.toolCall.id}`);
-      });
+    const succeeded = await ai.approveToolCall(pid, doc.toolCall.id, true, doc.sessionId);
+    if (!succeeded) return;
+    await manuscript.refreshProject(pid);
+    deleteAiApprovalDoc(doc.id);
+    await manuscript.closeTab(`tab-ai-approval-${doc.toolCall.id}`);
   }
 
-  function reject() {
+  async function reject() {
     if (!projectId || !doc) return;
-    void ai.approveToolCall(projectId, doc.toolCall.id, false, doc.sessionId);
+    const succeeded = await ai.approveToolCall(projectId, doc.toolCall.id, false, doc.sessionId);
+    if (!succeeded) return;
     deleteAiApprovalDoc(doc.id);
-    void manuscript.closeTab(`tab-ai-approval-${doc.toolCall.id}`);
+    await manuscript.closeTab(`tab-ai-approval-${doc.toolCall.id}`);
   }
 </script>
 
@@ -64,20 +65,30 @@
         </button>
         <button
           type="button"
-          onclick={approve}
-          class="inline-flex items-center gap-1 rounded-md bg-emerald-600/85 px-2.5 py-1 text-[11px] text-white hover:bg-emerald-500"
+          onclick={() => void approve()}
+          disabled={Boolean(actionState)}
+          class="inline-flex items-center gap-1 rounded-md bg-emerald-600/85 px-2.5 py-1 text-[11px] text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          <Check class="size-3" /> Approve
+          {#if actionState === 'approving'}<Loader2 class="size-3 motion-safe:animate-spin" />{:else}<Check class="size-3" />{/if}
+          {actionState === 'approving' ? 'Approving…' : 'Approve'}
         </button>
         <button
           type="button"
-          onclick={reject}
-          class="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
+          onclick={() => void reject()}
+          disabled={Boolean(actionState)}
+          class="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
         >
-          <X class="size-3" /> Reject
+          {#if actionState === 'rejecting'}<Loader2 class="size-3 motion-safe:animate-spin" />{:else}<X class="size-3" />{/if}
+          {actionState === 'rejecting' ? 'Rejecting…' : 'Reject'}
         </button>
       </div>
     </div>
+
+    {#if actionError}
+      <p role="alert" class="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-[11px] text-destructive">
+        {actionError}
+      </p>
+    {/if}
 
     {#if showRaw}
       <pre class="max-h-44 shrink-0 overflow-auto border-b border-border bg-card p-3 text-[11px] text-foreground/80">{JSON.stringify(doc.toolCall.input, null, 2)}</pre>

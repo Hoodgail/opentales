@@ -64,9 +64,12 @@ projectRoutes.delete('/:projectId/ai/skills/:skillId', asyncHandler(ai.deleteSki
 projectRoutes.get('/:projectId/ai/agent-sessions', asyncHandler(ai.agentSessions));
 projectRoutes.post('/:projectId/ai/agent-sessions', asyncHandler(ai.createAgentSession));
 projectRoutes.get('/:projectId/ai/agent-sessions/:sessionId', asyncHandler(ai.agentSession));
+projectRoutes.patch('/:projectId/ai/agent-sessions/:sessionId', asyncHandler(ai.updateAgentSession));
 projectRoutes.get('/:projectId/ai/agent-sessions/:sessionId/events', asyncHandler(ai.agentSessionEvents));
+projectRoutes.get('/:projectId/ai/agent-sessions/:sessionId/timeline', asyncHandler(ai.agentSessionTimeline));
 projectRoutes.post('/:projectId/ai/agent-sessions/:sessionId/prompts', asyncHandler(ai.queueAgentPrompt));
 projectRoutes.post('/:projectId/ai/agent-sessions/:sessionId/cancel', asyncHandler(ai.cancelAgentSession));
+projectRoutes.get('/:projectId/ai/agent-sessions/:sessionId/tool-calls/:toolCallId', asyncHandler(ai.getToolCall));
 projectRoutes.post(
   '/:projectId/ai/agent-sessions/:sessionId/tool-calls/approvals',
   asyncHandler(ai.approveToolCalls)
@@ -81,8 +84,10 @@ projectRoutes.post(
 );
 projectRoutes.get('/:projectId/ai/agent-session', asyncHandler(ai.agentSession));
 projectRoutes.get('/:projectId/ai/agent-session/events', asyncHandler(ai.agentSessionEvents));
+projectRoutes.get('/:projectId/ai/agent-session/timeline', asyncHandler(ai.agentSessionTimeline));
 projectRoutes.post('/:projectId/ai/agent-session/prompts', asyncHandler(ai.queueAgentPrompt));
 projectRoutes.post('/:projectId/ai/agent-session/cancel', asyncHandler(ai.cancelAgentSession));
+projectRoutes.get('/:projectId/ai/agent-session/tool-calls/:toolCallId', asyncHandler(ai.getToolCall));
 projectRoutes.post(
   '/:projectId/ai/agent-session/tool-calls/approvals',
   asyncHandler(ai.approveToolCalls)

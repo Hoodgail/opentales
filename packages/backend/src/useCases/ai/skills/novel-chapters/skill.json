@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "name": "novel-chapters",
+  "version": "2.0.0",
+  "description": "Draft or revise one assigned chapter from scene plans, current canon, causal context, and the narrative contract.",
+  "kind": "drafting",
+  "inputs": ["story-brief", "narrative-contract", "chapter-brief", "scene-plan"],
+  "outputs": ["chapter-draft"],
+  "runtimeRoles": ["drafter", "reviser"],
+  "allowedTools": ["getSceneContext", "searchStory", "queryCanon", "queryEntityState", "queryOpenLoops", "listBuildUnits", "readBuildUnit", "applyBuildUnitPatch", "applyChapterPatch", "updateChapter", "updateScene", "applyArtifactBatch", "reportTaskResult"],
+  "maxIterations": 2,
+  "context": {
+    "maxTokens": 32000,
+    "sections": ["story-brief", "narrative-contract", "active-task", "characters", "world", "recent-causal", "threads", "canon", "style"]
+  },
+  "rubric": "chapter-quality-v1",
+  "procedure": [
+    "Verify the assigned chapter and scene-plan identifiers; never mutate another target.",
+    "Read the compiler-built context pack and retrieve outward only by stable identifier when a required fact is missing.",
+    "Draft from explicit scene goals, obstacles, turns, outcomes, entry state, and exit state while honoring the narrative contract.",
+    "Apply one stale-safe patch to the build-bound chapter branch and update only assigned scene metadata.",
+    "Persist a schema-valid chapter-draft artifact and report observable evidence."
+  ],
+  "references": []
+}

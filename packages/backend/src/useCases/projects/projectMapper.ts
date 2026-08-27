@@ -11,6 +11,7 @@ import type {
   ProjectDoc,
   ProjectSummary,
   ProjectVisibility,
+  Scene,
   StoryStructure
 } from '@opentales/sdk';
 import { env } from '../../config/env.js';
@@ -97,7 +98,11 @@ const projectInclude = {
     where: { deletedAt: null },
     orderBy: [{ number: 'asc' }],
     include: {
-      bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } }
+      bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } },
+      scenes: {
+        orderBy: { order: 'asc' },
+        include: { bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } } }
+      }
     }
   },
   docs: {
@@ -111,6 +116,7 @@ const projectInclude = {
 
 export type ProjectWithManuscript = Prisma.ProjectGetPayload<{ include: typeof projectInclude }>;
 type WritingWithHead = ProjectWithManuscript['chapters'][number]['bodyWriting'];
+export type SceneWithBody = ProjectWithManuscript['chapters'][number]['scenes'][number];
 type CharacterAssetWithAttachments = ProjectWithManuscript['assets'][number];
 
 export function getProjectInclude() {
@@ -186,6 +192,7 @@ export function toCharacter(
     motivation: currentBody(character.motivationWriting),
     arc: currentBody(character.arcWriting),
     traits: character.traits,
+    aliases: character.aliases,
     relationships: character.outgoingRelationships.map((relationship) => ({
       id: relationship.id,
       characterId: relationship.toCharacterId,
@@ -210,6 +217,7 @@ export function toLocation(location: ProjectWithManuscript['locations'][number])
   return {
     id: location.id,
     name: location.name,
+    aliases: location.aliases,
     type: location.type ?? '',
     image: assetUrl(location.imageAssetId),
     imageAssetId: location.imageAssetId ?? undefined,
@@ -224,6 +232,9 @@ export function toChapter(chapter: ProjectWithManuscript['chapters'][number]): C
   const head = chapter.bodyWriting.defaultBranch?.headVersion;
   return {
     id: chapter.id,
+    writingId: chapter.bodyWritingId,
+    branchId: chapter.bodyWriting.defaultBranch?.id ?? null,
+    headVersionId: chapter.bodyWriting.defaultBranch?.headVersionId ?? null,
     number: chapter.number,
     title: chapter.title,
     status: toSdkChapterStatus(chapter.status),
@@ -232,7 +243,63 @@ export function toChapter(chapter: ProjectWithManuscript['chapters'][number]): C
     summary: chapter.summary ?? '',
     content: head?.body ?? '',
     wordCount: head?.wordCount ?? 0,
-    publishedAt: chapter.publishedAt ? chapter.publishedAt.toISOString() : null
+    publishedAt: chapter.publishedAt ? chapter.publishedAt.toISOString() : null,
+    scenes: chapter.scenes.map(toScene)
+  };
+}
+
+export function toScene(scene: SceneWithBody): Scene {
+  const head = scene.bodyWriting.defaultBranch?.headVersion;
+  const statusMap = {
+    PLANNED: 'planned',
+    DRAFT: 'draft',
+    IN_PROGRESS: 'in-progress',
+    REVIEW: 'review',
+    REVISED: 'revised',
+    FINAL: 'final'
+  } as const;
+  return {
+    id: scene.id,
+    writingId: scene.bodyWritingId,
+    branchId: scene.bodyWriting.defaultBranch?.id ?? null,
+    headVersionId: scene.bodyWriting.defaultBranch?.headVersionId ?? null,
+    chapterId: scene.chapterId,
+    order: scene.order,
+    title: scene.title ?? '',
+    status: statusMap[scene.status],
+    povCharacterId: scene.povCharacterId,
+    locationId: scene.locationId,
+    storyDate: scene.storyDate,
+    storyTime: scene.storyTime,
+    estimatedWordCount: scene.estimatedWordCount,
+    actualWordCount: scene.actualWordCount || head?.wordCount || 0,
+    sceneFunction: scene.sceneFunction ?? '',
+    goal: scene.goal ?? '',
+    obstacle: scene.obstacle ?? '',
+    stakes: scene.stakes ?? '',
+    conflict: scene.conflict ?? '',
+    turn: scene.turn ?? '',
+    revelation: scene.revelation ?? '',
+    outcome: scene.outcome ?? '',
+    emotionalValueShift: scene.emotionalValueShift ?? '',
+    tension: scene.tension,
+    characterPresentIds: scene.characterPresentIds,
+    characterReferencedIds: scene.characterReferencedIds,
+    plotThreadIds: scene.plotThreadIds,
+    setupPayoffIds: scene.setupPayoffIds,
+    knowledgeDeltas: scene.knowledgeDeltas as Scene['knowledgeDeltas'],
+    objectTransfers: scene.objectTransfers as Scene['objectTransfers'],
+    injuryStateChanges: scene.injuryStateChanges as Scene['injuryStateChanges'],
+    worldRuleRefs: scene.worldRuleRefs as Scene['worldRuleRefs'],
+    entryState: scene.entryState as Scene['entryState'],
+    exitState: scene.exitState as Scene['exitState'],
+    summary: scene.summary ?? '',
+    writerNotes: scene.writerNotes ?? '',
+    aiNotes: scene.aiNotes ?? '',
+    content: head?.body ?? '',
+    createdAt: scene.createdAt.toISOString(),
+    updatedAt: scene.updatedAt.toISOString(),
+    revision: scene.revision
   };
 }
 

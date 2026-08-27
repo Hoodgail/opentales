@@ -26,6 +26,7 @@ export class UpdateLocationUseCase {
         where: { id: locationId, projectId },
         select: {
           id: true,
+          name: true,
           descriptionWritingId: true,
           atmosphereWritingId: true,
           significanceWritingId: true,
@@ -36,9 +37,12 @@ export class UpdateLocationUseCase {
       if (!location) {
         throw new HttpError(404, 'Location not found');
       }
+      const nextName = input.name === undefined ? location.name : input.name.trim();
+      if (!nextName || nextName.length > 500) throw new HttpError(400, 'Location name must be between 1 and 500 characters');
 
       const data: Prisma.LocationUpdateInput = {
-        name: input.name,
+        name: input.name === undefined ? undefined : nextName,
+        aliases: input.aliases === undefined ? undefined : normalizeAliases(input.aliases, nextName),
         type: input.type
       };
 
@@ -85,4 +89,15 @@ export class UpdateLocationUseCase {
     });
     return toLocation(location);
   }
+}
+
+function normalizeAliases(values: string[], name: string): string[] {
+  if (!Array.isArray(values) || values.length > 1_000) throw new HttpError(400, 'Location aliases must contain at most 1,000 values');
+  const aliases = values.map((value) => {
+    if (typeof value !== 'string' || !value.trim() || value.trim().length > 500) throw new HttpError(400, 'Each location alias must be between 1 and 500 characters');
+    return value.trim();
+  });
+  const normalized = aliases.map((value) => value.toLocaleLowerCase());
+  if (new Set(normalized).size !== normalized.length || normalized.includes(name.toLocaleLowerCase())) throw new HttpError(400, 'Location aliases must be unique and different from the location name');
+  return aliases;
 }

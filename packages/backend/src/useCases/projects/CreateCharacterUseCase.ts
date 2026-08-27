@@ -21,9 +21,10 @@ export class CreateCharacterUseCase {
     await this.access.assertProjectAccess(userId, projectId);
 
     const name = input.name?.trim();
-    if (!name) {
+    if (!name || name.length > 500) {
       throw new HttpError(400, 'Character name is required');
     }
+    const aliases = normalizeAliases(input.aliases, name);
 
     await this.prisma.$transaction(async (tx) => {
       const descriptionWritingId = await this.writingUseCase.createWriting(tx, {
@@ -59,6 +60,7 @@ export class CreateCharacterUseCase {
           age: input.age,
           occupation: input.occupation,
           traits: input.traits ?? [],
+          aliases,
           descriptionWritingId,
           appearanceWritingId,
           motivationWritingId,
@@ -69,4 +71,16 @@ export class CreateCharacterUseCase {
 
     return reloadManuscript(this.prisma, projectId);
   }
+}
+
+function normalizeAliases(values: string[] | undefined, name: string): string[] {
+  if (values === undefined) return [];
+  if (!Array.isArray(values) || values.length > 1_000) throw new HttpError(400, 'Character aliases must contain at most 1,000 values');
+  const aliases = values.map((value) => {
+    if (typeof value !== 'string' || !value.trim() || value.trim().length > 500) throw new HttpError(400, 'Each character alias must be between 1 and 500 characters');
+    return value.trim();
+  });
+  const normalized = aliases.map((value) => value.toLocaleLowerCase());
+  if (new Set(normalized).size !== normalized.length || normalized.includes(name.toLocaleLowerCase())) throw new HttpError(400, 'Character aliases must be unique and different from the character name');
+  return aliases;
 }

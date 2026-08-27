@@ -1,26 +1,22 @@
 <script lang="ts">
   import {
-    Bot,
     Check,
-    ChevronDown,
-    ChevronRight,
     CircleStop,
-    FileText,
+    Loader2,
     Paperclip,
-    Plus,
     Send,
     Sparkles,
     X,
-    Zap,
   } from "lucide-svelte";
   import { tick, untrack } from "svelte";
   import type {
+    AiAgentApprovalMode,
     AiAgentAttachmentInput,
-    AiAgentMessage,
     AiAgentProjectReferenceType,
     AiAgentToolCall,
     AssetKind,
   } from "@opentales/sdk";
+  import { timelineRevision } from "$lib/ai-agent-timeline";
   import {
     deleteAiApprovalDoc,
     setAiApprovalDoc,
@@ -28,14 +24,13 @@
   import { ai } from "$lib/stores/ai.svelte";
   import { manuscript } from "$lib/stores/manuscript.svelte";
   import AiAgentMessages from "./AiAgentMessages.svelte";
-  import AiAgentQuestions from "./AiAgentQuestions.svelte";
+  import AiSessionMenu from "./AiSessionMenu.svelte";
   import PanelHeader from "./PanelHeader.svelte";
 
   let prompt = $state("");
   let scrollEl: HTMLDivElement | undefined = $state();
   let textareaEl: HTMLTextAreaElement | undefined = $state();
   let fileInputEl: HTMLInputElement | undefined = $state();
-  let sessionMenuOpen = $state(false);
   let selectedModel = $state("");
   let attachments = $state<AiAgentAttachmentInput[]>([]);
   let uploadingAttachment = $state(false);
@@ -43,31 +38,55 @@
   let autocompleteQuery = $state("");
   let autocompleteStart = $state(0);
   let selectedAutocompleteIndex = $state(0);
+  let transcriptPinnedToEnd = $state(true);
+  let promptSubmitting = $state(false);
+  let stopSubmitting = $state(false);
+  let modeUpdating = $state(false);
+  let autoModeConfirmOpen = $state(false);
 
   const projectId = $derived(manuscript.projectId);
   const session = $derived(ai.session);
   const isRunning = $derived(session?.status === "running");
+  const hasActiveWork = $derived(
+    isRunning ||
+      Boolean(
+        session?.queue.some(
+          (item) => item.status === "queued" || item.status === "running",
+        ),
+      ),
+  );
+  const primaryActionIsStop = $derived(
+    stopSubmitting ||
+      (hasActiveWork && (!prompt.trim() || promptSubmitting)),
+  );
+  const approvalMode = $derived<AiAgentApprovalMode>(
+    session?.approvalMode ?? "manual",
+  );
+  const modeControlDisabled = $derived(
+    !session ||
+      hasActiveWork ||
+      promptSubmitting ||
+      ai.sessionLoading ||
+      modeUpdating,
+  );
   const aiEnabled = $derived(ai.settings?.enabled ?? false);
   const modelOptions = $derived(modelChoices(ai.settings?.model));
   const activeModel = $derived(
     selectedModel || ai.settings?.model || modelOptions[0],
   );
-  const activeAssistantMessage = $derived(
-    session ? latestAssistantMessage(session.messages) : null,
-  );
-  const showThinking = $derived(isRunning && !activeAssistantMessage?.content);
+  const transcriptRevision = $derived(timelineRevision(session));
   const pendingToolCalls = $derived(
     session?.pendingToolCalls?.filter(
       (tc) => tc.status === "pending-approval" && tc.toolName !== "askUser",
     ) ?? [],
   );
-  const pendingQuestionCalls = $derived(
-    session?.pendingToolCalls?.filter(
-      (tc) => tc.status === "pending-approval" && tc.toolName === "askUser",
-    ) ?? [],
-  );
   const autocompleteItems = $derived(
     autocompleteOpen ? projectReferenceSuggestions(autocompleteQuery) : [],
+  );
+  const activeAutocompleteId = $derived(
+    autocompleteOpen && autocompleteItems[selectedAutocompleteIndex]
+      ? `ai-project-context-option-${selectedAutocompleteIndex}`
+      : undefined,
   );
 
   // Auto-scroll on new content
@@ -77,23 +96,37 @@
   });
 
   $effect(() => {
-    const _ = activeAssistantMessage?.content;
-    const __ = session?.messages?.length;
+    const _ = session?.id;
+    autoModeConfirmOpen = false;
+  });
+
+  $effect(() => {
+    const _ = transcriptRevision;
+    if (!transcriptPinnedToEnd) return;
     void tick().then(() => {
       if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
     });
   });
 
-  function latestAssistantMessage(
-    messages: AiAgentMessage[],
-  ): AiAgentMessage | null {
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      if (messages[index].role === "assistant") return messages[index];
-    }
-    return null;
+  function handleTranscriptScroll() {
+    if (!scrollEl) return;
+    const distanceFromEnd =
+      scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+    transcriptPinnedToEnd = distanceFromEnd < 48;
+  }
+
+  function pinTranscriptToEnd() {
+    transcriptPinnedToEnd = true;
+    void tick().then(() => {
+      if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+    });
   }
 
   // Hydrate session + start stream when project is loaded and AI is enabled
+  $effect(() => {
+    ai.setProjectContext(projectId);
+  });
+
   $effect(() => {
     const pid = projectId;
     if (!pid) return;
@@ -103,79 +136,115 @@
   $effect(() => {
     const pid = projectId;
     if (!pid || !aiEnabled) return;
+    let cancelled = false;
     untrack(() => {
-      void ai.loadSession(pid);
-      void ai.loadSessions(pid);
-      void ai.startStream(pid);
-      void ai.loadToolManifest(pid);
-      void ai.loadFileTree(pid);
-      void ai.loadSkills(pid);
+      void (async () => {
+        const sessionGeneration = ai.sessionGeneration;
+        const selectedSessionId = await ai.loadSessions(pid);
+        if (cancelled || sessionGeneration !== ai.sessionGeneration) return;
+        const loaded = await ai.loadSession(pid, selectedSessionId ?? undefined);
+        if (cancelled) return;
+        await Promise.all([
+          ai.loadToolManifest(pid),
+          ai.loadFileTree(pid),
+          ai.loadSkills(pid),
+        ]);
+        if (cancelled || !loaded) return;
+        void ai.startStream(pid, loaded.id);
+      })();
     });
 
-    return () => ai.stopStream();
+    return () => {
+      cancelled = true;
+      ai.stopStream();
+    };
   });
 
-  function send() {
-    if (!projectId || !prompt.trim()) return;
+  async function send() {
+    if (!projectId || !prompt.trim() || promptSubmitting || stopSubmitting)
+      return;
+    const queuedPrompt = prompt.trim();
     const queuedAttachments = [...attachments];
-    void ai.queuePrompt(projectId, prompt.trim(), false, {
-      model: activeModel,
-      attachments: queuedAttachments,
-    });
-    prompt = "";
-    attachments = [];
+    promptSubmitting = true;
+    try {
+      const succeeded = await ai.queuePrompt(projectId, queuedPrompt, false, {
+        model: activeModel,
+        attachments: queuedAttachments,
+      });
+      if (!succeeded) return;
+      prompt = "";
+      attachments = [];
+      pinTranscriptToEnd();
+    } finally {
+      promptSubmitting = false;
+    }
   }
 
-  function interrupt() {
-    if (!projectId || !prompt.trim()) return;
-    const queuedAttachments = [...attachments];
-    void ai.queuePrompt(projectId, prompt.trim(), true, {
-      model: activeModel,
-      attachments: queuedAttachments,
-    });
-    prompt = "";
-    attachments = [];
+  async function cancel() {
+    if (!projectId || stopSubmitting) return;
+    stopSubmitting = true;
+    try {
+      await ai.cancelSession(projectId);
+    } finally {
+      stopSubmitting = false;
+    }
   }
 
-  function cancel() {
-    if (!projectId) return;
-    void ai.cancelSession(projectId);
-  }
-
-  function approve(toolCallId: string) {
+  async function approve(toolCallId: string) {
     if (!projectId) return;
     const pid = projectId;
-    void ai
-      .approveToolCall(pid, toolCallId, true)
-      .then(() => manuscript.refreshProject(pid));
+    const succeeded = await ai.approveToolCall(pid, toolCallId, true);
+    if (!succeeded) return;
+    await manuscript.refreshProject(pid);
+    deleteAiApprovalDoc(toolCallId);
+    await manuscript.closeTab(`tab-ai-approval-${toolCallId}`);
   }
 
-  function approveAll() {
+  async function approveAll() {
     if (!projectId || pendingToolCalls.length === 0) return;
     const pid = projectId;
     const toolCallIds = pendingToolCalls.map((tc) => tc.id);
-    void ai
-      .approveToolCalls(pid, toolCallIds, true)
-      .then(() => manuscript.refreshProject(pid))
-      .then(() => {
-        for (const toolCallId of toolCallIds) {
-          deleteAiApprovalDoc(toolCallId);
-          void manuscript.closeTab(`tab-ai-approval-${toolCallId}`);
-        }
-      });
+    const succeeded = await ai.approveToolCalls(pid, toolCallIds, true);
+    if (!succeeded) return;
+    await manuscript.refreshProject(pid);
+    for (const toolCallId of toolCallIds) {
+      deleteAiApprovalDoc(toolCallId);
+      await manuscript.closeTab(`tab-ai-approval-${toolCallId}`);
+    }
   }
 
-  function reject(toolCallId: string) {
+  async function reject(toolCallId: string) {
     if (!projectId) return;
-    void ai.approveToolCall(projectId, toolCallId, false);
+    const succeeded = await ai.approveToolCall(projectId, toolCallId, false);
+    if (!succeeded) return;
+    deleteAiApprovalDoc(toolCallId);
+    await manuscript.closeTab(`tab-ai-approval-${toolCallId}`);
   }
 
-  function submitQuestion(tc: AiAgentToolCall, answers: string[][]) {
+  async function submitQuestion(tc: AiAgentToolCall, answers: string[][]) {
     if (!projectId) return;
-    void ai.answerQuestion(projectId, tc.id, answers);
+    await ai.answerQuestion(projectId, tc.id, answers);
+  }
+
+  async function loadToolCallDetail(tc: AiAgentToolCall) {
+    if (!projectId) throw new Error("No active project");
+    return ai.loadToolCallDetail(projectId, tc.id, session?.id ?? undefined);
+  }
+
+  async function loadEarlierActivity() {
+    if (!projectId || !session) return;
+    const previousHeight = scrollEl?.scrollHeight ?? 0;
+    const previousTop = scrollEl?.scrollTop ?? 0;
+    const loaded = await ai.loadEarlierTimeline(projectId, session.id);
+    if (!loaded) return;
+    await tick();
+    if (scrollEl) {
+      scrollEl.scrollTop = previousTop + (scrollEl.scrollHeight - previousHeight);
+    }
   }
 
   function handleKey(e: KeyboardEvent) {
+    if (e.isComposing) return;
     if (autocompleteOpen) {
       if (e.key === "ArrowDown" || (e.ctrlKey && e.key.toLowerCase() === "n")) {
         e.preventDefault();
@@ -206,7 +275,7 @@
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      send();
+      void send();
     }
   }
 
@@ -518,45 +587,102 @@
     }).format(value);
   }
 
-  function createSession() {
-    if (!projectId) return;
-    void ai.createSession(projectId, "New chat");
-    sessionMenuOpen = false;
+  function streamStatusLabel(): string {
+    if (ai.streamStatus === "connected") return "Connected";
+    if (ai.streamStatus === "connecting") return "Connecting";
+    if (ai.streamStatus === "reconnecting")
+      return `Reconnecting (${ai.reconnectAttempt}/${5})`;
+    return "Disconnected";
   }
 
-  function selectSession(sessionId: string) {
-    if (!projectId) return;
-    void ai.selectSession(projectId, sessionId);
-    sessionMenuOpen = false;
+  function streamDotClass(): string {
+    if (ai.streamStatus === "connected") return "bg-emerald-400";
+    if (ai.streamStatus === "connecting" || ai.streamStatus === "reconnecting")
+      return "motion-safe:animate-pulse bg-amber-400";
+    return "bg-muted-foreground";
   }
 
-  function sessionTime(value: string): string {
-    return new Date(value).toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-    });
+  async function createSession() {
+    if (!projectId) return;
+    const created = await ai.createSession(projectId, "New chat", approvalMode);
+    if (created) pinTranscriptToEnd();
+  }
+
+  async function setApprovalMode(mode: AiAgentApprovalMode) {
+    if (!projectId || modeControlDisabled || approvalMode === mode) return;
+    if (mode === "auto") {
+      autoModeConfirmOpen = true;
+      return;
+    }
+    autoModeConfirmOpen = false;
+    modeUpdating = true;
+    try {
+      await ai.updateSessionApprovalMode(projectId, "manual");
+    } finally {
+      modeUpdating = false;
+    }
+  }
+
+  async function enableAutoMode() {
+    if (!projectId || modeControlDisabled) return;
+    modeUpdating = true;
+    try {
+      const updated = await ai.updateSessionApprovalMode(projectId, "auto");
+      if (updated) autoModeConfirmOpen = false;
+    } finally {
+      modeUpdating = false;
+    }
+  }
+
+  async function selectSession(sessionId: string) {
+    if (!projectId) return;
+    pinTranscriptToEnd();
+    await ai.selectSession(projectId, sessionId);
+  }
+
+  function openTaskSession(sessionId: string) {
+    void selectSession(sessionId);
   }
 
   // Collapsible tool call rows
-  let expandedTools = $state<Record<string, boolean>>({});
-
-  function toggleTool(id: string) {
-    expandedTools[id] = !expandedTools[id];
-  }
-
   function toolLabel(name: string): string {
     const map: Record<string, string> = {
       listCharacters: "Listed characters",
       readCharacter: "Read character",
+      listCharacterRelationships: "Listed relationships",
       listChapters: "Listed chapters",
       readChapter: "Read chapter",
+      listScenes: "Listed scenes",
       grepChapter: "Searched chapter",
       grepChapters: "Searched chapters",
+      grepProject: "Searched project",
       listLocations: "Listed locations",
       readLocation: "Read location",
+      listActs: "Listed acts",
+      listObstacles: "Listed obstacles",
       listProjectDocs: "Listed docs",
       readProjectDoc: "Read doc",
+      listProjectFiles: "Listed project files",
+      listProjectAiSkills: "Listed AI skills",
+      readProjectAiSkill: "Read AI skill",
+      listAssets: "Listed assets",
+      listMembers: "Listed members",
+      listSubmissions: "Listed submissions",
+      listTrash: "Listed trash",
+      listWritingVersions: "Listed writing versions",
       readStoryStructure: "Read story structure",
+      getProjectStats: "Read project stats",
+      compareVersions: "Compared versions",
+      listBuildRuns: "Listed novel builds",
+      listBuildUnits: "Listed build units",
+      getBuildState: "Read build state",
+      getSceneContext: "Read scene context",
+      searchStory: "Searched story",
+      findReferences: "Found references",
+      runStoryLint: "Checked story",
+      reportTaskResult: "Reported task result",
+      task: "Delegated task",
+      startNovelBuild: "Start novel build",
       updateProject: "Update project",
       updateProjectAiSettings: "Update AI settings",
       askUser: "Ask user",
@@ -606,86 +732,16 @@
     return map[name] ?? name;
   }
 
-  function toolForMessage(msg: AiAgentMessage): AiAgentToolCall | undefined {
-    if (msg.role !== "tool" || !session?.toolCalls) return undefined;
-    return session.toolCalls.find((tc) => toolMessageMatches(msg, tc));
-  }
-
-  function toolMessageMatches(
-    msg: AiAgentMessage,
-    tc: AiAgentToolCall,
-  ): boolean {
-    if (msg.content.includes(tc.toolName)) return true;
-    const createdAt = Date.parse(msg.createdAt);
-    const toolCreatedAt = Date.parse(tc.createdAt);
-    return (
-      !Number.isNaN(createdAt) &&
-      !Number.isNaN(toolCreatedAt) &&
-      Math.abs(createdAt - toolCreatedAt) < 10_000
-    );
-  }
-
   function toolStatusLabel(status: AiAgentToolCall["status"]): string {
     const map: Record<AiAgentToolCall["status"], string> = {
       "pending-approval": "pending",
+      running: "running",
       approved: "approved",
       rejected: "rejected",
       executed: "executed",
       error: "failed",
     };
     return map[status];
-  }
-
-  function toolSummary(tc: AiAgentToolCall): string {
-    const input = inputRecord(tc.input);
-    if (tc.toolName === "updateChapter") {
-      const chapter = manuscript.chapters.find(
-        (c) => c.id === textInput(input, "chapterId"),
-      );
-      return (
-        chapter?.title ??
-        firstLine(textInput(input, "title"), "Unknown chapter")
-      );
-    }
-    if (tc.toolName === "createChapter")
-      return firstLine(textInput(input, "title"), "New chapter");
-    if (tc.toolName === "updateCharacter") {
-      const character = manuscript.characters.find(
-        (c) => c.id === textInput(input, "characterId"),
-      );
-      return (
-        character?.name ??
-        firstLine(textInput(input, "name"), "Unknown character")
-      );
-    }
-    if (tc.toolName === "createCharacter")
-      return firstLine(textInput(input, "name"), "New character");
-    if (tc.toolName === "updateProjectDoc") {
-      const doc = ai.docs.find((d) => d.id === textInput(input, "docId"));
-      return doc?.title ?? firstLine(textInput(input, "title"), "Unknown doc");
-    }
-    if (tc.toolName === "createProjectDoc")
-      return firstLine(textInput(input, "title"), "New doc");
-    if (typeof input.title === "string")
-      return firstLine(input.title, "Review proposed tool input");
-    if (typeof input.name === "string")
-      return firstLine(input.name, "Review proposed tool input");
-    if (typeof input.label === "string")
-      return firstLine(input.label, "Review proposed tool input");
-    for (const key of [
-      "chapterId",
-      "characterId",
-      "locationId",
-      "actId",
-      "docId",
-      "submissionId",
-      "shareLinkId",
-      "assetId",
-    ]) {
-      const value = textInput(input, key);
-      if (value) return value;
-    }
-    return "Review proposed tool input";
   }
 
   type JsonRecord = Record<string, unknown>;
@@ -1102,88 +1158,14 @@
 <div class="flex h-full flex-col">
   <PanelHeader title="AI Agent">
     {#snippet actions()}
-      <div class="relative">
-        <button
-          type="button"
-          onclick={() => (sessionMenuOpen = !sessionMenuOpen)}
-          title="Switch AI session"
-          class="flex max-w-32 items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
-        >
-          <Bot class="size-3" />
-          <span class="truncate">{session?.title ?? "Sessions"}</span>
-          <ChevronDown class="size-3" />
-        </button>
-        {#if sessionMenuOpen}
-          <button
-            type="button"
-            aria-label="Close session menu"
-            class="fixed inset-0 z-10 cursor-default bg-transparent"
-            onclick={() => (sessionMenuOpen = false)}
-          ></button>
-          <div
-            class="absolute right-0 top-7 z-20 w-64 overflow-hidden rounded-lg border border-border bg-popover shadow-xl"
-          >
-            <div
-              class="flex items-center justify-between border-b border-border px-2 py-1.5"
-            >
-              <span
-                class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-                >AI Sessions</span
-              >
-              <button
-                type="button"
-                onclick={createSession}
-                class="inline-flex items-center gap-1 rounded bg-accent px-1.5 py-0.5 text-[10px] text-accent-foreground hover:bg-accent/90"
-              >
-                <Plus class="size-3" /> New
-              </button>
-            </div>
-            <div class="max-h-72 overflow-y-auto p-1">
-              {#if ai.sessions.length === 0}
-                <div
-                  class="px-2 py-3 text-center text-[11px] text-muted-foreground"
-                >
-                  No sessions yet.
-                </div>
-              {:else}
-                {#each ai.sessions as s (s.id)}
-                  <button
-                    type="button"
-                    onclick={() => selectSession(s.id)}
-                    class="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted"
-                  >
-                    <span class="min-w-0">
-                      <span class="block truncate text-[11px] text-foreground"
-                        >{s.title}</span
-                      >
-                      <span
-                        class="block truncate text-[10px] text-muted-foreground"
-                      >
-                        {s.messageCount} messages · {sessionTime(s.updatedAt)} ·
-                        {s.status}
-                      </span>
-                    </span>
-                    {#if s.id === ai.activeSessionId}
-                      <span class="size-1.5 shrink-0 rounded-full bg-accent"
-                      ></span>
-                    {/if}
-                  </button>
-                {/each}
-              {/if}
-            </div>
-          </div>
-        {/if}
-      </div>
-      {#if isRunning}
-        <button
-          type="button"
-          onclick={cancel}
-          title="Cancel generation"
-          class="flex size-6 items-center justify-center rounded text-destructive hover:bg-muted"
-        >
-          <CircleStop class="size-3.5" />
-        </button>
-      {/if}
+      <AiSessionMenu
+        title={session?.title ?? "Sessions"}
+        sessions={ai.sessions}
+        activeSessionId={ai.activeSessionId}
+        loading={ai.sessionLoading}
+        onCreate={createSession}
+        onSelect={selectSession}
+      />
     {/snippet}
   </PanelHeader>
 
@@ -1209,107 +1191,44 @@
     </div>
   {:else}
     <!-- Transcript -->
-    <div bind:this={scrollEl} class="flex-1 overflow-y-auto">
+    <div
+      bind:this={scrollEl}
+      onscroll={handleTranscriptScroll}
+      class="flex-1 overflow-y-auto"
+    >
       <AiAgentMessages
         {session}
         {isRunning}
-        {activeAssistantMessage}
-        {showThinking}
         {toolLabel}
         {toolStatusLabel}
+        onOpenSession={openTaskSession}
+        onApproveTool={approve}
+        onRejectTool={reject}
+        onOpenApproval={openApprovalDoc}
+        onSubmitQuestion={submitQuestion}
+        toolActionStates={ai.toolActionStates}
+        toolActionErrors={ai.toolActionErrors}
+        onLoadToolDetail={loadToolCallDetail}
+        canLoadEarlier={ai.canLoadEarlierTimeline}
+        loadingEarlier={ai.timelineLoadingEarlier}
+        earlierError={ai.timelineEarlierError}
+        onLoadEarlier={loadEarlierActivity}
       />
 
-      <!-- Pending questions (agent is waiting for user input) -->
-      <AiAgentQuestions
-        questions={pendingQuestionCalls}
-        onSubmit={submitQuestion}
-        onDismiss={reject}
-      />
-
-      <!-- Pending tool calls (need approval) -->
-      {#if pendingToolCalls.length > 0}
-        <div class="border-t border-border">
-          <div class="flex items-center justify-between gap-2 px-3 pt-2 pb-1">
-            <div class="flex items-center gap-1.5">
-              <span class="size-1 rounded-full bg-accent"></span>
-              <p
-                class="text-[10px] uppercase tracking-wider text-muted-foreground"
-              >
-                Pending approval
-              </p>
-            </div>
-            {#if pendingToolCalls.length > 1}
-              <button
-                type="button"
-                onclick={approveAll}
-                class="inline-flex items-center gap-1 rounded border border-emerald-500/30 px-1.5 py-0.5 text-[10px] text-emerald-500 hover:bg-emerald-500/10"
-              >
-                <Check class="size-3" /> Approve all
-              </button>
-            {/if}
-          </div>
-          <ul class="divide-y divide-border/60">
-            {#each pendingToolCalls as tc (tc.id)}
-              <li class="group px-3 py-2">
-                <div class="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onclick={() => openApprovalDoc(tc)}
-                    class="flex min-w-0 flex-1 items-center gap-2 text-left"
-                    title="Open diff"
-                  >
-                    <FileText class="size-3 shrink-0 text-muted-foreground" />
-                    <span class="min-w-0 flex-1">
-                      <span class="block truncate text-[11px] text-foreground">
-                        {toolLabel(tc.toolName)}
-                        <span class="text-muted-foreground"
-                          >— {toolSummary(tc)}</span
-                        >
-                      </span>
-                    </span>
-                  </button>
-                  <div class="flex shrink-0 items-center gap-0.5">
-                    <button
-                      type="button"
-                      onclick={() => toggleTool(tc.id)}
-                      title={expandedTools[tc.id] ? "Hide input" : "Show input"}
-                      class="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                    >
-                      {#if expandedTools[tc.id]}
-                        <ChevronDown class="size-3" />
-                      {:else}
-                        <ChevronRight class="size-3" />
-                      {/if}
-                    </button>
-                    <button
-                      type="button"
-                      onclick={() => reject(tc.id)}
-                      title="Reject"
-                      class="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-destructive"
-                    >
-                      <X class="size-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onclick={() => approve(tc.id)}
-                      title="Approve"
-                      class="flex size-6 items-center justify-center rounded text-emerald-500 hover:bg-emerald-500/10"
-                    >
-                      <Check class="size-3.5" />
-                    </button>
-                  </div>
-                </div>
-                {#if expandedTools[tc.id]}
-                  <pre
-                    class="mt-1.5 ml-5 max-h-40 overflow-auto rounded bg-muted/40 p-2 text-[10px] leading-relaxed text-muted-foreground">{JSON.stringify(
-                      tc.input,
-                      null,
-                      2,
-                    )}</pre>
-                {/if}
-              </li>
-            {/each}
-          </ul>
+      {#if pendingToolCalls.length > 1}
+        <div
+          class="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-[10px] text-muted-foreground"
+        >
+          <span>{pendingToolCalls.length} changes are awaiting approval above.</span>
+          <button
+            type="button"
+            onclick={approveAll}
+            disabled={pendingToolCalls.some((toolCall) =>
+              Boolean(ai.toolActionStates[toolCall.id]))}
+            class="inline-flex shrink-0 items-center gap-1 rounded border border-emerald-500/30 px-1.5 py-0.5 text-emerald-500 hover:bg-emerald-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Check class="size-3" /> Approve all
+          </button>
         </div>
       {/if}
 
@@ -1337,11 +1256,22 @@
     </div>
 
     <!-- Error -->
-    {#if ai.sessionError || session?.error}
+    {#if ai.sessionError || ai.streamError || session?.error}
       <div
         class="border-t border-destructive/30 bg-destructive/10 px-3 py-2 text-[11px] text-destructive"
       >
-        <div>{ai.sessionError ?? session?.error}</div>
+        <div class="flex items-start justify-between gap-2">
+          <span>{ai.sessionError ?? ai.streamError ?? session?.error}</span>
+          {#if ai.canRetryStream}
+            <button
+              type="button"
+              onclick={() => void ai.retryStream()}
+              class="shrink-0 rounded border border-destructive/30 px-2 py-0.5 text-[10px] font-medium hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+            >
+              Retry
+            </button>
+          {/if}
+        </div>
         {#if session?.contextUsage && session.status === 'error'}
           <div class="mt-1 text-[10px] text-destructive/80">
             Request context: {formatUsage(session.contextUsage.totalTokens)} / {formatUsage(session.contextUsage.maxTokens)} tokens ({session.contextUsage.percentage}%)
@@ -1363,6 +1293,7 @@
               <button
                 type="button"
                 onclick={() => removeAttachment(attachment.id)}
+                disabled={promptSubmitting}
                 title="Remove attachment"
                 class="inline-flex max-w-44 items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-[10px] text-muted-foreground hover:text-destructive"
               >
@@ -1378,10 +1309,54 @@
             {/each}
           </div>
         {/if}
+        {#if autoModeConfirmOpen}
+          <div
+            role="alert"
+            class="flex items-start gap-2 border-b border-amber-500/25 bg-amber-500/8 px-2.5 py-2"
+          >
+            <span class="mt-1 size-1.5 shrink-0 rounded-full bg-amber-400"></span>
+            <div class="min-w-0 flex-1">
+              <p class="text-[11px] font-medium text-foreground">Enable Auto mode?</p>
+              <p class="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+                Project-changing tools will run immediately, and the agent will
+                proceed without approval prompts or questions.
+              </p>
+              <div class="mt-2 flex justify-end gap-1.5">
+                <button
+                  type="button"
+                  disabled={modeUpdating}
+                  onclick={() => (autoModeConfirmOpen = false)}
+                  class="rounded border border-border px-2 py-1 text-[10px] text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+                >Cancel</button>
+                <button
+                  type="button"
+                  disabled={modeUpdating}
+                  onclick={() => void enableAutoMode()}
+                  class="inline-flex items-center gap-1 rounded border border-amber-500/35 bg-amber-500/10 px-2 py-1 text-[10px] font-medium text-amber-300 hover:bg-amber-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 disabled:opacity-50"
+                >
+                  {#if modeUpdating}<Loader2 class="size-3 motion-safe:animate-spin" />{/if}
+                  Enable Auto
+                </button>
+              </div>
+            </div>
+          </div>
+        {/if}
         <div class="relative">
+          <span id="ai-project-context-help" class="sr-only">
+            Type @ to attach project context. Use arrow keys to choose a result.
+          </span>
           <textarea
             bind:this={textareaEl}
             value={prompt}
+            disabled={promptSubmitting}
+            aria-busy={promptSubmitting}
+            aria-label="Message the AI agent"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={Boolean(autocompleteOpen && autocompleteItems.length)}
+            aria-controls="ai-project-context-options"
+            aria-activedescendant={activeAutocompleteId}
+            aria-describedby="ai-project-context-help"
             oninput={handlePromptInput}
             onkeydown={handleKey}
             onclick={handlePromptClick}
@@ -1399,10 +1374,18 @@
               >
                 Project context
               </div>
-              <div class="max-h-56 overflow-y-auto p-1">
+              <div
+                id="ai-project-context-options"
+                role="listbox"
+                aria-label="Project context"
+                class="max-h-56 overflow-y-auto p-1"
+              >
                 {#each autocompleteItems as item, index (item.type + item.id)}
                   <button
+                    id={`ai-project-context-option-${index}`}
                     type="button"
+                    role="option"
+                    aria-selected={index === selectedAutocompleteIndex}
                     onmousedown={(event) => {
                       event.preventDefault();
                       insertAutocompleteItem(item);
@@ -1440,21 +1423,52 @@
               bind:this={fileInputEl}
               type="file"
               multiple
+              disabled={promptSubmitting}
               class="hidden"
               onchange={(event) => void handleFiles(event.currentTarget.files)}
             />
             <button
               type="button"
               onclick={() => fileInputEl?.click()}
-              disabled={uploadingAttachment}
+              disabled={uploadingAttachment || promptSubmitting}
               class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
               title="Attach files"
             >
               <Paperclip class="size-3.5" />
             </button>
+            <div
+              role="group"
+              aria-label="Agent execution mode"
+              class="inline-flex h-7 shrink-0 items-center rounded-md border border-border bg-muted/20 p-0.5"
+              title={approvalMode === "auto"
+                ? "Auto runs available tools without approvals or questions"
+                : "Manual asks before project-changing tools run"}
+            >
+              <button
+                type="button"
+                aria-pressed={approvalMode === "manual"}
+                disabled={modeControlDisabled}
+                onclick={() => void setApprovalMode("manual")}
+                class="h-5 rounded px-1.5 text-[9px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 {approvalMode ===
+                'manual'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'}"
+              >Manual</button>
+              <button
+                type="button"
+                aria-pressed={approvalMode === "auto"}
+                disabled={modeControlDisabled}
+                onclick={() => void setApprovalMode("auto")}
+                class="h-5 rounded px-1.5 text-[9px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 disabled:opacity-50 {approvalMode ===
+                'auto'
+                  ? 'bg-amber-500/15 text-amber-300 shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'}"
+              >Auto</button>
+            </div>
             <select
               bind:value={selectedModel}
-              class="h-7 max-w-40 rounded-md border border-transparent bg-transparent px-1.5 text-[10px] text-muted-foreground outline-none hover:border-border hover:text-foreground"
+              disabled={promptSubmitting}
+              class="h-7 max-w-28 rounded-md border border-transparent bg-transparent px-1.5 text-[10px] text-muted-foreground outline-none hover:border-border hover:text-foreground"
               title="Model"
             >
               {#each modelOptions as model}
@@ -1463,25 +1477,44 @@
             </select>
           </div>
           <div class="flex items-center gap-1">
-            {#if isRunning}
-              <button
-                type="button"
-                onclick={interrupt}
-                disabled={!prompt.trim()}
-                title="Interrupt and send"
-                class="flex size-7 items-center justify-center rounded-md border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 disabled:opacity-40"
-              >
-                <Zap class="size-3.5" />
-              </button>
-            {/if}
             <button
               type="button"
-              onclick={send}
-              disabled={!prompt.trim() || uploadingAttachment}
-              title="Send"
-              class="flex size-7 items-center justify-center rounded-md bg-accent text-accent-foreground hover:bg-accent/90 disabled:opacity-40"
+              onclick={() =>
+                void (primaryActionIsStop ? cancel() : send())}
+              disabled={primaryActionIsStop
+                ? stopSubmitting
+                : !prompt.trim() ||
+                  uploadingAttachment ||
+                  promptSubmitting ||
+                  stopSubmitting}
+              aria-label={primaryActionIsStop
+                ? stopSubmitting
+                  ? "Stopping agent"
+                  : "Stop agent"
+                : hasActiveWork
+                  ? "Queue follow-up"
+                  : "Send"}
+              aria-busy={primaryActionIsStop
+                ? stopSubmitting
+                : promptSubmitting}
+              title={primaryActionIsStop
+                ? stopSubmitting
+                  ? "Stopping agent"
+                  : "Stop agent"
+                : hasActiveWork
+                  ? "Queue follow-up"
+                  : "Send"}
+              class="flex size-7 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 {primaryActionIsStop
+                ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                : 'bg-accent text-accent-foreground hover:bg-accent/90'}"
             >
-              <Send class="size-3.5" />
+              {#if stopSubmitting}<Loader2
+                  class="size-3.5 motion-safe:animate-spin"
+                />{:else if primaryActionIsStop}<CircleStop
+                  class="size-3.5"
+                />{:else if promptSubmitting}<Loader2
+                  class="size-3.5 motion-safe:animate-spin"
+                />{:else}<Send class="size-3.5" />{/if}
             </button>
           </div>
         </div>
@@ -1491,12 +1524,18 @@
       >
         <span class="inline-flex items-center gap-1">
           <span
-            class="size-1.5 rounded-full {ai.streaming
-              ? 'animate-pulse bg-emerald-400'
-              : 'bg-muted-foreground'}"
+            class={`size-1.5 rounded-full ${streamDotClass()}`}
           ></span>
-          {ai.streaming ? "Connected" : "Disconnected"} · {session?.status ??
-            "idle"}
+          {streamStatusLabel()} · {session?.status ?? "idle"}
+          {#if ai.canRetryStream}
+            ·
+            <button
+              type="button"
+              onclick={() => void ai.retryStream()}
+              class="rounded px-1 text-accent hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >Retry</button
+            >
+          {/if}
         </span>
         {#if session?.contextUsage}
           <span

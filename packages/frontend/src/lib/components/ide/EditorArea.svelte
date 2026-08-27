@@ -35,7 +35,7 @@
 
 <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
   <EditorTabs />
-  <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+  <div id={activeTab ? `editor-panel-${activeTab.id}` : undefined} role={activeTab ? 'tabpanel' : undefined} aria-labelledby={activeTab ? `editor-tab-${activeTab.id}` : undefined} class="flex min-h-0 min-w-0 flex-1 flex-col outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/30">
     {#if !activeTab}
       <div class="flex h-full items-center justify-center bg-background">
         <div class="max-w-md text-center">
@@ -72,6 +72,18 @@
       <CharacterEditor character={activeCharacter} />
     {:else if activeTab.type === 'location' && activeLocation}
       <LocationEditor location={activeLocation} />
+    {:else if activeTab.type === 'manuscript'}
+      {#await import('./ContinuousManuscriptEditor.svelte')}<div class="flex flex-1 items-center justify-center text-xs text-muted-foreground" role="status">Loading continuous manuscript…</div>{:then module}{@const Component = module.default}<Component />{:catch error}<div class="m-auto max-w-md border-l-2 border-destructive bg-destructive/8 p-4 text-xs text-destructive-foreground" role="alert">Failed to load the continuous manuscript: {error instanceof Error ? error.message : 'Unknown module error.'}<button type="button" onclick={() => location.reload()} class="mt-3 block rounded border border-border px-2 py-1 text-foreground">Reload workspace</button></div>{/await}
+    {:else if activeTab.type === 'build'}
+      {#await import('./NovelBuildSurface.svelte')}<div class="flex flex-1 items-center justify-center text-xs text-muted-foreground" role="status">Loading Novel Build…</div>{:then module}{@const Component = module.default}<Component />{:catch error}<div class="m-auto max-w-md border-l-2 border-destructive bg-destructive/8 p-4 text-xs text-destructive-foreground" role="alert">Failed to load Novel Build: {error instanceof Error ? error.message : 'Unknown module error.'}<button type="button" onclick={() => location.reload()} class="mt-3 block rounded border border-border px-2 py-1 text-foreground">Reload workspace</button></div>{/await}
+    {:else if activeTab.type === 'story-bible'}
+      {#await import('./StoryBibleSurface.svelte')}<div class="flex flex-1 items-center justify-center text-xs text-muted-foreground" role="status">Loading Story Bible…</div>{:then module}{@const Component = module.default}<Component />{:catch error}<div class="m-auto max-w-md border-l-2 border-destructive bg-destructive/8 p-4 text-xs text-destructive-foreground" role="alert">Failed to load Story Bible: {error instanceof Error ? error.message : 'Unknown module error.'}<button type="button" onclick={() => location.reload()} class="mt-3 block rounded border border-border px-2 py-1 text-foreground">Reload workspace</button></div>{/await}
+    {:else if activeTab.type === 'outline-studio'}
+      {#await import('./OutlineStudioSurface.svelte')}<div class="flex flex-1 items-center justify-center text-xs text-muted-foreground" role="status">Loading semantic outline…</div>{:then module}{@const Component = module.default}<Component />{:catch error}<div class="m-auto max-w-md border-l-2 border-destructive bg-destructive/8 p-4 text-xs text-destructive-foreground" role="alert">Failed to load the semantic outline: {error instanceof Error ? error.message : 'Unknown module error.'}<button type="button" onclick={() => location.reload()} class="mt-3 block rounded border border-border px-2 py-1 text-foreground">Reload workspace</button></div>{/await}
+    {:else if activeTab.type === 'publishing'}
+      {#await import('./ExportImportSurface.svelte')}<div class="flex flex-1 items-center justify-center text-xs text-muted-foreground" role="status">Loading publishing pipeline…</div>{:then module}{@const Component = module.default}<Component />{:catch error}<div class="m-auto max-w-md border-l-2 border-destructive bg-destructive/8 p-4 text-xs text-destructive-foreground" role="alert">Failed to load publishing: {error instanceof Error ? error.message : 'Unknown module error.'}</div>{/await}
+    {:else if activeTab.type === 'revisions'}
+      {#await import('./RevisionSnapshotsSurface.svelte')}<div class="flex flex-1 items-center justify-center text-xs text-muted-foreground" role="status">Loading revision history…</div>{:then module}{@const Component = module.default}<Component />{:catch error}<div class="m-auto max-w-md border-l-2 border-destructive bg-destructive/8 p-4 text-xs text-destructive-foreground" role="alert">Failed to load revision history: {error instanceof Error ? error.message : 'Unknown module error.'}</div>{/await}
     {:else if activeTab.type === 'structure'}
       <StructureEditor />
     {:else if activeTab.type === 'outline'}

@@ -25,5 +25,6 @@ await cp(agentsSource, agentsTarget, {
 await mkdir(skillsTarget, { recursive: true });
 await cp(skillsSource, skillsTarget, {
   recursive: true,
-  filter: (path) => path === skillsSource || path.endsWith('.md') || !extname(path)
+  filter: (path) =>
+    path === skillsSource || path.endsWith('.md') || path.endsWith('.json') || !extname(path)
 });

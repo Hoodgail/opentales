@@ -26,6 +26,7 @@ export class UpdateCharacterUseCase {
         where: { id: characterId, projectId },
         select: {
           id: true,
+          name: true,
           descriptionWritingId: true,
           appearanceWritingId: true,
           motivationWritingId: true,
@@ -36,13 +37,16 @@ export class UpdateCharacterUseCase {
       if (!character) {
         throw new HttpError(404, 'Character not found');
       }
+      const nextName = input.name === undefined ? character.name : input.name.trim();
+      if (!nextName || nextName.length > 500) throw new HttpError(400, 'Character name must be between 1 and 500 characters');
 
       const data: Prisma.CharacterUpdateInput = {
-        name: input.name,
+        name: input.name === undefined ? undefined : nextName,
         role: input.role,
         age: input.age,
         occupation: input.occupation,
-        traits: input.traits
+        traits: input.traits,
+        aliases: input.aliases === undefined ? undefined : normalizeAliases(input.aliases, nextName)
       };
 
       if (input.avatarAssetId !== undefined) {
@@ -94,4 +98,15 @@ export class UpdateCharacterUseCase {
     });
     return toCharacter(character, assets);
   }
+}
+
+function normalizeAliases(values: string[], name: string): string[] {
+  if (!Array.isArray(values) || values.length > 1_000) throw new HttpError(400, 'Character aliases must contain at most 1,000 values');
+  const aliases = values.map((value) => {
+    if (typeof value !== 'string' || !value.trim() || value.trim().length > 500) throw new HttpError(400, 'Each character alias must be between 1 and 500 characters');
+    return value.trim();
+  });
+  const normalized = aliases.map((value) => value.toLocaleLowerCase());
+  if (new Set(normalized).size !== normalized.length || normalized.includes(name.toLocaleLowerCase())) throw new HttpError(400, 'Character aliases must be unique and different from the character name');
+  return aliases;
 }

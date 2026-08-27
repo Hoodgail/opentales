@@ -24,6 +24,7 @@ export class CreateLocationUseCase {
     if (!name) {
       throw new HttpError(400, 'Location name is required');
     }
+    const aliases = normalizeAliases(input.aliases, name);
 
     await this.prisma.$transaction(async (tx) => {
       const descriptionWritingId = await this.writingUseCase.createWriting(tx, {
@@ -55,6 +56,7 @@ export class CreateLocationUseCase {
         data: {
           projectId,
           name,
+          aliases,
           type: input.type,
           descriptionWritingId,
           atmosphereWritingId,
@@ -66,4 +68,16 @@ export class CreateLocationUseCase {
 
     return reloadManuscript(this.prisma, projectId);
   }
+}
+
+function normalizeAliases(values: string[] | undefined, name: string): string[] {
+  if (values === undefined) return [];
+  if (!Array.isArray(values) || values.length > 1_000) throw new HttpError(400, 'Location aliases must contain at most 1,000 values');
+  const aliases = values.map((value) => {
+    if (typeof value !== 'string' || !value.trim() || value.trim().length > 500) throw new HttpError(400, 'Each location alias must be between 1 and 500 characters');
+    return value.trim();
+  });
+  const normalized = aliases.map((value) => value.toLocaleLowerCase());
+  if (new Set(normalized).size !== normalized.length || normalized.includes(name.toLocaleLowerCase())) throw new HttpError(400, 'Location aliases must be unique and different from the location name');
+  return aliases;
 }

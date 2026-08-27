@@ -1,6 +1,39 @@
 <script lang="ts">
   import { X } from 'lucide-svelte';
+  import { tick } from 'svelte';
   import { commandPalette } from '$lib/stores/commandPalette.svelte';
+
+  let dialogEl: HTMLDivElement | undefined = $state();
+  let restoreFocus: HTMLElement | null = null;
+
+  $effect(() => {
+    if (!commandPalette.shortcutsOpen) return;
+    restoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    void tick().then(() => dialogEl?.focus());
+  });
+
+  function close() {
+    commandPalette.hideShortcuts();
+    void tick().then(() => {
+      if (restoreFocus?.isConnected) restoreFocus.focus();
+      else document.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+    });
+  }
+
+  function trapFocus(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      close();
+      return;
+    }
+    if (event.key !== 'Tab' || !dialogEl) return;
+    const focusable = [...dialogEl.querySelectorAll<HTMLElement>('button:not([disabled]),[tabindex]:not([tabindex="-1"])')];
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
 
   interface Shortcut {
     keys: string[];
@@ -60,23 +93,23 @@
     class="fixed inset-0 z-[55] flex items-center justify-center bg-black/50 px-4 backdrop-blur-sm"
     role="presentation"
     onclick={(e) => {
-      if (e.target === e.currentTarget) commandPalette.hideShortcuts();
-    }}
-    onkeydown={(e) => {
-      if (e.key === 'Escape') commandPalette.hideShortcuts();
+      if (e.target === e.currentTarget) close();
     }}
   >
     <div
+      bind:this={dialogEl}
       class="w-full max-w-2xl overflow-hidden rounded-lg border border-border bg-card shadow-2xl"
       role="dialog"
+      tabindex="-1"
       aria-modal="true"
       aria-label="Keyboard shortcuts"
+      onkeydown={trapFocus}
     >
       <header class="flex items-center justify-between border-b border-border px-4 py-3">
         <h2 class="text-sm font-semibold text-foreground">Keyboard shortcuts</h2>
         <button
           type="button"
-          onclick={() => commandPalette.hideShortcuts()}
+          onclick={close}
           class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
           aria-label="Close"
         >

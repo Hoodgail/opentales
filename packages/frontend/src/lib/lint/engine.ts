@@ -25,7 +25,9 @@ export function runLint(context: LintContext, options: LintRunOptions = {}): Dia
         chapterTitle: '',
         message: `Rule ${rule.id} failed: ${
           error instanceof Error ? error.message : 'unknown error'
-        }`
+        }`,
+        category: 'workflow',
+        pass: 'final'
       });
     }
   }

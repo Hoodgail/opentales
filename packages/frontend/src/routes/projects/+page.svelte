@@ -1,10 +1,12 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
+  import { Pane, Splitpanes, type IPaneSizingEvent } from "svelte-splitpanes";
   import ActivityBar from "$lib/components/ide/ActivityBar.svelte";
   import CommandPalette from "$lib/components/ide/CommandPalette.svelte";
   import EditorArea from "$lib/components/ide/EditorArea.svelte";
   import InspectorPanel from "$lib/components/ide/InspectorPanel.svelte";
   import MobileBottomNav from "$lib/components/ide/MobileBottomNav.svelte";
+  import RenameSymbolSurface from "$lib/components/ide/RenameSymbolSurface.svelte";
   import ShortcutsOverlay from "$lib/components/ide/ShortcutsOverlay.svelte";
   import SidePanel from "$lib/components/ide/SidePanel.svelte";
   import StatusBar from "$lib/components/ide/StatusBar.svelte";
@@ -12,7 +14,13 @@
   import Logo from "$lib/components/Logo.svelte";
   import { commandPalette } from "$lib/stores/commandPalette.svelte";
   import { manuscript } from "$lib/stores/manuscript.svelte";
-  import { ui } from "$lib/stores/ui.svelte";
+  import {
+    SIDE_PANEL_MAX_SIZE,
+    SIDE_PANEL_MIN_SIZE,
+    SIDE_PANEL_SNAP_SIZE,
+    ui,
+  } from "$lib/stores/ui.svelte";
+  import { storyUi } from "$lib/stores/storyUi.svelte";
   import { viewport } from "$lib/stores/viewport.svelte";
 
   function isTypingTarget(el: EventTarget | null): boolean {
@@ -23,6 +31,13 @@
   }
 
   function handleGlobalKey(e: KeyboardEvent) {
+    if (
+      e.target instanceof HTMLElement &&
+      e.target.classList.contains('splitpanes__splitter')
+    ) {
+      handleSplitKeydown(e);
+      return;
+    }
     // Cmd/Ctrl+K — toggle command palette (works even from typing targets).
     if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
       e.preventDefault();
@@ -42,6 +57,16 @@
   // tapped a chapter inside the side drawer — they should land on the
   // editor with the drawer dismissed).
   let lastActiveTabId: string | null = null;
+  let sideDrawer: HTMLElement | undefined = $state();
+  let inspectorDrawer: HTMLElement | undefined = $state();
+  let desktopSplitHost: HTMLDivElement | undefined = $state();
+  let previousDrawer: typeof ui.drawer = null;
+  let drawerTrigger: HTMLElement | null = null;
+  const wideWorkspace = $derived(
+    ['build', 'story-bible', 'outline-studio', 'manuscript', 'publishing', 'revisions'].includes(
+      manuscript.tabs.find((tab) => tab.id === manuscript.activeTabId)?.type ?? ''
+    )
+  );
   $effect(() => {
     const id = manuscript.activeTabId;
     if (
@@ -51,9 +76,73 @@
       ui.drawer === "side"
     ) {
       ui.close();
+      void tick().then(() => {
+        document.querySelector<HTMLElement>(`[role="tab"][aria-selected="true"]`)?.focus();
+      });
     }
     lastActiveTabId = id;
   });
+
+  $effect(() => {
+    const drawer = ui.drawer;
+    if (!viewport.mobile || drawer === previousDrawer) return;
+    if (drawer) {
+      drawerTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const panel = drawer === 'side' ? sideDrawer : inspectorDrawer;
+      void tick().then(() => {
+        panel?.querySelector<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )?.focus();
+      });
+    } else if (previousDrawer) {
+      const trigger = drawerTrigger;
+      drawerTrigger = null;
+      void tick().then(() => trigger?.isConnected && trigger.focus());
+    }
+    previousDrawer = drawer;
+  });
+
+  $effect(() => {
+    const host = desktopSplitHost;
+    const size = ui.sidePanelCollapsed ? 0 : ui.sidePanelSize;
+    void tick().then(() => {
+      const splitter = host?.querySelector<HTMLElement>(
+        '.opentales-workspace-split > .splitpanes__splitter',
+      );
+      if (!splitter) return;
+      splitter.tabIndex = 0;
+      splitter.setAttribute('role', 'separator');
+      splitter.setAttribute('aria-label', 'Resize side panel');
+      splitter.setAttribute('aria-orientation', 'vertical');
+      splitter.setAttribute('aria-valuemin', '0');
+      splitter.setAttribute('aria-valuemax', String(SIDE_PANEL_MAX_SIZE));
+      splitter.setAttribute('aria-valuenow', String(size));
+    });
+  });
+
+  function handleDrawerKeydown(event: KeyboardEvent, drawer: 'side' | 'inspector') {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      ui.close();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const panel = drawer === 'side' ? sideDrawer : inspectorDrawer;
+    if (!panel) return;
+    const focusable = [...panel.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )].filter((element) => element.getClientRects().length > 0);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
 
   let mode = $state<"login" | "register">("login");
   let emailOrUsername = $state("");
@@ -63,8 +152,34 @@
   let password = $state("");
 
   onMount(() => {
+    ui.hydrate();
     void manuscript.initialize();
   });
+
+  function handleWorkspaceResized(event: CustomEvent<IPaneSizingEvent[]>) {
+    const sidePane = event.detail[0];
+    if (sidePane) ui.setSidePanelSize(sidePane.size);
+  }
+
+  function handleSplitKeydown(event: KeyboardEvent) {
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || !target.classList.contains('splitpanes__splitter')) return;
+    const current = ui.sidePanelCollapsed ? 0 : ui.sidePanelSize;
+    if (event.key === 'Home') {
+      event.preventDefault();
+      ui.collapseSidePanel();
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      ui.setSidePanelSize(SIDE_PANEL_MAX_SIZE);
+    } else if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      if (current <= SIDE_PANEL_MIN_SIZE) ui.collapseSidePanel();
+      else ui.setSidePanelSize(current - 2);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      ui.setSidePanelSize(current === 0 ? ui.sidePanelSize : current + 2);
+    }
+  }
 
   function submitAuth() {
     if (mode === "login") {
@@ -85,8 +200,13 @@
 
 <CommandPalette />
 <ShortcutsOverlay />
+<RenameSymbolSurface />
 
-<div class="pwa-shell flex flex-col overflow-visible bg-sidebar">
+<div
+  class="pwa-shell flex flex-col overflow-visible bg-sidebar"
+  inert={commandPalette.open || commandPalette.shortcutsOpen || storyUi.renameSymbolRequest ? true : undefined}
+  aria-hidden={commandPalette.open || commandPalette.shortcutsOpen || Boolean(storyUi.renameSymbolRequest)}
+>
   {#if manuscript.initializing}
     <div class="flex h-full items-center justify-center">
       <div
@@ -271,31 +391,70 @@
           ></button>
         {/if}
 
-        <aside
-          class="fixed left-0 z-40 flex w-[88vw] max-w-[20rem] flex-col border-r border-border bg-sidebar shadow-2xl transition-transform duration-200 ease-out"
+        <div
+          bind:this={sideDrawer}
+          role="dialog"
+          aria-modal={ui.drawer === "side" ? "true" : undefined}
+          aria-label="Workspace navigation"
+          onkeydown={(event) => handleDrawerKeydown(event, 'side')}
+          class="fixed left-0 z-40 flex w-[88vw] max-w-[20rem] flex-col border-r border-border bg-sidebar shadow-2xl"
           style="top: calc(env(safe-area-inset-top) + var(--app-titlebar-height)); bottom: var(--app-safe-bottom); padding-left: env(safe-area-inset-left); padding-bottom: calc(var(--app-bottom-nav-height) + 20px);"
-          class:-translate-x-full={ui.drawer !== "side"}
+          style:translate={ui.drawer === "side" ? "0" : "-100%"}
           aria-hidden={ui.drawer !== "side"}
+          inert={ui.drawer !== "side" ? true : undefined}
         >
           <SidePanel />
-        </aside>
+        </div>
 
-        <aside
-          class="fixed right-0 z-40 flex w-[88vw] max-w-[22rem] flex-col border-l border-border bg-sidebar shadow-2xl transition-transform duration-200 ease-out"
+        <div
+          bind:this={inspectorDrawer}
+          role="dialog"
+          aria-modal={ui.drawer === "inspector" ? "true" : undefined}
+          aria-label="Workspace inspector"
+          onkeydown={(event) => handleDrawerKeydown(event, 'inspector')}
+          class="fixed right-0 z-40 flex w-[88vw] max-w-[22rem] flex-col border-l border-border bg-sidebar shadow-2xl"
           style="top: calc(env(safe-area-inset-top) + var(--app-titlebar-height)); bottom: var(--app-safe-bottom); padding-right: env(safe-area-inset-right);"
-          class:translate-x-full={ui.drawer !== "inspector"}
+          style:translate={ui.drawer === "inspector" ? "0" : "100%"}
           aria-hidden={ui.drawer !== "inspector"}
+          inert={ui.drawer !== "inspector" ? true : undefined}
         >
           <InspectorPanel />
-        </aside>
+        </div>
       </div>
       <MobileBottomNav />
     {:else}
       <div class="flex min-h-0 flex-1">
         <ActivityBar />
-        <SidePanel />
-        <EditorArea />
-        <InspectorPanel />
+        <div
+          bind:this={desktopSplitHost}
+          class="min-h-0 min-w-0 flex-1 overflow-hidden"
+        >
+          <Splitpanes
+            id="opentales-editor-split"
+            theme="opentales-theme"
+            class="opentales-workspace-split"
+            pushOtherPanes={false}
+            dblClickSplitter={true}
+            on:resized={handleWorkspaceResized}
+          >
+            <Pane
+              size={ui.sidePanelCollapsed ? 0 : ui.sidePanelSize}
+              minSize={0}
+              maxSize={SIDE_PANEL_MAX_SIZE}
+              snapSize={SIDE_PANEL_SNAP_SIZE}
+            >
+              {#if !ui.sidePanelCollapsed}
+                <SidePanel />
+              {/if}
+            </Pane>
+            <Pane minSize={100 - SIDE_PANEL_MAX_SIZE}>
+              <div class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+                <EditorArea />
+              </div>
+            </Pane>
+          </Splitpanes>
+        </div>
+        {#if !wideWorkspace}<InspectorPanel />{/if}
       </div>
       <StatusBar />
     {/if}

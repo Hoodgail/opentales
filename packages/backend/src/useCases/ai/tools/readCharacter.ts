@@ -22,6 +22,7 @@ export function readCharacterTool(prisma: PrismaClient, context: ToolContext) {
       return {
         id: character.id,
         name: character.name,
+        aliases: character.aliases,
         role: character.role,
         age: character.age,
         occupation: character.occupation,

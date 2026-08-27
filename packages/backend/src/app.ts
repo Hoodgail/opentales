@@ -8,11 +8,19 @@ import { projectRoutes } from './routes/projectRoutes.js';
 import { publicRoutes } from './routes/publicRoutes.js';
 import { shareLinkRoutes } from './routes/shareLinkRoutes.js';
 import { projectSubmissionRoutes, submissionRoutes } from './routes/submissionRoutes.js';
+import { novelBuildRoutes } from './routes/novelBuildRoutes.js';
+import { revisionRoutes } from './routes/revisionRoutes.js';
+import { refactorRoutes } from './routes/refactorRoutes.js';
+import { exportImportRoutes } from './routes/exportImportRoutes.js';
 
 export function createApp() {
   const app = express();
 
-  app.use(cors({ origin: true, credentials: true }));
+  app.use(cors({
+    origin: true,
+    credentials: true,
+    exposedHeaders: ['Content-Disposition', 'Content-Length', 'X-Content-SHA256']
+  }));
   app.use(express.json({ limit: '2mb' }));
 
   app.get('/health', (_req, res) => {
@@ -30,6 +38,10 @@ export function createApp() {
   app.use('/projects', projectSubmissionRoutes);
   app.use('/submissions', submissionRoutes);
   app.use('/projects', shareLinkRoutes);
+  app.use('/projects', novelBuildRoutes);
+  app.use('/projects', revisionRoutes);
+  app.use('/projects', refactorRoutes);
+  app.use('/projects', exportImportRoutes);
   app.use('/projects', projectRoutes);
   app.use(errorMiddleware);
 

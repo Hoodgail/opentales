@@ -16,6 +16,14 @@ out
 # Vite
 .vite
 
+# Test artifacts
+coverage
+playwright-report
+test-results
+
+# Local backend state
+packages/backend/data/
+
 # Editor / OS
 *.log
 .idea

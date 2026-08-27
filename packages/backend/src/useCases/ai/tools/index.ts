@@ -4,7 +4,14 @@ import { listChaptersTool } from './listChapters.js';
 import { listCharactersTool } from './listCharacters.js';
 import { listLocationsTool } from './listLocations.js';
 import { listProjectDocsTool } from './listProjectDocs.js';
-import { mutationTools, type ApprovalHandler, type QuestionHandler } from './mutations.js';
+import {
+  executeMutationTool,
+  mutatingToolNames,
+  mutationTools,
+  type ApprovalHandler,
+  type MutatingToolName,
+  type QuestionHandler
+} from './mutations.js';
 import { listProjectFilesTool, readFolderTool } from './projectFiles.js';
 import { readChapterTool } from './readChapter.js';
 import { readCharacterTool } from './readCharacter.js';
@@ -42,16 +49,43 @@ import { readStoryStructureTool } from './readStoryStructure.js';
 import { taskTool, type TaskHandler } from './task.js';
 import type { ToolContext } from './shared.js';
 import type { AiAgentInfo } from '../agents.js';
+import type { RuntimeRole, TaskContract } from '../runtime/taskContract.js';
+import type { AiAgentApprovalMode, BuildTaskLeaseInput } from '@opentales/sdk';
+import { filterToolsForRole, filterToolsForSkill } from './capabilities.js';
+import {
+  executeSemanticMutation,
+  semanticMutatingToolNames,
+  storyIntelligenceTools,
+  type SemanticApprovalHandler,
+  type SemanticMutatingToolName
+} from './storyIntelligence.js';
+import {
+  buildMutatingToolNames,
+  buildWorkflowTools,
+  executeBuildMutation,
+  type BuildApprovalHandler,
+  type BuildMutatingToolName
+} from './buildTools.js';
+
+export interface AgentToolPolicy {
+  role: RuntimeRole;
+  taskContract: TaskContract | null;
+  primary: boolean;
+  skillAllowedTools?: readonly string[] | null;
+  executionLease?: BuildTaskLeaseInput | null;
+  approvalMode?: AiAgentApprovalMode;
+}
 
 export function buildAgentTools(
   prisma: PrismaClient,
   context: ToolContext & { userId: string },
-  approval: ApprovalHandler,
+  approval: ApprovalHandler & SemanticApprovalHandler & BuildApprovalHandler,
   question: QuestionHandler,
   task: TaskHandler,
-  subagents: AiAgentInfo[] = []
+  subagents: AiAgentInfo[] = [],
+  policy: AgentToolPolicy = { role: 'orchestrator', taskContract: null, primary: true }
 ) {
-  return {
+  const tools = {
     task: taskTool(subagents, task),
     readProject: readProjectTool(prisma, context),
     listProjectFiles: listProjectFilesTool(prisma, context),
@@ -92,9 +126,37 @@ export function buildAgentTools(
     listWritingVersions: listWritingVersionsTool(prisma, context),
     readWritingVersion: readWritingVersionTool(prisma, context),
     grepProject: grepProjectTool(prisma, context),
+    ...storyIntelligenceTools(prisma, context, approval, policy.taskContract, policy.executionLease ?? null),
+    ...buildWorkflowTools(prisma, context, approval, policy.taskContract, policy.executionLease ?? null),
     ...mutationTools(prisma, context, approval, question)
   };
+  const roleScoped = filterToolsForRole(tools, policy.role, policy.taskContract, { primary: policy.primary });
+  const leaseScoped = policy.executionLease
+    ? roleScoped
+    : Object.fromEntries(Object.entries(roleScoped).filter(([name]) => !['applyBuildUnitPatch', 'compileBuildManuscript', 'reportTaskResult'].includes(name)));
+  const skillScoped = filterToolsForSkill(leaseScoped, policy.skillAllowedTools);
+  if (policy.approvalMode !== 'auto') return skillScoped;
+  return Object.fromEntries(Object.entries(skillScoped).filter(([name]) => name !== 'askUser'));
 }
 
-export { executeMutationTool, mutatingToolNames, type MutatingToolName, type QuestionHandler } from './mutations.js';
+export const agentMutatingToolNames = [
+  ...mutatingToolNames,
+  ...semanticMutatingToolNames,
+  ...buildMutatingToolNames
+] as const;
+
+export type AgentMutatingToolName = MutatingToolName | SemanticMutatingToolName | BuildMutatingToolName;
+
+export async function executeAgentMutationTool(
+  prisma: PrismaClient,
+  context: ToolContext & { userId: string },
+  toolName: string,
+  input: Record<string, unknown>
+) {
+  if ((semanticMutatingToolNames as readonly string[]).includes(toolName)) return executeSemanticMutation(prisma, context, toolName, input);
+  if ((buildMutatingToolNames as readonly string[]).includes(toolName)) return executeBuildMutation(prisma, context, toolName, input);
+  return executeMutationTool(prisma, context, toolName, input);
+}
+
+export { type QuestionHandler } from './mutations.js';
 export { bodyOf } from './shared.js';

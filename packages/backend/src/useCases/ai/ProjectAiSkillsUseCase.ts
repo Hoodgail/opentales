@@ -6,7 +6,7 @@ import type {
 } from '@opentales/sdk';
 import { HttpError } from '../../http/HttpError.js';
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
-import { loadBuiltInAiSkills } from './markdownCatalog.js';
+import { loadBuiltInAiSkills, projectSkillManifest } from './markdownCatalog.js';
 
 const MAX_SKILLS = 50;
 const MAX_CONTENT_LENGTH = 50_000;
@@ -42,12 +42,16 @@ export class ProjectAiSkillsUseCase {
     if (count >= MAX_SKILLS) throw new HttpError(400, `Projects can have at most ${MAX_SKILLS} skills`);
 
     try {
+      const name = validateName(input.name);
+      const description = validateDescription(input.description);
+      const content = validateContent(input.content ?? defaultSkillContent(input.name, input.description));
+      validateManifest(name, description, content);
       const skill = await this.prisma.projectAiSkill.create({
         data: {
           projectId,
-          name: validateName(input.name),
-          description: validateDescription(input.description),
-          content: validateContent(input.content ?? defaultSkillContent(input.name, input.description)),
+          name,
+          description,
+          content,
           enabled: input.enabled ?? true
         }
       });
@@ -67,14 +71,18 @@ export class ProjectAiSkillsUseCase {
     await this.access.assertPermission(userId, projectId, 'project:write');
     const existing = await this.prisma.projectAiSkill.findFirst({ where: { id: skillId, projectId } });
     if (!existing) throw new HttpError(404, 'AI skill not found');
+    const name = input.name === undefined ? existing.name : validateName(input.name);
+    const description = input.description === undefined ? existing.description : validateDescription(input.description);
+    const content = input.content === undefined ? existing.content : validateContent(input.content);
+    validateManifest(name, description, content);
 
     try {
       const skill = await this.prisma.projectAiSkill.update({
         where: { id: skillId },
         data: {
-          ...(input.name !== undefined ? { name: validateName(input.name) } : {}),
-          ...(input.description !== undefined ? { description: validateDescription(input.description) } : {}),
-          ...(input.content !== undefined ? { content: validateContent(input.content) } : {}),
+          ...(input.name !== undefined ? { name } : {}),
+          ...(input.description !== undefined ? { description } : {}),
+          ...(input.content !== undefined ? { content } : {}),
           ...(input.enabled !== undefined ? { enabled: input.enabled } : {})
         }
       });
@@ -146,4 +154,12 @@ function defaultSkillContent(name: string, description: string): string {
 
 function isUniqueConstraintError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002';
+}
+
+function validateManifest(name: string, description: string, content: string): void {
+  try {
+    projectSkillManifest(name, description, content);
+  } catch (error) {
+    throw new HttpError(400, error instanceof Error ? error.message : 'Skill manifest is invalid');
+  }
 }

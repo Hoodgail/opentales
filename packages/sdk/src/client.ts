@@ -30,6 +30,8 @@ import type {
   AiAgentSessionEvent,
   AiAgentSession,
   AiAgentSessionSummary,
+  AiAgentTimelinePage,
+  AiAgentToolCall,
   AiCharacterDialogueSuggestion,
   AiContinuityReview,
   AiModelCatalog,
@@ -39,8 +41,10 @@ import type {
   PollGithubCopilotAuthInput,
   PollGithubCopilotAuthResult,
   CreateSubmissionInput,
+  DeleteSceneInput,
   CreateAiCharacterDialogueInput,
   CreateAiAgentSessionInput,
+  UpdateAiAgentSessionInput,
   CreateAiOutlineExpansionInput,
   CreateAiRewriteSuggestionInput,
   CollaborationDocumentEvent,
@@ -68,6 +72,9 @@ import type {
   ProjectSummary,
   PublicProject,
   RegisterInput,
+  ReplanBuildInput,
+  ReplanBuildResult,
+  BranchBuildFromCheckpointInput,
   StartGithubCopilotAuthResult,
   TrashItem,
   Role,
@@ -86,7 +93,80 @@ import type {
   UpdateProjectAiSettingsInput,
   UpdateProjectAiSkillInput,
   UpdateProjectInput,
-  UpdateStructureInput
+  UpdateStructureInput,
+  ApplyStoryArtifactBatchInput,
+  ApplyStoryArtifactBatchResult,
+  ApplyStoryStateBatchInput,
+  ApplyStoryStateBatchResult,
+  AuthorizeBuildRunInput,
+  BuildCheckpoint,
+  BuildLifecycleInput,
+  BuildObservability,
+  BuildRun,
+  BuildTaskActionResult,
+  CreateBuildCheckpointInput,
+  CreateBuildRunInput,
+  CreateSceneInput,
+  FindStoryReferencesInput,
+  FindStoryReferencesResult,
+  GetBuildObservabilityInput,
+  GetAiAgentTimelineInput,
+  ListStoryArtifactsInput,
+  PaginatedStoryArtifacts,
+  PatchSceneResult,
+  Scene,
+  SearchStoryInput,
+  StoryDiagnosticsResult,
+  StorySearchResult,
+  StoryStateSnapshot,
+  UpdateSceneInput,
+  BuildManuscriptUnit,
+  BuildCompilation,
+  BuildComparison,
+  BuildReview,
+  CreateBuildManuscriptUnitInput,
+  PatchBuildManuscriptUnitInput,
+  CompileBuildManuscriptInput,
+  CreateBuildReviewInput,
+  ApproveBuildReviewInput,
+  MergeBuildReviewInput,
+  RejectBuildReviewInput,
+  UnpinBuildArtifactsInput,
+  ReorderScenesInput,
+  GetStoryStateInput,
+  StoryStateDelta,
+  StoryStateEntityKind,
+  StoryStateHistoryResult,
+  TemporalStoryStateQuery,
+  TemporalStoryStateResult,
+  RegisterBuildExportInput,
+  StoryArtifact,
+  ProjectExport,
+  CreateProjectExportInput,
+  RegenerateProjectExportInput,
+  ReorderBuildManuscriptUnitsInput,
+  ProjectImportPreview,
+  PreviewProjectImportInput,
+  ApplyProjectImportInput
+  ,NamedSnapshot
+  ,SnapshotListFilter
+  ,CreateNamedSnapshotInput
+  ,CompareNamedSnapshotsInput
+  ,NamedSnapshotComparison
+  ,RestoreNamedSnapshotInput
+  ,RestoreNamedSnapshotResult
+  ,BranchFromNamedSnapshotInput
+  ,BranchFromNamedSnapshotResult
+  ,WritingAnnotationThread
+  ,ListWritingAnnotationsInput
+  ,CreateWritingAnnotationInput
+  ,ReplyToWritingAnnotationInput
+  ,UpdateWritingAnnotationStatusInput
+  ,AcceptWritingSuggestionInput
+  ,PreviewRenameSymbolInput
+  ,RenameSymbolPreview
+  ,ApplyRenameSymbolInput
+  ,ApplyRenameSymbolResult
 } from './types.js';
 
 export class ApiError extends Error {
@@ -159,6 +239,339 @@ export class OpenTalesClient {
 
   updateProject(projectId: string, input: UpdateProjectInput): Promise<ProjectSummary> {
     return this.request<ProjectSummary>(`/projects/${projectId}`, { method: 'PATCH', body: input });
+  }
+
+  listScenes(projectId: string, chapterId: string): Promise<Scene[]> {
+    return this.request<Scene[]>(`/projects/${projectId}/chapters/${chapterId}/scenes`);
+  }
+
+  getScene(projectId: string, chapterId: string, sceneId: string): Promise<Scene> {
+    return this.request<Scene>(`/projects/${projectId}/chapters/${chapterId}/scenes/${sceneId}`);
+  }
+
+  createScene(projectId: string, chapterId: string, input: CreateSceneInput): Promise<Scene> {
+    return this.request<Scene>(`/projects/${projectId}/chapters/${chapterId}/scenes`, { method: 'POST', body: input });
+  }
+
+  updateScene(projectId: string, chapterId: string, sceneId: string, input: UpdateSceneInput): Promise<PatchSceneResult> {
+    return this.request<PatchSceneResult>(`/projects/${projectId}/chapters/${chapterId}/scenes/${sceneId}`, { method: 'PATCH', body: input });
+  }
+
+  deleteScene(projectId: string, chapterId: string, sceneId: string, input: DeleteSceneInput = {}): Promise<{ id: string; deleted: true }> {
+    return this.request<{ id: string; deleted: true }>(`/projects/${projectId}/chapters/${chapterId}/scenes/${sceneId}`, { method: 'DELETE', body: input });
+  }
+
+  reorderScenes(projectId: string, chapterId: string, input: ReorderScenesInput): Promise<Scene[]> {
+    return this.request<Scene[]>(`/projects/${projectId}/chapters/${chapterId}/scenes/reorder`, {
+      method: 'POST', body: input
+    });
+  }
+
+  listBuildRuns(projectId: string): Promise<BuildRun[]> {
+    return this.request<BuildRun[]>(`/projects/${projectId}/builds`);
+  }
+
+  createBuildRun(projectId: string, input: CreateBuildRunInput): Promise<BuildRun> {
+    return this.request<BuildRun>(`/projects/${projectId}/builds`, { method: 'POST', body: input });
+  }
+
+  getBuildRun(projectId: string, buildRunId: string): Promise<BuildRun> {
+    return this.request<BuildRun>(`/projects/${projectId}/builds/${buildRunId}`);
+  }
+
+  authorizeBuildRun(projectId: string, buildRunId: string, input: AuthorizeBuildRunInput): Promise<BuildRun> {
+    return this.request<BuildRun>(`/projects/${projectId}/builds/${buildRunId}/authorization`, { method: 'POST', body: input });
+  }
+
+  pauseBuildRun(projectId: string, buildRunId: string, input: BuildLifecycleInput): Promise<BuildRun> {
+    return this.buildLifecycle(projectId, buildRunId, 'pause', input);
+  }
+
+  resumeBuildRun(projectId: string, buildRunId: string, input: BuildLifecycleInput): Promise<BuildRun> {
+    return this.buildLifecycle(projectId, buildRunId, 'resume', input);
+  }
+
+  cancelBuildRun(projectId: string, buildRunId: string, input: BuildLifecycleInput): Promise<BuildRun> {
+    return this.buildLifecycle(projectId, buildRunId, 'cancel', input);
+  }
+
+  retryBuildTask(projectId: string, buildRunId: string, taskId: string, input: BuildLifecycleInput): Promise<BuildTaskActionResult> {
+    return this.request<BuildTaskActionResult>(`/projects/${projectId}/builds/${buildRunId}/tasks/${taskId}/retry`, { method: 'POST', body: input });
+  }
+
+  rerunBuildTask(projectId: string, buildRunId: string, taskId: string, input: BuildLifecycleInput): Promise<BuildTaskActionResult> {
+    return this.request<BuildTaskActionResult>(`/projects/${projectId}/builds/${buildRunId}/tasks/${taskId}/rerun`, { method: 'POST', body: input });
+  }
+
+  replanBuildRun(projectId: string, buildRunId: string, input: ReplanBuildInput): Promise<ReplanBuildResult> {
+    return this.request<ReplanBuildResult>(`/projects/${projectId}/builds/${buildRunId}/replan`, { method: 'POST', body: input });
+  }
+
+  branchBuildFromCheckpoint(projectId: string, buildRunId: string, input: BranchBuildFromCheckpointInput): Promise<ReplanBuildResult> {
+    return this.request<ReplanBuildResult>(`/projects/${projectId}/builds/${buildRunId}/branches/from-checkpoint`, { method: 'POST', body: input });
+  }
+
+  listBuildManuscriptUnits(
+    projectId: string,
+    buildRunId: string,
+    filter: { kind?: 'chapter' | 'scene'; parentUnitId?: string | null } = {}
+  ): Promise<BuildManuscriptUnit[]> {
+    return this.request<BuildManuscriptUnit[]>(
+      `/projects/${projectId}/builds/${buildRunId}/units${this.queryString(filter as Record<string, unknown>)}`
+    );
+  }
+
+  getBuildManuscriptUnit(projectId: string, buildRunId: string, unitId: string): Promise<BuildManuscriptUnit> {
+    return this.request<BuildManuscriptUnit>(`/projects/${projectId}/builds/${buildRunId}/units/${unitId}`);
+  }
+
+  createBuildManuscriptUnit(
+    projectId: string,
+    buildRunId: string,
+    input: CreateBuildManuscriptUnitInput
+  ): Promise<BuildManuscriptUnit> {
+    return this.request<BuildManuscriptUnit>(`/projects/${projectId}/builds/${buildRunId}/units`, {
+      method: 'POST', body: input
+    });
+  }
+
+  patchBuildManuscriptUnit(
+    projectId: string,
+    buildRunId: string,
+    unitId: string,
+    input: PatchBuildManuscriptUnitInput
+  ): Promise<BuildManuscriptUnit> {
+    return this.request<BuildManuscriptUnit>(`/projects/${projectId}/builds/${buildRunId}/units/${unitId}`, {
+      method: 'PATCH', body: input
+    });
+  }
+
+  reorderBuildManuscriptUnits(projectId: string, buildRunId: string, input: ReorderBuildManuscriptUnitsInput): Promise<BuildManuscriptUnit[]> {
+    return this.request<BuildManuscriptUnit[]>(`/projects/${projectId}/builds/${buildRunId}/units/reorder`, { method: 'POST', body: input });
+  }
+
+  compileBuildManuscript(
+    projectId: string,
+    buildRunId: string,
+    input: CompileBuildManuscriptInput
+  ): Promise<BuildCompilation> {
+    return this.request<BuildCompilation>(`/projects/${projectId}/builds/${buildRunId}/compile`, {
+      method: 'POST', body: input
+    });
+  }
+
+  getBuildCompilation(projectId: string, buildRunId: string, compilationId: string): Promise<BuildCompilation> {
+    return this.request<BuildCompilation>(`/projects/${projectId}/builds/${buildRunId}/compilations/${compilationId}`);
+  }
+
+  compareBuildManuscript(projectId: string, buildRunId: string): Promise<BuildComparison> {
+    return this.request<BuildComparison>(`/projects/${projectId}/builds/${buildRunId}/comparison`);
+  }
+
+  listBuildReviews(projectId: string, buildRunId: string): Promise<BuildReview[]> {
+    return this.request<BuildReview[]>(`/projects/${projectId}/builds/${buildRunId}/reviews`);
+  }
+
+  createBuildReview(projectId: string, buildRunId: string, input: CreateBuildReviewInput): Promise<BuildReview> {
+    return this.request<BuildReview>(`/projects/${projectId}/builds/${buildRunId}/reviews`, {
+      method: 'POST', body: input
+    });
+  }
+
+  getBuildReview(projectId: string, buildRunId: string, reviewId: string): Promise<BuildReview> {
+    return this.request<BuildReview>(`/projects/${projectId}/builds/${buildRunId}/reviews/${reviewId}`);
+  }
+
+  approveBuildReview(
+    projectId: string,
+    buildRunId: string,
+    reviewId: string,
+    input: ApproveBuildReviewInput
+  ): Promise<BuildReview> {
+    return this.request<BuildReview>(`/projects/${projectId}/builds/${buildRunId}/reviews/${reviewId}/approve`, {
+      method: 'POST', body: input
+    });
+  }
+
+  mergeBuildReview(
+    projectId: string,
+    buildRunId: string,
+    reviewId: string,
+    input: MergeBuildReviewInput
+  ): Promise<BuildReview> {
+    return this.request<BuildReview>(`/projects/${projectId}/builds/${buildRunId}/reviews/${reviewId}/merge`, {
+      method: 'POST', body: input
+    });
+  }
+
+  rejectBuildReview(
+    projectId: string,
+    buildRunId: string,
+    reviewId: string,
+    input: RejectBuildReviewInput
+  ): Promise<BuildReview> {
+    return this.request<BuildReview>(`/projects/${projectId}/builds/${buildRunId}/reviews/${reviewId}/reject`, {
+      method: 'POST', body: input
+    });
+  }
+
+  unpinBuildArtifacts(projectId: string, buildRunId: string, input: UnpinBuildArtifactsInput): Promise<BuildRun> {
+    return this.request<BuildRun>(`/projects/${projectId}/builds/${buildRunId}/pins/unpin`, {
+      method: 'POST', body: input
+    });
+  }
+
+  registerBuildExport(projectId: string, buildRunId: string, input: RegisterBuildExportInput): Promise<StoryArtifact> {
+    return this.request<StoryArtifact>(`/projects/${projectId}/builds/${buildRunId}/exports`, {
+      method: 'POST', body: input
+    });
+  }
+
+  listProjectExports(projectId: string): Promise<ProjectExport[]> {
+    return this.request<ProjectExport[]>(`/projects/${projectId}/exports`);
+  }
+
+  createProjectExport(projectId: string, input: CreateProjectExportInput): Promise<ProjectExport> {
+    return this.request<ProjectExport>(`/projects/${projectId}/exports`, { method: 'POST', body: input });
+  }
+
+  regenerateProjectExport(projectId: string, exportId: string, input: RegenerateProjectExportInput): Promise<ProjectExport> {
+    return this.request<ProjectExport>(`/projects/${projectId}/exports/${exportId}/regenerate`, { method: 'POST', body: input });
+  }
+
+  deleteProjectExport(projectId: string, exportId: string): Promise<ProjectExport> {
+    return this.request<ProjectExport>(`/projects/${projectId}/exports/${exportId}`, { method: 'DELETE' });
+  }
+
+  async downloadProjectExport(
+    projectId: string,
+    exportId: string
+  ): Promise<{ blob: Blob; filename: string; mimeType: string }> {
+    const headers = new Headers({ accept: 'application/octet-stream' });
+    if (this.token) headers.set('authorization', `Bearer ${this.token}`);
+    const response = await this.fetcher(`${this.baseUrl}/projects/${projectId}/exports/${exportId}/download`, { headers });
+    if (!response.ok) {
+      const text = await response.text();
+      let payload: { message?: string } | null = null;
+      try { payload = text ? JSON.parse(text) as { message?: string } : null; } catch { payload = null; }
+      throw new ApiError(payload?.message ?? 'Export download failed', response.status, payload);
+    }
+    const disposition = response.headers.get('content-disposition') ?? '';
+    const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+    const quoted = disposition.match(/filename="([^"]+)"/i)?.[1];
+    return {
+      blob: await response.blob(),
+      filename: encoded ? decodeURIComponent(encoded) : quoted ?? `opentales-export-${exportId}`,
+      mimeType: response.headers.get('content-type') ?? 'application/octet-stream'
+    };
+  }
+
+  listProjectImports(projectId: string): Promise<ProjectImportPreview[]> {
+    return this.request<ProjectImportPreview[]>(`/projects/${projectId}/imports`);
+  }
+
+  async previewProjectImport(projectId: string, input: PreviewProjectImportInput): Promise<ProjectImportPreview> {
+    const form = new FormData();
+    form.set('idempotencyKey', input.idempotencyKey);
+    if (input.mimeType) form.set('mimeType', input.mimeType);
+    form.set('file', input.file, input.filename ?? ('name' in input.file && typeof input.file.name === 'string' ? input.file.name : 'import'));
+    const headers = new Headers({ accept: 'application/json' });
+    if (this.token) headers.set('authorization', `Bearer ${this.token}`);
+    const response = await this.fetcher(`${this.baseUrl}/projects/${projectId}/imports/preview`, { method: 'POST', headers, body: form });
+    const text = await response.text();
+    const payload = text ? JSON.parse(text) : null;
+    if (!response.ok) throw new ApiError(payload?.message ?? 'Import preview failed', response.status, payload);
+    return payload as ProjectImportPreview;
+  }
+
+  applyProjectImport(projectId: string, importId: string, input: ApplyProjectImportInput): Promise<ProjectImportPreview> {
+    return this.request<ProjectImportPreview>(`/projects/${projectId}/imports/${importId}/apply`, { method: 'POST', body: input });
+  }
+
+  listNamedSnapshots(projectId: string, filter: SnapshotListFilter = {}): Promise<NamedSnapshot[]> { return this.request<NamedSnapshot[]>(`/projects/${projectId}/snapshots${this.queryString(filter as Record<string, unknown>)}`); }
+  createNamedSnapshot(projectId: string, input: CreateNamedSnapshotInput): Promise<NamedSnapshot> { return this.request<NamedSnapshot>(`/projects/${projectId}/snapshots`, { method: 'POST', body: input }); }
+  getNamedSnapshot(projectId: string, snapshotId: string): Promise<NamedSnapshot> { return this.request<NamedSnapshot>(`/projects/${projectId}/snapshots/${snapshotId}`); }
+  deleteNamedSnapshot(projectId: string, snapshotId: string): Promise<NamedSnapshot> { return this.request<NamedSnapshot>(`/projects/${projectId}/snapshots/${snapshotId}`, { method: 'DELETE' }); }
+  compareNamedSnapshots(projectId: string, input: CompareNamedSnapshotsInput): Promise<NamedSnapshotComparison> { return this.request<NamedSnapshotComparison>(`/projects/${projectId}/snapshots/compare`, { method: 'POST', body: input }); }
+  restoreNamedSnapshot(projectId: string, snapshotId: string, input: RestoreNamedSnapshotInput): Promise<RestoreNamedSnapshotResult> { return this.request<RestoreNamedSnapshotResult>(`/projects/${projectId}/snapshots/${snapshotId}/restore`, { method: 'POST', body: input }); }
+  branchFromNamedSnapshot(projectId: string, snapshotId: string, input: BranchFromNamedSnapshotInput): Promise<BranchFromNamedSnapshotResult> { return this.request<BranchFromNamedSnapshotResult>(`/projects/${projectId}/snapshots/${snapshotId}/branch`, { method: 'POST', body: input }); }
+  listWritingAnnotations(projectId: string, input: ListWritingAnnotationsInput = {}): Promise<WritingAnnotationThread[]> { return this.request<WritingAnnotationThread[]>(`/projects/${projectId}/annotations${this.queryString(input as Record<string, unknown>)}`); }
+  createWritingAnnotation(projectId: string, input: CreateWritingAnnotationInput): Promise<WritingAnnotationThread> { return this.request<WritingAnnotationThread>(`/projects/${projectId}/annotations`, { method: 'POST', body: input }); }
+  getWritingAnnotation(projectId: string, threadId: string): Promise<WritingAnnotationThread> { return this.request<WritingAnnotationThread>(`/projects/${projectId}/annotations/${threadId}`); }
+  replyToWritingAnnotation(projectId: string, threadId: string, input: ReplyToWritingAnnotationInput): Promise<WritingAnnotationThread> { return this.request<WritingAnnotationThread>(`/projects/${projectId}/annotations/${threadId}/replies`, { method: 'POST', body: input }); }
+  resolveWritingAnnotation(projectId: string, threadId: string, input: UpdateWritingAnnotationStatusInput): Promise<WritingAnnotationThread> { return this.request<WritingAnnotationThread>(`/projects/${projectId}/annotations/${threadId}/resolve`, { method: 'POST', body: input }); }
+  reopenWritingAnnotation(projectId: string, threadId: string, input: UpdateWritingAnnotationStatusInput): Promise<WritingAnnotationThread> { return this.request<WritingAnnotationThread>(`/projects/${projectId}/annotations/${threadId}/reopen`, { method: 'POST', body: input }); }
+  acceptWritingSuggestion(projectId: string, threadId: string, input: AcceptWritingSuggestionInput): Promise<WritingAnnotationThread> { return this.request<WritingAnnotationThread>(`/projects/${projectId}/annotations/${threadId}/accept`, { method: 'POST', body: input }); }
+  rejectWritingSuggestion(projectId: string, threadId: string, input: UpdateWritingAnnotationStatusInput): Promise<WritingAnnotationThread> { return this.request<WritingAnnotationThread>(`/projects/${projectId}/annotations/${threadId}/reject`, { method: 'POST', body: input }); }
+
+  previewRenameSymbol(projectId: string, input: PreviewRenameSymbolInput): Promise<RenameSymbolPreview> { return this.request<RenameSymbolPreview>(`/projects/${projectId}/refactor/rename/preview`, { method: 'POST', body: input }); }
+  applyRenameSymbol(projectId: string, input: ApplyRenameSymbolInput): Promise<ApplyRenameSymbolResult> { return this.request<ApplyRenameSymbolResult>(`/projects/${projectId}/refactor/rename/apply`, { method: 'POST', body: input }); }
+
+  createBuildCheckpoint(projectId: string, buildRunId: string, input: CreateBuildCheckpointInput): Promise<BuildCheckpoint> {
+    return this.request<BuildCheckpoint>(`/projects/${projectId}/builds/${buildRunId}/checkpoints`, { method: 'POST', body: input });
+  }
+
+  listStoryArtifacts(projectId: string, buildRunId: string, input: ListStoryArtifactsInput = {}): Promise<PaginatedStoryArtifacts> {
+    const query = this.queryString(input as Record<string, unknown>);
+    return this.request<PaginatedStoryArtifacts>(`/projects/${projectId}/builds/${buildRunId}/artifacts${query}`);
+  }
+
+  applyStoryArtifactBatch(projectId: string, buildRunId: string, input: ApplyStoryArtifactBatchInput): Promise<ApplyStoryArtifactBatchResult> {
+    return this.request<ApplyStoryArtifactBatchResult>(`/projects/${projectId}/builds/${buildRunId}/artifacts/batch`, { method: 'POST', body: input });
+  }
+
+  getStoryState(projectId: string, buildRunId: string, input: GetStoryStateInput = {}): Promise<StoryStateSnapshot> {
+    return this.request<StoryStateSnapshot>(
+      `/projects/${projectId}/builds/${buildRunId}/story-state${this.queryString(input as Record<string, unknown>)}`
+    );
+  }
+
+  getStoryStateDelta(projectId: string, buildRunId: string, input: GetStoryStateInput = {}): Promise<StoryStateDelta> {
+    return this.request<StoryStateDelta>(
+      `/projects/${projectId}/builds/${buildRunId}/story-state/delta${this.queryString(input as Record<string, unknown>)}`
+    );
+  }
+
+  getStoryStateHistory(
+    projectId: string,
+    buildRunId: string,
+    entityKind: StoryStateEntityKind,
+    key: string
+  ): Promise<StoryStateHistoryResult> {
+    return this.request<StoryStateHistoryResult>(
+      `/projects/${projectId}/builds/${buildRunId}/story-state/history/${entityKind}/${encodeURIComponent(key)}`
+    );
+  }
+
+  queryTemporalStoryState(
+    projectId: string,
+    buildRunId: string,
+    input: TemporalStoryStateQuery
+  ): Promise<TemporalStoryStateResult> {
+    return this.request<TemporalStoryStateResult>(`/projects/${projectId}/builds/${buildRunId}/story-state/temporal`, {
+      method: 'POST', body: input
+    });
+  }
+
+  applyStoryStateBatch(projectId: string, buildRunId: string, input: ApplyStoryStateBatchInput): Promise<ApplyStoryStateBatchResult> {
+    return this.request<ApplyStoryStateBatchResult>(`/projects/${projectId}/builds/${buildRunId}/story-state/batch`, { method: 'POST', body: input });
+  }
+
+  getBuildObservability(projectId: string, buildRunId: string, input: GetBuildObservabilityInput = {}): Promise<BuildObservability> {
+    const query = this.queryString(input as Record<string, unknown>);
+    return this.request<BuildObservability>(`/projects/${projectId}/builds/${buildRunId}/observability${query}`);
+  }
+
+  searchStory(projectId: string, buildRunId: string, input: SearchStoryInput): Promise<StorySearchResult> {
+    return this.request<StorySearchResult>(`/projects/${projectId}/builds/${buildRunId}/search`, { method: 'POST', body: input });
+  }
+
+  findStoryReferences(projectId: string, buildRunId: string, input: FindStoryReferencesInput): Promise<FindStoryReferencesResult> {
+    return this.request<FindStoryReferencesResult>(`/projects/${projectId}/builds/${buildRunId}/references`, { method: 'POST', body: input });
+  }
+
+  getStoryDiagnostics(projectId: string, buildRunId: string): Promise<StoryDiagnosticsResult> {
+    return this.request<StoryDiagnosticsResult>(`/projects/${projectId}/builds/${buildRunId}/diagnostics`);
   }
 
   listMembers(projectId: string): Promise<MembersAndInvites> {
@@ -723,9 +1136,31 @@ export class OpenTalesClient {
     });
   }
 
+  updateAiAgentSession(
+    projectId: string,
+    sessionId: string,
+    input: UpdateAiAgentSessionInput
+  ): Promise<AiAgentSession> {
+    return this.request<AiAgentSession>(`/projects/${projectId}/ai/agent-sessions/${sessionId}`, {
+      method: 'PATCH',
+      body: input
+    });
+  }
+
   getAiAgentSession(projectId: string, sessionId?: string): Promise<AiAgentSession> {
     const suffix = sessionId ? `/agent-sessions/${sessionId}` : '/agent-session';
     return this.request<AiAgentSession>(`/projects/${projectId}/ai${suffix}`);
+  }
+
+  getAiAgentTimeline(
+    projectId: string,
+    input: GetAiAgentTimelineInput,
+    sessionId?: string
+  ): Promise<AiAgentTimelinePage> {
+    const suffix = sessionId ? `/agent-sessions/${sessionId}` : '/agent-session';
+    return this.request<AiAgentTimelinePage>(
+      `/projects/${projectId}/ai${suffix}/timeline${this.queryString(input as Record<string, unknown>)}`
+    );
   }
 
   queueAiAgentPrompt(
@@ -745,6 +1180,11 @@ export class OpenTalesClient {
     return this.request<AiAgentSession>(`/projects/${projectId}/ai${suffix}/cancel`, {
       method: 'POST'
     });
+  }
+
+  getAiAgentToolCall(projectId: string, toolCallId: string, sessionId?: string): Promise<AiAgentToolCall> {
+    const suffix = sessionId ? `/agent-sessions/${sessionId}` : '/agent-session';
+    return this.request<AiAgentToolCall>(`/projects/${projectId}/ai${suffix}/tool-calls/${toolCallId}`);
   }
 
   approveAiToolCall(
@@ -910,6 +1350,29 @@ export class OpenTalesClient {
     if (!response.body) return;
 
     await this.readEventStream(response, onEvent);
+  }
+
+  private buildLifecycle(
+    projectId: string,
+    buildRunId: string,
+    action: 'pause' | 'resume' | 'cancel',
+    input: BuildLifecycleInput
+  ): Promise<BuildRun> {
+    return this.request<BuildRun>(`/projects/${projectId}/builds/${buildRunId}/${action}`, {
+      method: 'POST',
+      body: input
+    });
+  }
+
+  private queryString(input: Record<string, unknown>): string {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(input)) {
+      if (value === undefined || value === null) continue;
+      if (Array.isArray(value)) value.forEach((item) => params.append(key, String(item)));
+      else params.set(key, String(value));
+    }
+    const query = params.toString();
+    return query ? `?${query}` : '';
   }
 
   private async readEventStream<T>(response: Response, onEvent: (event: T) => void): Promise<void> {

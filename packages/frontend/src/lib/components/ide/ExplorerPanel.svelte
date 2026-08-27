@@ -4,6 +4,7 @@
     ChevronRight,
     Clipboard,
     Copy,
+    BookOpenText,
     FileText,
     FilePlus,
     FolderOpen,
@@ -71,6 +72,15 @@
   function newChapter() {
     const firstAct = manuscript.acts[0];
     newChapterInAct(firstAct?.id ?? null);
+  }
+
+  function openContinuousManuscript() {
+    void manuscript.openTab({
+      id: 'tab-continuous-manuscript',
+      type: 'manuscript',
+      refId: 'manuscript',
+      title: 'Continuous Manuscript'
+    });
   }
 
   let menuOpen = $state(false);
@@ -186,6 +196,7 @@
 <div class="flex h-full flex-col">
   <PanelHeader title="Manuscript">
     {#snippet actions()}
+      <HeaderButton icon={BookOpenText} label="Read or edit continuously" onclick={openContinuousManuscript} />
       <HeaderButton icon={FolderPlus} label="New act" onclick={newAct} />
       <HeaderButton icon={Plus} label="New chapter" onclick={newChapter} />
     {/snippet}

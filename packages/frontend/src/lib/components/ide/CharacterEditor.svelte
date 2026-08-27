@@ -222,6 +222,7 @@
               </span>
             {/each}
           </div>
+          <label class="mt-3 block"><span class="mb-1 block text-center text-[9px] font-semibold uppercase tracking-wider text-muted-foreground sm:text-left">Aliases <span class="normal-case font-normal tracking-normal">(comma separated)</span></span><input value={character.aliases.join(', ')} oninput={(event) => manuscript.updateCharacter(character.id, { aliases: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} class="h-8 w-full rounded border border-border bg-card px-2 text-xs text-foreground outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30" placeholder="Names, titles, code names…" /></label>
         </div>
       </div>
 
