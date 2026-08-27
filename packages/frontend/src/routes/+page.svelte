@@ -15,7 +15,7 @@
   const ogImagePath = "/og-banner.png";
   // Public canonical site URL used as a fallback during prerender (when
   // there's no real request). Gets overridden client-side from $page.url.
-  const SITE_URL = "https://opentales.lumina.pw";
+  const SITE_URL = "https://tale.yasui.io";
 
   let origin = $derived(
     $page.url.origin && !$page.url.origin.includes("sveltekit-prerender")

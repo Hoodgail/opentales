@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="docs/getting-started.md"><strong>Docs</strong></a> ·
+  <a href="https://tale.yasui.io/guide"><strong>Writer's Guide</strong></a> ·
   <a href="CONTRIBUTING.md"><strong>Contributing</strong></a> ·
   <a href="docs/architecture.md"><strong>Architecture</strong></a> ·
   <a href="docs/ai-system.md"><strong>AI System</strong></a> ·

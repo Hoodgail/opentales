@@ -9,8 +9,12 @@
     // Service worker registration (SvelteKit auto-registers in production
     // builds, but we add an explicit guard so it's clear and safe to
     // remove later if needed).
-    if ('serviceWorker' in navigator && import.meta.env.PROD) {
-      navigator.serviceWorker.register('./service-worker.js', { type: 'module' }).catch(() => {
+    if (
+      'serviceWorker' in navigator &&
+      import.meta.env.PROD &&
+      (window.location.protocol === 'http:' || window.location.protocol === 'https:')
+    ) {
+      navigator.serviceWorker.register('/service-worker.js', { type: 'module' }).catch(() => {
         // Non-fatal — app continues to work without offline support.
       });
     }

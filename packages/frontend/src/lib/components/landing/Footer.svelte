@@ -1,6 +1,11 @@
 <script lang="ts">
   import Logo from '$lib/components/Logo.svelte';
 
+  interface Props {
+    page?: 'home' | 'guide';
+  }
+
+  let { page = 'home' }: Props = $props();
   const year = new Date().getFullYear();
 </script>
 
@@ -18,15 +23,17 @@
       <nav
         class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground"
       >
-        <a href="#features" class="hover:text-foreground">Features</a>
-        <a href="#workflow" class="hover:text-foreground">Workflow</a>
-        <a href="/projects" class="hover:text-foreground">Editor</a>
-        <a
-          href="https://github.com/Hoodgail/opentales/blob/main/docs/getting-started.md"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="hover:text-foreground">Docs</a
-        >
+        {#if page === 'guide'}
+          <a href="/" class="hover:text-foreground">Home</a>
+          <a href="#start" class="hover:text-foreground">Start</a>
+          <a href="#workspace" class="hover:text-foreground">Workspace</a>
+        {:else}
+          <a href="#features" class="hover:text-foreground">Features</a>
+          <a href="#workflow" class="hover:text-foreground">Workflow</a>
+          <a href="#editor" class="hover:text-foreground">Editor</a>
+        {/if}
+        <a href="/guide" class="hover:text-foreground">Guide</a>
+        <a href="/projects" class="hover:text-foreground">Open app</a>
         <a
           href="https://github.com/Hoodgail/opentales/blob/main/CONTRIBUTING.md"
           target="_blank"

@@ -1,5 +1,35 @@
 <script lang="ts">
   import Logo from '$lib/components/Logo.svelte';
+
+  interface Props {
+    page?: 'home' | 'guide';
+  }
+
+  interface NavLink {
+    href: string;
+    label: string;
+    external?: boolean;
+  }
+
+  let { page = 'home' }: Props = $props();
+
+  const links: NavLink[] = $derived(
+    page === 'guide'
+      ? [
+          { href: '#start', label: 'Start' },
+          { href: '#workspace', label: 'Workspace' },
+          { href: '#ai-builds', label: 'AI & builds' },
+          { href: '#finish', label: 'Finish' },
+          { href: '#self-host', label: 'Self-host' }
+        ]
+      : [
+          { href: '/#features', label: 'Features' },
+          { href: '/#workflow', label: 'Workflow' },
+          { href: '/#editor', label: 'Editor' },
+          { href: '/guide', label: 'Guide' },
+          { href: 'https://github.com/Hoodgail/opentales', label: 'GitHub', external: true }
+        ]
+  );
 </script>
 
 <header
@@ -16,36 +46,26 @@
       </span>
     </a>
 
-    <div class="hidden items-center gap-8 md:flex">
-      <a
-        href="#features"
-        class="text-sm text-muted-foreground transition-colors hover:text-foreground"
-      >
-        Features
-      </a>
-      <a
-        href="#workflow"
-        class="text-sm text-muted-foreground transition-colors hover:text-foreground"
-      >
-        Workflow
-      </a>
-      <a
-        href="#editor"
-        class="text-sm text-muted-foreground transition-colors hover:text-foreground"
-      >
-        Editor
-      </a>
-      <a
-        href="https://github.com/Hoodgail/opentales"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="text-sm text-muted-foreground transition-colors hover:text-foreground"
-      >
-        GitHub
-      </a>
+    <div class="hidden items-center gap-7 md:flex">
+      {#each links as link (link.href)}
+        <a
+          href={link.href}
+          target={link.external ? '_blank' : undefined}
+          rel={link.external ? 'noopener noreferrer' : undefined}
+          class="text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          {link.label}
+        </a>
+      {/each}
     </div>
 
     <div class="flex items-center gap-2">
+      <a
+        href={page === 'guide' ? '/' : '/guide'}
+        class="inline-flex items-center rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
+      >
+        {page === 'guide' ? 'Home' : 'Guide'}
+      </a>
       <a
         href="/projects"
         class="hidden items-center rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:inline-flex"
