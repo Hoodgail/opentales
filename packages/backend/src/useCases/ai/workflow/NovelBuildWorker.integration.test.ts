@@ -405,7 +405,7 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
       modelParameters: {},
       workflowVersion: 'novel-build-v1',
       systemPromptVersion: 'layered-v1',
-      skillVersions: { 'novel-build': '1.0.0', 'novel-chapters': '2.0.0' },
+      skillVersions: { 'novel-build': '1.1.0', 'novel-chapters': '2.0.0' },
       toolSchemaVersions: { buildWorkflow: 2 },
       inputs: {},
       retrievedArtifactIds: [],
@@ -464,7 +464,7 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
   it('rejects a no-op revision even when the candidate reports perfect checks and quality', async () => {
     const fixture = await createIsolatedSceneRun(prisma, projectId, userId, `${suffix}-noop`, {
       taskType: 'finalization', assignedAgent: 'reviser', acceptanceCriteria: { finalManuscriptRequired: true },
-      skillVersions: { 'novel-build': '1.0.0', 'novel-finalization': '1.0.0' }, maxAttempts: 1, maxRevisionIterations: 0
+      skillVersions: { 'novel-build': '1.1.0', 'novel-finalization': '1.0.0' }, maxAttempts: 1, maxRevisionIterations: 0
     });
     await resumeRunnableBuilds(prisma, {
       workerId: `noop:${suffix}`, buildRunIds: [fixture.run.id], maxTasksPerSweep: 1,
@@ -483,7 +483,7 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
 
     const lineFixture = await createIsolatedSceneRun(prisma, projectId, userId, `${suffix}-noop-line`, {
       taskType: 'line-edit', assignedAgent: 'reviser', acceptanceCriteria: {},
-      skillVersions: { 'novel-build': '1.0.0', 'novel-line-revision': '1.0.0' }, maxAttempts: 1, maxRevisionIterations: 0
+      skillVersions: { 'novel-build': '1.1.0', 'novel-line-revision': '1.0.0' }, maxAttempts: 1, maxRevisionIterations: 0
     });
     await resumeRunnableBuilds(prisma, {
       workerId: `noop-line:${suffix}`, buildRunIds: [lineFixture.run.id], maxTasksPerSweep: 1,
@@ -584,7 +584,7 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
 
     const judgeFixture = await createIsolatedSceneRun(prisma, projectId, userId, `${suffix}-hung-judge`, {
       taskType: 'critique-scene', assignedAgent: 'critic', acceptanceCriteria: { rubric: 'scene-quality-v1' },
-      skillVersions: { 'novel-build': '1.0.0', 'novel-critic': '2.0.0' }, qualityThreshold: 0.8,
+      skillVersions: { 'novel-build': '1.1.0', 'novel-critic': '2.0.0' }, qualityThreshold: 0.8,
       maxAttempts: 1, maxDurationMs: 1_000
     });
     const judgeStarted = Date.now();
@@ -662,7 +662,7 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
 
     const canonFixture = await createIsolatedSceneRun(prisma, projectId, userId, `${suffix}-canon-compensation`, {
       taskType: 'extract-scene-canon', assignedAgent: 'librarian', acceptanceCriteria: { canonDeltaRequired: true },
-      skillVersions: { 'novel-build': '1.0.0', 'novel-continuity': '1.0.0' }, maxAttempts: 1
+      skillVersions: { 'novel-build': '1.1.0', 'novel-continuity': '1.0.0' }, maxAttempts: 1
     });
     await resumeRunnableBuilds(prisma, {
       workerId: `canon-compensation:${suffix}`, buildRunIds: [canonFixture.run.id], maxTasksPerSweep: 1, modelPricing: fixturePricing,
@@ -696,7 +696,7 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
 
     const canonFixture = await createIsolatedSceneRun(prisma, projectId, userId, `${suffix}-global-canon`, {
       taskType: 'extract-scene-canon', assignedAgent: 'librarian', acceptanceCriteria: { canonDeltaRequired: true },
-      skillVersions: { 'novel-build': '1.0.0', 'novel-continuity': '1.0.0' }, maxAttempts: 1
+      skillVersions: { 'novel-build': '1.1.0', 'novel-continuity': '1.0.0' }, maxAttempts: 1
     });
     await resumeRunnableBuilds(prisma, {
       workerId: `global-canon:${suffix}`, buildRunIds: [canonFixture.run.id], maxTasksPerSweep: 1, modelPricing: fixturePricing,
@@ -853,7 +853,7 @@ async function createIsolatedSceneRun(
       status: 'READY',
       scopeUnitIds: [createdSceneUnit.id],
       assignedAgent,
-      skillVersions: options.skillVersions ?? { 'novel-build': '1.0.0', 'novel-chapters': '2.0.0' },
+      skillVersions: options.skillVersions ?? { 'novel-build': '1.1.0', 'novel-chapters': '2.0.0' },
       acceptanceCriteria: (options.acceptanceCriteria ?? { manuscriptUnitDraftRequired: true }) as Prisma.InputJsonObject,
       executionPolicy: {
         model: 'priced/model', maxInputTokens: 24_000, maxOutputTokens: 1_000, maxToolCalls: 4, maxDurationMs: options.maxDurationMs ?? 10_000,
@@ -935,7 +935,7 @@ async function createBudgetRun(prisma: PrismaClient, projectId: string, userId: 
       phase: 'planning',
       status: 'READY',
       assignedAgent: 'creator',
-      skillVersions: { 'novel-build': '1.0.0', 'novel-intake': '1.0.0' },
+      skillVersions: { 'novel-build': '1.1.0', 'novel-intake': '1.0.0' },
       acceptanceCriteria: { requiredArtifactTypes: ['story-brief'] },
       executionPolicy: { model, maxInputTokens: 1_000, maxOutputTokens: 1_000 },
       maxAttempts: 1,

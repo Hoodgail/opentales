@@ -75,6 +75,16 @@ it('intersects runtime capabilities with the active skill manifest', () => {
   expect(skillScoped.findReferences).toBeDefined();
 });
 
+it('strictly narrows durable worker schemas to the procedural skill tools', () => {
+  const roleScoped = filterToolsForRole(tools, 'creator', null, { primary: false });
+  const skillScoped = filterToolsForSkill(
+    roleScoped,
+    ['applyArtifactBatch', 'reportTaskResult'],
+    { preserveRoleReads: false }
+  );
+  expect(Object.keys(skillScoped)).toEqual(['applyArtifactBatch', 'reportTaskResult']);
+});
+
 it('lets the librarian persist a scoped timeline artifact during planning', () => {
   const contract = taskContractSchema.parse({
     objective: 'Create the timeline artifact', outputs: [{ type: 'timeline', name: 'timeline' }],

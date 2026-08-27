@@ -435,7 +435,7 @@ export const PLANNING_TASK_TEMPLATES: readonly TaskTemplate[] = Object.freeze([
     phase: 'planning-review',
     dependencyKeys: ['narrative-contract', 'research-questions', 'timeline', 'setup-payoff-map', 'finale-plan', 'open-questions'],
     assignedAgent: 'critic',
-    skillVersions: { 'novel-build': '1.0.0', 'novel-critic': '2.0.0' },
+    skillVersions: { 'novel-build': '1.1.0', 'novel-critic': '2.0.0' },
     acceptanceCriteria: { requiresPassingEvaluation: true, rubric: 'complete-book-plan-v1' },
     executionPolicy: { maxIterations: 1, deterministicValidationRequired: true },
     maxAttempts: 2,
@@ -449,7 +449,7 @@ export const PLANNING_TASK_TEMPLATES: readonly TaskTemplate[] = Object.freeze([
     phase: 'planning-review',
     dependencyKeys: ['planning-quality-gate'],
     assignedAgent: 'orchestrator',
-    skillVersions: { 'novel-build': '1.0.0' },
+    skillVersions: { 'novel-build': '1.1.0' },
     acceptanceCriteria: { checkpoint: true },
     executionPolicy: { deterministic: true },
     maxAttempts: 3,
@@ -483,7 +483,7 @@ export function createPlanningTaskTemplates(targetChapterCount: number, targetSc
   });
   const aggregate = (key: string, type: string, dependencies: string[], priority: number): TaskTemplate => ({
     key, type, phase: 'planning', dependencyKeys: dependencies, assignedAgent: 'orchestrator',
-    skillVersions: { 'novel-build': '1.0.0' }, acceptanceCriteria: { deterministicValidationRequired: true },
+    skillVersions: { 'novel-build': '1.1.0' }, acceptanceCriteria: { deterministicValidationRequired: true },
     executionPolicy: { deterministic: true, aggregate: true }, maxAttempts: 3, maxRevisionIterations: 0, priority
   });
   base.push(aggregate('beats', 'aggregate-beats', beatShards.map((task) => task.key), 67));
@@ -497,57 +497,57 @@ export const REVISION_TASK_TEMPLATES: readonly TaskTemplate[] = Object.freeze([
     executionPolicy: { deterministic: true, barrier: true }
   }),
   revisionTask('manuscript-developmental-review', 'manuscript-developmental-review', ['drafting-complete'], 'critic', 90, {
-    skillVersions: { 'novel-build': '1.0.0', 'novel-critic': '2.0.0', 'novel-developmental-revision': '1.0.0' },
+    skillVersions: { 'novel-build': '1.1.0', 'novel-critic': '2.0.0', 'novel-developmental-revision': '1.0.0' },
     acceptanceCriteria: { rubric: 'manuscript-developmental-v1' },
     qualityThreshold: 0.8
   }),
   revisionTask('character-review-pass', 'character-review-pass', ['manuscript-developmental-review'], 'critic', 85, {
-    skillVersions: { 'novel-build': '1.0.0', 'novel-critic': '2.0.0', 'novel-developmental-revision': '1.0.0' },
+    skillVersions: { 'novel-build': '1.1.0', 'novel-critic': '2.0.0', 'novel-developmental-revision': '1.0.0' },
     acceptanceCriteria: { rubric: 'character-continuity-v1' },
     qualityThreshold: 0.8
   }),
   revisionTask('continuity-review-pass', 'continuity-review-pass', ['character-review-pass'], 'critic', 80, {
-    skillVersions: { 'novel-build': '1.0.0', 'novel-critic': '2.0.0', 'novel-continuity': '1.0.0' },
+    skillVersions: { 'novel-build': '1.1.0', 'novel-critic': '2.0.0', 'novel-continuity': '1.0.0' },
     acceptanceCriteria: { deterministicValidationRequired: true, rubric: 'continuity-v1' },
     qualityThreshold: 0.9
   }),
   revisionTask('pacing-review-pass', 'pacing-review-pass', ['continuity-review-pass'], 'critic', 75, {
-    skillVersions: { 'novel-build': '1.0.0', 'novel-critic': '2.0.0', 'novel-developmental-revision': '1.0.0' },
+    skillVersions: { 'novel-build': '1.1.0', 'novel-critic': '2.0.0', 'novel-developmental-revision': '1.0.0' },
     acceptanceCriteria: { rubric: 'pacing-v1' },
     qualityThreshold: 0.8
   }),
   revisionTask('structural-revision', 'structural-revision', ['pacing-review-pass'], 'reviser', 70, {
-    skillVersions: { 'novel-build': '1.0.0', 'novel-chapters': '2.0.0', 'novel-developmental-revision': '1.0.0' },
+    skillVersions: { 'novel-build': '1.1.0', 'novel-chapters': '2.0.0', 'novel-developmental-revision': '1.0.0' },
     maxAttempts: 2,
     maxRevisionIterations: 1,
     acceptanceCriteria: { boundedRevision: true }
   }),
   revisionTask('line-edit', 'line-edit', ['structural-revision'], 'reviser', 60, {
-    skillVersions: { 'novel-build': '1.0.0', 'novel-line-revision': '1.0.0' },
+    skillVersions: { 'novel-build': '1.1.0', 'novel-line-revision': '1.0.0' },
     maxAttempts: 2,
     maxRevisionIterations: 1
   }),
   revisionTask('copy-edit', 'copy-edit', ['line-edit'], 'reviser', 50, {
-    skillVersions: { 'novel-build': '1.0.0', 'novel-copy-edit': '1.0.0' },
+    skillVersions: { 'novel-build': '1.1.0', 'novel-copy-edit': '1.0.0' },
     maxAttempts: 2,
     maxRevisionIterations: 1
   }),
   revisionTask('proof', 'proof', ['copy-edit'], 'critic', 40, {
-    skillVersions: { 'novel-build': '1.0.0', 'novel-critic': '2.0.0', 'novel-finalization': '1.0.0' },
+    skillVersions: { 'novel-build': '1.1.0', 'novel-critic': '2.0.0', 'novel-finalization': '1.0.0' },
     acceptanceCriteria: { deterministicValidationRequired: true, rubric: 'proof-v1' },
     qualityThreshold: 0.95
   }),
   revisionTask('finalization', 'finalization', ['proof'], 'reviser', 30, {
-    skillVersions: { 'novel-build': '1.0.0', 'novel-finalization': '1.0.0' },
+    skillVersions: { 'novel-build': '1.1.0', 'novel-finalization': '1.0.0' },
     acceptanceCriteria: { finalManuscriptRequired: true }
   }),
   revisionTask('export-preparation', 'export-preparation', ['finalization'], 'orchestrator', 20, {
-    skillVersions: { 'novel-build': '1.0.0', 'novel-finalization': '1.0.0' },
+    skillVersions: { 'novel-build': '1.1.0', 'novel-finalization': '1.0.0' },
     acceptanceCriteria: { exportManifestRequired: true, requiredArtifactTypes: ['export-manifest'] },
     executionPolicy: { externalServiceRequired: true }
   }),
   revisionTask('final-checkpoint', 'checkpoint', ['export-preparation'], 'orchestrator', 10, {
-    skillVersions: { 'novel-build': '1.0.0', 'novel-finalization': '1.0.0' },
+    skillVersions: { 'novel-build': '1.1.0', 'novel-finalization': '1.0.0' },
     acceptanceCriteria: { checkpoint: true, final: true },
     executionPolicy: { deterministic: true },
     maxRevisionIterations: 0
@@ -569,7 +569,7 @@ export function createSceneTaskTemplates(sceneKey: string, dependencyCheckpointK
     phase: 'drafting',
     dependencyKeys: dependencies,
     assignedAgent: agent,
-    skillVersions: { 'novel-build': '1.0.0' },
+    skillVersions: { 'novel-build': '1.1.0' },
     acceptanceCriteria: {},
     executionPolicy: { maxIterations: 1 },
     maxAttempts: 3,
@@ -583,40 +583,40 @@ export function createSceneTaskTemplates(sceneKey: string, dependencyCheckpointK
       executionPolicy: { deterministic: true }
     }),
     task('draft', 'draft-scene-unit', [`${prefix}:context`], 'drafter', 90, {
-      skillVersions: { 'novel-build': '1.0.0', 'novel-chapters': '2.0.0' },
+      skillVersions: { 'novel-build': '1.1.0', 'novel-chapters': '2.0.0' },
       acceptanceCriteria: { manuscriptUnitDraftRequired: true }
     }),
     task('canon', 'extract-scene-canon', [`${prefix}:draft`], 'librarian', 80, {
-      skillVersions: { 'novel-build': '1.0.0', 'novel-continuity': '1.0.0' },
+      skillVersions: { 'novel-build': '1.1.0', 'novel-continuity': '1.0.0' },
       acceptanceCriteria: { canonDeltaRequired: true }
     }),
     task('diagnostics', 'run-scene-diagnostics', [`${prefix}:canon`], 'critic', 70, {
-      skillVersions: { 'novel-build': '1.0.0', 'novel-critic': '2.0.0', 'novel-continuity': '1.0.0' },
+      skillVersions: { 'novel-build': '1.1.0', 'novel-critic': '2.0.0', 'novel-continuity': '1.0.0' },
       acceptanceCriteria: { deterministicValidationRequired: true },
       executionPolicy: { deterministic: true }
     }),
     task('critic', 'critique-scene', [`${prefix}:diagnostics`], 'critic', 60, {
-      skillVersions: { 'novel-build': '1.0.0', 'novel-critic': '2.0.0' },
+      skillVersions: { 'novel-build': '1.1.0', 'novel-critic': '2.0.0' },
       acceptanceCriteria: { rubric: 'scene-quality-v1' },
       qualityThreshold: 0.8
     }),
     task('revision', 'revise-scene-unit', [`${prefix}:critic`], 'reviser', 50, {
-      skillVersions: { 'novel-build': '1.0.0', 'novel-chapters': '2.0.0', 'novel-developmental-revision': '1.0.0' },
+      skillVersions: { 'novel-build': '1.1.0', 'novel-chapters': '2.0.0', 'novel-developmental-revision': '1.0.0' },
       acceptanceCriteria: { boundedRevision: true },
       maxAttempts: 2,
       maxRevisionIterations: 1
     }),
     task('reextract-canon', 'extract-scene-canon', [`${prefix}:revision`], 'librarian', 45, {
-      skillVersions: { 'novel-build': '1.0.0', 'novel-continuity': '1.0.0' },
+      skillVersions: { 'novel-build': '1.1.0', 'novel-continuity': '1.0.0' },
       acceptanceCriteria: { canonDeltaRequired: true }
     }),
     task('rerun-diagnostics', 'run-scene-diagnostics', [`${prefix}:reextract-canon`], 'critic', 42, {
-      skillVersions: { 'novel-build': '1.0.0', 'novel-critic': '2.0.0', 'novel-continuity': '1.0.0' },
+      skillVersions: { 'novel-build': '1.1.0', 'novel-critic': '2.0.0', 'novel-continuity': '1.0.0' },
       acceptanceCriteria: { deterministicValidationRequired: true },
       executionPolicy: { deterministic: true }
     }),
     task('quality-gate', 'quality-gate', [`${prefix}:rerun-diagnostics`], 'critic', 40, {
-      skillVersions: { 'novel-build': '1.0.0', 'novel-critic': '2.0.0' },
+      skillVersions: { 'novel-build': '1.1.0', 'novel-critic': '2.0.0' },
       acceptanceCriteria: { requiresPassingEvaluation: true, rubric: 'scene-quality-v1' },
       qualityThreshold: 0.8
     }),
@@ -637,7 +637,7 @@ export function createChapterCompilationTaskTemplates(chapterKey: string, sceneC
       phase: 'drafting',
       dependencyKeys: sceneCheckpointKeys,
       assignedAgent: 'orchestrator',
-      skillVersions: { 'novel-build': '1.0.0', 'novel-finalization': '1.0.0' },
+      skillVersions: { 'novel-build': '1.1.0', 'novel-finalization': '1.0.0' },
       acceptanceCriteria: { compiledChapterRequired: true, requiredArtifactTypes: ['chapter-draft'] },
       executionPolicy: { deterministic: true },
       maxAttempts: 3,
@@ -650,7 +650,7 @@ export function createChapterCompilationTaskTemplates(chapterKey: string, sceneC
       phase: 'drafting',
       dependencyKeys: [`${prefix}:compile`],
       assignedAgent: 'orchestrator',
-      skillVersions: { 'novel-build': '1.0.0' },
+      skillVersions: { 'novel-build': '1.1.0' },
       acceptanceCriteria: { checkpoint: true, compiledChapterRequired: true },
       executionPolicy: { deterministic: true },
       maxAttempts: 3,
@@ -819,11 +819,11 @@ function planningTask(
 }
 
 function planningSkillVersions(types: StoryArtifactType[]): JsonObject {
-  const skills: JsonObject = { 'novel-build': '1.0.0' };
+  const skills: JsonObject = { 'novel-build': '1.1.0' };
   for (const type of types) {
     if (type === 'story-brief' || type === 'open-questions') skills['novel-intake'] = '1.0.0';
     if (type === 'narrative-contract') skills['novel-voice'] = '1.0.0';
-    if (type === 'character-bible' || type === 'relationship-graph') skills['novel-characters'] = '1.0.0';
+    if (type === 'character-bible' || type === 'relationship-graph') skills['novel-characters'] = '1.2.0';
     if (type === 'world-bible') skills['novel-world'] = '1.0.0';
     if (['plot-thread', 'act-architecture', 'chapter-brief'].includes(type)) skills['novel-outline'] = '2.0.0';
     if (type === 'scene-plan') skills['novel-scenes'] = '1.0.0';
@@ -849,7 +849,7 @@ function revisionTask(
     dependencyKeys,
     assignedAgent,
     skillVersions: {
-      'novel-build': '1.0.0',
+      'novel-build': '1.1.0',
       ...(assignedAgent === 'critic' ? { 'novel-critic': '2.0.0' } : {}),
       ...(assignedAgent === 'reviser' ? { 'novel-chapters': '2.0.0' } : {})
     },

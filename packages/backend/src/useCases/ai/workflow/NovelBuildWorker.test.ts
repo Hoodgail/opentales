@@ -11,9 +11,107 @@ import type { BuildModelExecutor, BuildModelExecutorInput } from './NovelBuildWo
 
 process.env.DATABASE_URL ??= 'postgresql://opentales:opentales@127.0.0.1:5432/opentales_test';
 process.env.JWT_SECRET ??= 'unit-test-secret-not-for-production';
-const { NovelBuildWorker, startNovelBuildWorker } = await import('./NovelBuildWorker.js');
+const {
+  NovelBuildWorker,
+  extractWorkerResult,
+  resolveUntouchedBuiltInSkillUpgrades,
+  startNovelBuildWorker
+} = await import('./NovelBuildWorker.js');
 
 describe('durable Novel Build execution contract', () => {
+  it('accepts Terra-compatible reportTaskResult output without provider structured-output mode', () => {
+    const observable = {
+      status: 'complete',
+      decisions: [],
+      artifactIds: ['artifact-1'],
+      evidence: [{ type: 'artifact', id: 'artifact-1', summary: 'Persisted' }],
+      checks: { persisted: true },
+      quality: { schema: 1 },
+      unresolvedQuestions: []
+    };
+    expect(extractWorkerResult([{
+      toolName: 'reportTaskResult',
+      output: { observableResult: observable }
+    }], '')).toEqual(observable);
+    expect(extractWorkerResult([], JSON.stringify(observable))).toEqual(observable);
+    expect(extractWorkerResult([{
+      toolName: 'applyArtifactBatch',
+      output: {
+        ok: true,
+        results: [{ action: 'created', id: 'artifact-1', type: 'story-brief' }]
+      }
+    }], 'Finished.')).toMatchObject({
+      status: 'complete',
+      artifactIds: ['artifact-1'],
+      checks: { persistedToolResult: true }
+    });
+    expect(() => extractWorkerResult([], 'prose only')).toThrow(/reportTaskResult/);
+  });
+
+  it('enforces character batch and manifest cardinality at the fenced tool boundary', async () => {
+    const findMany = vi.fn(async () => Array.from({ length: 9 }, (_, index) => ({ key: `character-${index}` })));
+    const worker = new NovelBuildWorker({
+      storyArtifact: { findMany }
+    } as unknown as PrismaClient, { modelPricing: {} }) as any;
+    const claimed = {
+      run: {
+        id: 'build-1',
+        manifest: { artifactSpecs: [{ type: 'character-bible', minCount: 11, maxCount: 11 }] }
+      },
+      task: { id: 'task-1', type: 'create-character-bibles' }
+    };
+    const operation = (key: string) => ({ action: 'upsert', type: 'character-bible', key });
+
+    await expect(worker.assertTaskToolPolicy(
+      claimed,
+      'applyArtifactBatch',
+      { operations: [operation('a'), operation('b'), operation('c'), operation('d')] }
+    )).rejects.toThrow(/at most 3/);
+    await expect(worker.assertTaskToolPolicy(
+      claimed,
+      'applyArtifactBatch',
+      { operations: [operation('a'), operation('b'), operation('c')] }
+    )).rejects.toThrow(/2 new artifact/);
+    await expect(worker.assertTaskToolPolicy(
+      claimed,
+      'applyArtifactBatch',
+      { operations: [operation('a'), operation('b')] }
+    )).resolves.toBeUndefined();
+  });
+
+
+  it('upgrades only untouched tasks to a newer published built-in skill', () => {
+    const catalog = [{
+      name: 'novel-build',
+      native: true,
+      manifest: { version: '1.1.0' }
+    }] as any;
+    const untouched = {
+      status: 'READY', attempts: 0, startedAt: null, outputArtifactIds: []
+    } as any;
+    expect(resolveUntouchedBuiltInSkillUpgrades(
+      catalog,
+      { 'novel-build': '1.0.0' },
+      untouched
+    )).toEqual({
+      versions: { 'novel-build': '1.1.0' },
+      upgrades: [{ name: 'novel-build', from: '1.0.0', to: '1.1.0' }]
+    });
+    expect(resolveUntouchedBuiltInSkillUpgrades(
+      catalog,
+      { 'novel-build': '1.0.0' },
+      { ...untouched, attempts: 1 }
+    )).toEqual({
+      versions: { 'novel-build': '1.0.0' },
+      upgrades: []
+    });
+    expect(resolveUntouchedBuiltInSkillUpgrades(
+      [{ ...catalog[0], native: false }],
+      { 'novel-build': '1.0.0' },
+      untouched
+    ).upgrades).toEqual([]);
+  });
+
   it('keeps chapter production causal and gates whole-manuscript revision behind every checkpoint', () => {
     const sceneOne = createSceneTaskTemplates('scene-1', ['planning-checkpoint']);
     const sceneTwo = createSceneTaskTemplates('scene-2', ['scene:scene-1:checkpoint']);

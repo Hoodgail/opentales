@@ -106,13 +106,20 @@ export function filterToolsForRole(
   return Object.fromEntries(entries);
 }
 
-export function filterToolsForSkill(tools: AgentToolMap, allowedTools: readonly string[] | null | undefined): AgentToolMap {
+export function filterToolsForSkill(
+  tools: AgentToolMap,
+  allowedTools: readonly string[] | null | undefined,
+  options: { preserveRoleReads?: boolean } = {}
+): AgentToolMap {
   if (!allowedTools?.length) return tools;
   const allowed = new Set(allowedTools);
   // Skill manifests may narrow writes/delegation, but the runtime role owns its
   // safe read surface. Omitting a read from one procedural manifest must not
   // blind a worker to canon/evidence it is otherwise authorized to inspect.
-  return Object.fromEntries(Object.entries(tools).filter(([name]) => STORY_READ_TOOLS.has(name) || allowed.has(name)));
+  const preserveRoleReads = options.preserveRoleReads !== false;
+  return Object.fromEntries(Object.entries(tools).filter(([name]) =>
+    allowed.has(name) || (preserveRoleReads && STORY_READ_TOOLS.has(name))
+  ));
 }
 
 function scopedTool(

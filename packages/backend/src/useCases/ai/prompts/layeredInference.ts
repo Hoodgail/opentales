@@ -131,6 +131,7 @@ function renderOutputLayer(task: TaskContract | null): string {
         quality: 'rubric/check scores without hidden reasoning'
       }
     }),
+    'Persist every required mutation through the assigned fenced tools, then call reportTaskResult exactly once with the persisted artifact IDs and observable checks. Do not substitute a prose summary for that tool call.',
     `Evaluation is bounded to ${task.qualityGate.maxRevisions} revision(s). After that, accept if the gate passes or report/escalate the remaining gap.`
   ].join('\n');
 }

@@ -77,7 +77,7 @@ describeDatabase('durable Novel Build integration', () => {
       'line-edit', 'copy-edit', 'proof', 'finalization', 'export-preparation', 'final-checkpoint'
     ]));
     expect(created.manifest.sourceBrainstormHash).toMatch(/^[a-f0-9]{64}$/);
-    expect(created.tasks.find((task) => task.key === 'story-brief')?.skillVersions).toEqual(expect.objectContaining({ 'novel-build': '1.0.0', 'novel-intake': '1.0.0' }));
+    expect(created.tasks.find((task) => task.key === 'story-brief')?.skillVersions).toEqual(expect.objectContaining({ 'novel-build': '1.1.0', 'novel-intake': '1.0.0' }));
     expect(created.tasks.find((task) => task.key.startsWith('scene-plans:chapter-'))?.skillVersions).toEqual(expect.objectContaining({ 'novel-scenes': '1.0.0' }));
     expect(created.tasks.find((task) => task.key === 'scene-plans')).toMatchObject({ type: 'aggregate-scene-plans', assignedAgent: 'orchestrator' });
     expect(created.tasks.find((task) => task.key === 'continuity-review-pass')?.skillVersions).toEqual(expect.objectContaining({ 'novel-continuity': '1.0.0' }));
@@ -288,7 +288,7 @@ describeDatabase('durable Novel Build integration', () => {
     await story.appendTrace(ownerId, projectId, buildId, {
       taskId: null,
       idempotencyKey: 'integration:trace', attempt: 1, status: 'completed', provider: 'test', model: 'test-model', modelParameters: {},
-      workflowVersion: beforeTrace.workflowVersion, systemPromptVersion: 'test', skillVersions: { 'novel-build': '1.0.0' },
+      workflowVersion: beforeTrace.workflowVersion, systemPromptVersion: 'test', skillVersions: { 'novel-build': '1.1.0' },
       toolSchemaVersions: { build: '1' }, inputs: { artifactId: storyBriefId }, retrievedArtifactIds: [storyBriefId],
       contextTokenCount: 100, toolCalls: [], toolResults: [], outputs: { artifactId: storyBriefId }, validatorResults: { schema: 'pass' },
       inputTokens: 100, outputTokens: 50, costMicros: 1000, latencyMs: 25, retries: 0, completionState: 'done', error: null,

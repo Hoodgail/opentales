@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "novel-build",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Execute a durable novel build by scheduling typed planning, drafting, canon, critique, revision, and checkpoint tasks.",
   "kind": "workflow",
   "inputs": ["story-brief"],
@@ -32,7 +32,6 @@
     "getBuildState",
     "listBuildUnits",
     "readBuildUnit",
-    "task",
     "searchStory",
     "queryCanon",
     "queryTimeline",
@@ -59,8 +58,8 @@
   },
   "rubric": "novel-build-v1",
   "procedure": [
-    "Read the persisted build state and select only dependency-ready work.",
-    "Issue typed task contracts with explicit inputs, outputs, acceptance criteria, scope, model policy, budget, and retry policy.",
+    "Read the persisted build state and execute only the currently leased dependency-ready task.",
+    "Never delegate persisted BuildTasks through the generic task tool; the durable worker owns scheduling, fencing, retries, and checkpoints.",
     "Plan story state before prose: brief, narrative contract, characters, world, threads, acts, chapters, scenes, timeline, and setup/payoff map.",
     "Draft chapters sequentially in causal order from compiler-built context packs.",
     "After each draft, extract canon and state, run diagnostics, request an independent critique, and allow at most the task quality gate's revision count.",

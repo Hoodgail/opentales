@@ -74,6 +74,7 @@ export interface AgentToolPolicy {
   skillAllowedTools?: readonly string[] | null;
   executionLease?: BuildTaskLeaseInput | null;
   approvalMode?: AiAgentApprovalMode;
+  strictSkillTools?: boolean;
 }
 
 export function buildAgentTools(
@@ -134,7 +135,9 @@ export function buildAgentTools(
   const leaseScoped = policy.executionLease
     ? roleScoped
     : Object.fromEntries(Object.entries(roleScoped).filter(([name]) => !['applyBuildUnitPatch', 'compileBuildManuscript', 'reportTaskResult'].includes(name)));
-  const skillScoped = filterToolsForSkill(leaseScoped, policy.skillAllowedTools);
+  const skillScoped = filterToolsForSkill(leaseScoped, policy.skillAllowedTools, {
+    preserveRoleReads: policy.strictSkillTools !== true
+  });
   if (policy.approvalMode !== 'auto') return skillScoped;
   return Object.fromEntries(Object.entries(skillScoped).filter(([name]) => name !== 'askUser'));
 }

@@ -2,9 +2,9 @@
 
 ## Outcome
 
-The attempt failed before the durable Novel Build executed a single task. The run remains recoverable: `story-brief` is still `READY`, all downstream tasks are dependency-blocked, and the build ledger contains no traces, artifacts, task attempts, model tokens, or model cost.
+The original attempt failed before the durable Novel Build executed a single task. After the repairs below, the same build was explicitly resumed against the project’s stored Yasui OpenAI-compatible provider with `gpt-5.6-terra` and is now advancing through the persisted planning graph.
 
-OpenTales now resolves the previously unknown `gpt-5.6-terra` price from models.dev and has replaced the stale error with: **“Pricing for task story-brief is now available from the refreshed models.dev catalog. Resume the build to continue.”** The run remains paused so resuming provider spend is an explicit author action.
+At the verified recovery snapshot, Story Brief, Narrative Contract, eleven Character Bibles, World Bible, Relationship Graph, and Research Questions were `DONE` with current VALIDATED artifacts; Plot Threads was actively leased and running. The workflow remains Plan & Review and will pause at its planning checkpoint rather than silently entering manuscript drafting.
 
 ## Evidence from the failed attempt
 
@@ -44,14 +44,26 @@ The Novel Build instructions now prohibit silently choosing Plan & Review when t
 
 The existing run remains Plan & Review because changing its authorization and spend semantics automatically would exceed the author’s prior approval. Resuming it will continue structured planning. A full unattended manuscript draft should use an explicitly budgeted Autonomous Draft authorization.
 
+### 5. Built-in skill edits were not published as new versions
+
+The initial repair changed `novel-build` instructions while its manifest still declared `1.0.0`, so the worker correctly rejected the changed content hash against pinned provenance. `novel-build@1.1.0` and `novel-characters@1.2.0` are now published versions. Future task templates pin those versions, and an existing task can auto-repin only when it is untouched, belongs to a built-in skill, and the available version is a strict semantic-version upgrade. Started tasks and project overrides remain fail-closed.
+
+### 6. Provider-native structured output and oversized single responses were not portable
+
+Yasui Terra persisted valid artifacts but did not reliably finish with provider-native `Output.object` or `reportTaskResult`. The worker now prefers `reportTaskResult`, can derive an observable candidate from successful persisted `applyArtifactBatch` results, and still runs independent schema/task/cardinality validation before completion.
+
+Durable workers now expose only the active procedural skill’s tools. Character planning uses a concise versioned skill, batches at most three bibles per tool call, reserves a realistic cumulative multi-step budget, and enforces both batch size and exact manifest cardinality inside the fenced tool boundary. This produced exactly eleven validated bibles in four calls (`3+3+3+2`) on one Terra attempt.
+
 ## Recovery state
 
-- Build status: `PAUSED`
-- Build revision: `2`
-- Ready task: `story-brief`
-- Durable task attempts: `0`
-- Durable traces: `0`
-- Persisted story artifacts: `0`
-- Build token/cost usage: `0`
-- Required action: open **Novel Builds**, review the preserved Plan & Review scope, and choose **Resume**.
-
+- Build status: `PLANNING` (worker active)
+- Completed boundaries: `story-brief`, `narrative-contract`, `character-bibles`, `world-bible`, `relationship-graph`, `research-questions`
+- Current artifacts: 1 Story Brief, 1 Narrative Contract, 11 Character Bibles, 1 World Bible, 1 Relationship Graph, 1 Research Questions artifact
+- Published provenance: `novel-build@1.1.0`, `novel-characters@1.2.0`
+- Successful Story Brief trace: 46,122 input / 3,962 output tokens, $0.174735
+- Successful Narrative Contract trace: 83,205 input / 4,347 output tokens, $0.273218
+- Successful exact-count Character Bibles trace: 217,545 input / 10,557 output tokens, $0.702218
+- Successful World Bible trace: 94,636 input / 8,775 output tokens, $0.368215
+- Successful Relationship Graph trace: 82,332 input / 5,560 output tokens, $0.289230
+- Ledger snapshot while Plot Threads was running: 2,015,258 tokens and $6.882923, including the earlier failed compatibility/timeout/cardinality attempts described above
+- Next automatic boundary: finish Plot Threads, then continue dependency-ready planning until Plan & Review pauses at the planning checkpoint

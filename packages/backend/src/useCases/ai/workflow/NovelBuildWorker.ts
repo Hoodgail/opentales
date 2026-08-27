@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { BuildRun, BuildTask, Prisma, PrismaClient } from '@prisma/client';
-import { generateText, Output, stepCountIs, type ToolSet } from 'ai';
+import { generateText, hasToolCall, Output, stepCountIs, type ToolSet } from 'ai';
 import { z } from 'zod';
 import type { JsonValue } from '@opentales/sdk';
 import type { BuildTaskLease } from '@opentales/sdk';
@@ -418,14 +418,55 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       await this.prisma.buildRun.updateMany({ where: { id: run.id, status: 'PAUSED' }, data: { lastError: reason } });
     };
     let pins: SkillProvenancePin[];
+    let upgradedVersions: Record<string, string>;
+    let upgrades: BuiltInSkillUpgrade[];
     try {
       const catalog = await loadAiSkillCatalog(this.prisma, run.projectId);
-      pins = skillProvenancePins(catalog, jsonRecord(task.skillVersions), run.projectId);
+      const resolved = resolveUntouchedBuiltInSkillUpgrades(
+        catalog,
+        jsonRecord(task.skillVersions),
+        task
+      );
+      upgradedVersions = resolved.versions;
+      upgrades = resolved.upgrades;
+      pins = skillProvenancePins(catalog, upgradedVersions, run.projectId);
     } catch (error) {
       await pauseForProvenance(error instanceof Error ? error.message : 'Pinned skill provenance could not be resolved');
       return null;
     }
     const policy = jsonRecord(task.executionPolicy);
+    if (upgrades.length) {
+      const history = Array.isArray(policy.skillUpgradeHistory) ? policy.skillUpgradeHistory : [];
+      const updated = await this.prisma.buildTask.updateMany({
+        where: {
+          id: task.id,
+          buildRunId: run.id,
+          status: 'READY',
+          revision: task.revision,
+          attempts: 0,
+          startedAt: null,
+          outputArtifactIds: { isEmpty: true }
+        },
+        data: {
+          skillVersions: jsonSafe(upgradedVersions) as Prisma.InputJsonValue,
+          executionPolicy: jsonSafe({
+            ...policy,
+            skillProvenance: pins,
+            skillUpgradeHistory: [
+              ...history,
+              {
+                source: 'built-in-publish',
+                upgrades,
+                upgradedAt: new Date().toISOString()
+              }
+            ]
+          }) as Prisma.InputJsonValue,
+          revision: { increment: 1 }
+        }
+      });
+      if (updated.count !== 1) return null;
+      return this.prisma.buildTask.findUniqueOrThrow({ where: { id: task.id } });
+    }
     const existing = Array.isArray(policy.skillProvenance) ? policy.skillProvenance : null;
     if (existing && stableHash(existing) !== stableHash(pins)) {
       const reason = `Pinned skill provenance changed for task ${task.key}; publish a new skill version before rerunning.`;
@@ -472,11 +513,12 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
   private async taskReservation(run: BuildRun, task: BuildTask): Promise<{ tokens: number; costMicros: number }> {
     if (deterministicTask(task)) return { tokens: 0, costMicros: 0 };
     const policy = jsonRecord(task.executionPolicy);
+    const defaults = defaultTaskBudget(task);
     const judgeRequired = typeof jsonRecord(task.acceptanceCriteria).rubric === 'string' || task.qualityThreshold !== null;
-    const inputTokens = numeric(policy.maxInputTokens, 24_000);
-    const outputTokens = numeric(policy.maxOutputTokens, 8_000);
-    const judgeInputTokens = judgeRequired ? numeric(policy.maxInputTokens, 24_000) : 0;
-    const judgeOutputTokens = judgeRequired ? Math.min(4_000, numeric(policy.maxOutputTokens, 8_000)) : 0;
+    const inputTokens = numeric(policy.maxInputTokens, defaults.maxInputTokens);
+    const outputTokens = numeric(policy.maxOutputTokens, defaults.maxOutputTokens);
+    const judgeInputTokens = judgeRequired ? numeric(policy.maxInputTokens, defaults.maxInputTokens) : 0;
+    const judgeOutputTokens = judgeRequired ? Math.min(4_000, numeric(policy.maxOutputTokens, defaults.maxOutputTokens)) : 0;
     const settings = await this.prisma.projectAiSettings.findUnique({ where: { projectId: run.projectId }, select: { model: true } });
     const route = this.modelRoute(task);
     const modelId = route.preferred ?? settings?.model ?? null;
@@ -699,7 +741,9 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       estimatedTokens: pack.estimatedTokens + estimateTokens(brainstormData),
       tokenBudget: contextTokenBudget + estimateTokens(brainstormData)
     };
-    const skillAllowedTools = [...new Set(activeSkills.flatMap((skill) => skill.manifest.allowedTools))];
+    const proceduralSkills = activeSkills.filter((skill) => skill.manifest.kind !== 'workflow');
+    const capabilitySkills = proceduralSkills.length ? proceduralSkills : activeSkills;
+    const skillAllowedTools = [...new Set(capabilitySkills.flatMap((skill) => skill.manifest.allowedTools))];
     const system = [
       renderInferenceLayers({
         role,
@@ -718,6 +762,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const approval = {
       handleApproval: async (toolName: AgentMutatingToolName, input: unknown, execute: () => Promise<unknown>) => {
         assertAuthorizedTool(claimed.run, toolName, input);
+        await this.assertTaskToolPolicy(claimed, toolName, input);
         return execute();
       }
     };
@@ -733,6 +778,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         taskContract: contract,
         primary: false,
         skillAllowedTools,
+        strictSkillTools: true,
         executionLease: {
           taskId: claimed.task.id,
           workerId: this.workerId,
@@ -793,6 +839,50 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       select: { id: true }
     });
     if (!current) throw new Error(`Lease fence rejected stale worker ${this.workerId} for task ${claimed.task.id}`);
+  }
+
+  private async assertTaskToolPolicy(
+    claimed: ClaimedTask,
+    toolName: AgentMutatingToolName,
+    input: unknown
+  ): Promise<void> {
+    if (claimed.task.type !== 'create-character-bibles' || toolName !== 'applyArtifactBatch') return;
+    const operations = Array.isArray(jsonRecord(input).operations)
+      ? jsonRecord(input).operations as unknown[]
+      : [];
+    if (operations.length > 3) {
+      throw new Error('Character-bible batches may contain at most 3 artifact operations');
+    }
+    const specs = Array.isArray(jsonRecord(claimed.run.manifest).artifactSpecs)
+      ? jsonRecord(claimed.run.manifest).artifactSpecs as unknown[]
+      : [];
+    const characterSpec = specs.map(jsonRecord).find((spec) => spec.type === 'character-bible');
+    const maximum = typeof characterSpec?.maxCount === 'number'
+      ? Math.max(1, Math.trunc(characterSpec.maxCount))
+      : 1;
+    const current = await this.prisma.storyArtifact.findMany({
+      where: {
+        buildRunId: claimed.run.id,
+        taskId: claimed.task.id,
+        type: 'CHARACTER_BIBLE',
+        invalidatedAt: null,
+        status: { in: ['DRAFT', 'VALIDATED', 'ACCEPTED'] }
+      },
+      select: { key: true }
+    });
+    const existingKeys = new Set(current.map((artifact) => artifact.key));
+    const newKeys = new Set(
+      operations
+        .map(jsonRecord)
+        .filter((operation) => operation.action === 'upsert' && operation.type === 'character-bible')
+        .map((operation) => typeof operation.key === 'string' ? operation.key : '')
+        .filter((key) => key && !existingKeys.has(key))
+    );
+    if (current.length + newKeys.size > maximum) {
+      throw new Error(
+        `Character-bible manifest allows exactly ${maximum}; ${Math.max(0, maximum - current.length)} new artifact(s) remain`
+      );
+    }
   }
 
   private async finalizeExecution(
@@ -1160,9 +1250,15 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       : null;
     const criterionEntries = Object.entries(acceptance);
     const scopedContinuationRole = ['critic', 'reviser'].includes(role) && claimed.scopeUnitIds.length > 1;
-    const maxToolCalls = numeric(policy.maxToolCalls, scopedContinuationRole ? Math.min(1_000, claimed.scopeUnitIds.length + 32) : 16);
+    const defaults = defaultTaskBudget(claimed.task);
+    const maxToolCalls = numeric(
+      policy.maxToolCalls,
+      scopedContinuationRole ? Math.min(1_000, claimed.scopeUnitIds.length + 32) : defaults.maxToolCalls
+    );
     return taskContractSchema.parse({
-      objective: typeof policy.objective === 'string' ? policy.objective : objectiveForTask(claimed.task, claimed.run.objective),
+      objective: typeof policy.objective === 'string'
+        ? policy.objective
+        : objectiveForTask(claimed.task, claimed.run.objective, claimed.run.manifest),
       dependencies: claimed.task.dependencyIds,
       inputs: inputArtifacts.map((artifact) => ({ type: prismaArtifactType(artifact.type), id: artifact.id })),
       outputs: requiredArtifactTypes.length
@@ -1172,10 +1268,10 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         ? criterionEntries.map(([id, value]) => ({ id, description: criterionDescription(id, value), check: id === 'rubric' ? 'rubric' : 'deterministic' }))
         : [{ id: 'task-complete', description: `${claimed.task.type} completes with persisted evidence.` }],
       budget: {
-        maxInputTokens: numeric(policy.maxInputTokens, 24_000),
-        maxOutputTokens: numeric(policy.maxOutputTokens, 8_000),
+        maxInputTokens: numeric(policy.maxInputTokens, defaults.maxInputTokens),
+        maxOutputTokens: numeric(policy.maxOutputTokens, defaults.maxOutputTokens),
         maxToolCalls,
-        maxDurationMs: numeric(policy.maxDurationMs, 15 * 60_000),
+        maxDurationMs: numeric(policy.maxDurationMs, defaults.maxDurationMs),
         maxCostUsd: typeof policy.maxCostMicros === 'number' ? policy.maxCostMicros / 1_000_000 : undefined
       },
       modelPolicy: {
@@ -1267,6 +1363,22 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         }
       }
     }
+    const artifactSpecs = Array.isArray(jsonRecord(claimed.run.manifest).artifactSpecs)
+      ? jsonRecord(claimed.run.manifest).artifactSpecs as unknown[]
+      : [];
+    for (const rawSpec of artifactSpecs) {
+      const spec = jsonRecord(rawSpec);
+      const type = typeof spec.type === 'string' ? spec.type : '';
+      if (!requiredTypes.includes(type)) continue;
+      const minimum = typeof spec.minCount === 'number' ? Math.max(0, Math.trunc(spec.minCount)) : 0;
+      const maximum = typeof spec.maxCount === 'number' ? Math.max(minimum, Math.trunc(spec.maxCount)) : Number.MAX_SAFE_INTEGER;
+      const count = artifacts.filter((artifact) =>
+        prismaArtifactType(artifact.type) === type &&
+        artifact.taskId === claimed.task.id &&
+        ['VALIDATED', 'ACCEPTED'].includes(artifact.status)
+      ).length;
+      checks[`artifact-count:${type}`] = count >= minimum && count <= maximum;
+    }
     for (const key of requiredKeys) checks[`artifact-key:${key}`] = artifacts.some((artifact) => artifact.key === key && artifact.taskId === claimed.task.id && ['VALIDATED', 'ACCEPTED'].includes(artifact.status));
     if (acceptance.requiresPassingEvaluation === true) {
       // The current task is independently judged after deterministic validation.
@@ -1354,6 +1466,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       && (!runtimeRevisionHeadChangeRequired || Object.entries(checks).some(([name, value]) => ['finalManuscriptRequired', 'boundedRevision', 'runtimeRevisionHeadChanged'].includes(name) && value))
       && (!runtimeCriticEvidenceRequired || checks.runtimeCriticEvidenceRequired === true)
       && !Object.entries(checks).some(([name, value]) => name.startsWith('writing-binding:') && value === false)
+      && !Object.entries(checks).some(([name, value]) => name.startsWith('artifact-count:') && value === false)
       && requiredCheckNames.every((name) => checks[name] === true)
       && !Object.entries(checks).some(([name, value]) => name.startsWith('schema:') && value === false);
     const failed = Object.entries(checks).filter(([, value]) => !value).map(([name]) => name);
@@ -1485,9 +1598,89 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
   }
 }
 
+interface BuiltInSkillUpgrade {
+  name: string;
+  from: string;
+  to: string;
+}
+
+export function resolveUntouchedBuiltInSkillUpgrades(
+  catalog: AiSkillCatalogItem[],
+  versions: Record<string, unknown>,
+  task: Pick<BuildTask, 'status' | 'attempts' | 'startedAt' | 'outputArtifactIds'>
+): { versions: Record<string, string>; upgrades: BuiltInSkillUpgrade[] } {
+  const resolved: Record<string, string> = {};
+  const upgrades: BuiltInSkillUpgrade[] = [];
+  const eligible =
+    task.status === 'READY' &&
+    task.attempts === 0 &&
+    task.startedAt === null &&
+    task.outputArtifactIds.length === 0;
+  for (const [name, rawVersion] of Object.entries(versions)) {
+    if (typeof rawVersion !== 'string') throw new Error(`Pinned skill version for ${name} is invalid`);
+    const skill = catalog.find((candidate) => candidate.name === name);
+    if (
+      eligible &&
+      skill?.native === true &&
+      skill.manifest.version !== rawVersion &&
+      isNewerSemver(skill.manifest.version, rawVersion)
+    ) {
+      resolved[name] = skill.manifest.version;
+      upgrades.push({ name, from: rawVersion, to: skill.manifest.version });
+    } else {
+      resolved[name] = rawVersion;
+    }
+  }
+  return { versions: resolved, upgrades };
+}
+
+function isNewerSemver(candidate: string, current: string): boolean {
+  const parse = (value: string) => {
+    const match = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(value);
+    return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+  };
+  const next = parse(candidate);
+  const previous = parse(current);
+  if (!next || !previous) return false;
+  for (let index = 0; index < 3; index += 1) {
+    if (next[index] !== previous[index]) return next[index]! > previous[index]!;
+  }
+  return false;
+}
+
 function deterministicTask(task: BuildTask): boolean {
   const policy = jsonRecord(task.executionPolicy);
   return policy.deterministic === true || ['checkpoint', 'drafting-complete-barrier', 'export-preparation', 'assemble-chapter-context', 'assemble-scene-context', 'run-chapter-diagnostics', 'run-scene-diagnostics'].includes(task.type);
+}
+
+function defaultTaskBudget(task: BuildTask): {
+  maxInputTokens: number;
+  maxOutputTokens: number;
+  maxToolCalls: number;
+  maxDurationMs: number;
+} {
+  if (task.type === 'create-character-bibles') {
+    return {
+      maxInputTokens: 256_000,
+      maxOutputTokens: 48_000,
+      maxToolCalls: 16,
+      maxDurationMs: 15 * 60_000
+    };
+  }
+  if (task.type === 'create-relationship-graph') {
+    return {
+      maxInputTokens: 320_000,
+      maxOutputTokens: 32_000,
+      maxToolCalls: 12,
+      maxDurationMs: 15 * 60_000
+    };
+  }
+  return {
+    maxInputTokens: 96_000,
+    maxOutputTokens: 12_000,
+    maxToolCalls: 16,
+    maxDurationMs: 15 * 60_000
+  };
 }
 
 function roleForTask(assignedAgent: string): RuntimeRole {
@@ -1501,8 +1694,25 @@ function roleForTask(assignedAgent: string): RuntimeRole {
   return 'creator';
 }
 
-function objectiveForTask(task: BuildTask, buildObjective: string): string {
-  return `Complete durable task ${task.key} (${task.type}) for this build objective: ${buildObjective}. Persist every required structured artifact with status VALIDATED using scoped tools before reporting its ID. Report only observable decisions, artifact IDs, validator evidence, checks, and quality scores.`;
+function objectiveForTask(task: BuildTask, buildObjective: string, manifestValue: Prisma.JsonValue): string {
+  const manifest = jsonRecord(manifestValue);
+  const requiredTypes = stringArray(jsonRecord(task.acceptanceCriteria).requiredArtifactTypes);
+  const cardinality = (Array.isArray(manifest.artifactSpecs) ? manifest.artifactSpecs : [])
+    .map(jsonRecord)
+    .filter((spec) => typeof spec.type === 'string' && requiredTypes.includes(spec.type))
+    .map((spec) => {
+      const minimum = typeof spec.minCount === 'number' ? Math.trunc(spec.minCount) : 0;
+      const maximum = typeof spec.maxCount === 'number' ? Math.trunc(spec.maxCount) : minimum;
+      return `${spec.type}: exactly ${minimum === maximum ? minimum : `${minimum}-${maximum}`}`;
+    });
+  return [
+    `Complete durable task ${task.key} (${task.type}) for this build objective: ${buildObjective}.`,
+    cardinality.length
+      ? `Manifest artifact cardinality is authoritative and overrides conflicting suggestions in input artifacts: ${cardinality.join(', ')}.`
+      : '',
+    'Persist every required structured artifact with status VALIDATED using scoped tools before reporting its ID.',
+    'Report only observable decisions, artifact IDs, validator evidence, checks, and quality scores.'
+  ].filter(Boolean).join(' ');
 }
 
 function outputTypeForTask(task: BuildTask): string {
@@ -1705,8 +1915,7 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
         system: input.system,
         prompt: input.prompt,
         tools: input.tools,
-        stopWhen: stepCountIs(input.stepLimit),
-        output: Output.object({ schema: workerResultSchema }),
+        stopWhen: [hasToolCall('reportTaskResult'), stepCountIs(input.stepLimit)],
         abortSignal: input.abortSignal,
         maxOutputTokens: input.contract.budget.maxOutputTokens
       });
@@ -1716,7 +1925,10 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
       if (actualModelId) usageByModel.push(...normalizeMeasuredUsage(undefined, actualModelId, usage?.inputTokens ?? 0, usage?.outputTokens ?? 0));
       const steps = generation.steps ?? [];
       return {
-        result: workerResultSchema.parse(generation.output),
+        result: extractWorkerResult(
+          steps.flatMap((step) => step.toolResults ?? []),
+          generation.text
+        ),
         inputTokens: cumulativeInputTokens,
         outputTokens: cumulativeOutputTokens,
         toolCalls: steps.flatMap((step) => step.toolCalls ?? []),
@@ -1784,6 +1996,56 @@ function classifyRetry(error: unknown): 'transient' | 'timeout' | 'validation' |
   if (/timeout|timed out|deadline/i.test(message)) return 'timeout';
   if (error instanceof z.ZodError || /schema|validation|invalid output/i.test(message)) return 'validation';
   return 'transient';
+}
+
+export function extractWorkerResult(toolResults: unknown[], text: string): WorkerResult {
+  for (const value of [...toolResults].reverse()) {
+    const result = jsonRecord(value);
+    if (result.toolName !== 'reportTaskResult') continue;
+    const output = jsonRecord(result.output);
+    const parsed = workerResultSchema.safeParse(output.observableResult ?? output.result ?? output);
+    if (parsed.success) return parsed.data;
+  }
+  const candidates = [
+    text.trim(),
+    ...[...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map((match) => match[1]?.trim() ?? '')
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      const parsed = workerResultSchema.safeParse(JSON.parse(candidate));
+      if (parsed.success) return parsed.data;
+    } catch {
+      // Try the next observable candidate.
+    }
+  }
+  const persistedArtifactIds: string[] = [];
+  const persistedEvidence: WorkerResult['evidence'] = [];
+  for (const value of toolResults) {
+    const result = jsonRecord(value);
+    const toolName = typeof result.toolName === 'string' ? result.toolName : '';
+    const output = jsonRecord(result.output);
+    if (toolName !== 'applyArtifactBatch' || output.ok !== true) continue;
+    for (const item of Array.isArray(output.results) ? output.results : []) {
+      const id = jsonRecord(item).id;
+      if (typeof id === 'string') persistedArtifactIds.push(id);
+    }
+    persistedEvidence.push({
+      type: 'persisted-tool-result',
+      summary: `${toolName} completed successfully with independently validated backend output.`
+    });
+  }
+  if (persistedEvidence.length) {
+    return {
+      status: 'complete',
+      decisions: [],
+      artifactIds: [...new Set(persistedArtifactIds)],
+      evidence: persistedEvidence,
+      checks: { persistedToolResult: true },
+      quality: {},
+      unresolvedQuestions: []
+    };
+  }
+  throw new Error('Build task did not call reportTaskResult with a schema-valid observable result');
 }
 
 async function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
@@ -1887,12 +2149,13 @@ function costForMeasuredUsage(pricing: ModelPricingTable, usage: MeasuredModelUs
 
 function traceModelParameters(task: BuildTask, price: ModelPrice | null, model?: string | null, chargedReservedCeiling = false): JsonValue {
   const policy = jsonRecord(task.executionPolicy);
+  const defaults = defaultTaskBudget(task);
   return jsonSafe({
     modelTier: policy.modelTier ?? null,
-    maxInputTokens: policy.maxInputTokens ?? 24_000,
-    maxOutputTokens: policy.maxOutputTokens ?? 8_000,
-    maxToolCalls: policy.maxToolCalls ?? 16,
-    maxDurationMs: policy.maxDurationMs ?? 15 * 60_000,
+    maxInputTokens: policy.maxInputTokens ?? defaults.maxInputTokens,
+    maxOutputTokens: policy.maxOutputTokens ?? defaults.maxOutputTokens,
+    maxToolCalls: policy.maxToolCalls ?? defaults.maxToolCalls,
+    maxDurationMs: policy.maxDurationMs ?? defaults.maxDurationMs,
     fallbackModels: stringArray(policy.fallbackModels),
     retryOn: stringArray(policy.retryOn),
     pricing: price
