@@ -14,11 +14,22 @@ process.env.JWT_SECRET ??= 'unit-test-secret-not-for-production';
 const {
   NovelBuildWorker,
   extractWorkerResult,
+  lookupExecutionModelPrice,
   resolveUntouchedBuiltInSkillUpgrades,
   startNovelBuildWorker
 } = await import('./NovelBuildWorker.js');
 
 describe('durable Novel Build execution contract', () => {
+  it('accounts Codex subscription models at zero without making other providers free', () => {
+    expect(lookupExecutionModelPrice({}, 'CODEX', 'codex/gpt-5.6-terra')).toMatchObject({
+      inputMicrosPerMillion: 0,
+      outputMicrosPerMillion: 0,
+      version: 'codex-oauth-v1'
+    });
+    expect(lookupExecutionModelPrice({}, 'CODEX', 'gpt-5.5-pro')).toBeNull();
+    expect(lookupExecutionModelPrice({}, 'GATEWAY', 'codex/gpt-5.6-terra')).toBeNull();
+  });
+
   it('accepts Terra-compatible reportTaskResult output without provider structured-output mode', () => {
     const observable = {
       status: 'complete',

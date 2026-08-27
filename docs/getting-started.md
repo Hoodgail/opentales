@@ -72,6 +72,8 @@ Open http://localhost:5173 — you'll land on the marketing page. Click **Open t
 
 The seeded project has AI disabled. Enable and configure a provider in Project Settings before running model-backed tasks. You can still inspect the Build, Story Bible, Outline Studio, Search, Problems, continuous manuscript, and Publish surfaces without enabling AI.
 
+For ChatGPT subscription models, first allow device code login in your ChatGPT security settings. Then choose **Codex**, select **Connect with ChatGPT**, open the OpenAI device page, and enter the displayed code. Keep Project Settings open while OpenTales polls for approval. The connected session refreshes automatically; use **Disconnect** and save settings to remove it. GitHub Copilot uses the adjacent GitHub device flow, while OpenAI-compatible providers accept a project API key and optional base URL.
+
 To start a Novel Build, open **Build**, enter the brainstorm and target, choose an autonomy mode, set token/cost limits where appropriate, and review the generated scope. **Plan & Review** is the recommended first run: it pauses after planning and writes prose only to an isolated build manuscript after authorization. See [`novel-build.md`](novel-build.md).
 
 ## 5. (Optional) Run the Electron desktop app

@@ -5,7 +5,7 @@ export type AssetKind = 'image' | 'audio' | 'video' | 'document';
 export type Role = 'OWNER' | 'ADMIN' | 'EDITOR' | 'VIEWER';
 export type CoverOrientation = 'landscape' | 'portrait';
 export type ProjectVisibility = 'private' | 'public';
-export type AiProviderKind = 'gateway' | 'openai-compatible' | 'github-copilot';
+export type AiProviderKind = 'gateway' | 'openai-compatible' | 'github-copilot' | 'codex';
 export type AiRewriteMode = 'tighter' | 'softer' | 'more-visceral' | 'more-lyrical';
 export type ProjectDocKind = 'note' | 'brainstorm' | 'instructions' | 'reference' | 'other';
 export type CollaborationDocumentKind =
@@ -511,6 +511,26 @@ export interface PollGithubCopilotAuthResult {
   message?: string;
 }
 
+export interface StartCodexAuthResult {
+  deviceAuthId: string;
+  userCode: string;
+  verificationUri: string;
+  expiresIn: number;
+  interval: number;
+}
+
+export interface PollCodexAuthInput {
+  deviceAuthId: string;
+  userCode: string;
+}
+
+export interface PollCodexAuthResult {
+  status: 'pending' | 'authorized' | 'failed';
+  interval?: number;
+  settings?: ProjectAiSettings;
+  message?: string;
+}
+
 export interface AiModelCatalogApi {
   id: string;
   url: string | null;
@@ -532,6 +552,7 @@ export interface AiModelCatalogModel {
   api: AiModelCatalogApi;
   cost: AiModelCatalogCost | null;
   context: number | null;
+  maxInput: number | null;
   maxOutput: number | null;
   supportsTools: boolean;
   supportsVision: boolean;

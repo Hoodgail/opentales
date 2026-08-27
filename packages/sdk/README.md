@@ -102,6 +102,13 @@ Important DTOs:
 | `deleteProjectFolder(projectId, folderId)` | `DELETE /projects/:projectId/folders/:folderId` |
 | `updateProjectAsset(projectId, assetId, input)` | `PATCH /projects/:projectId/assets/:assetId` |
 | `getProjectStorage(projectId)` | `GET /projects/:projectId/storage` |
+| `getProjectAiSettings(projectId)` | `GET /projects/:projectId/ai-settings` |
+| `updateProjectAiSettings(projectId, input)` | `PATCH /projects/:projectId/ai-settings` |
+| `startGithubCopilotAuth(projectId)` | `POST /projects/:projectId/ai-settings/github-copilot/auth/start` |
+| `pollGithubCopilotAuth(projectId, input)` | `POST /projects/:projectId/ai-settings/github-copilot/auth/poll` |
+| `startCodexAuth(projectId)` | `POST /projects/:projectId/ai-settings/codex/auth/start` |
+| `pollCodexAuth(projectId, input)` | `POST /projects/:projectId/ai-settings/codex/auth/poll` |
+| `listAiModels(projectId)` | `GET /projects/:projectId/ai/models` |
 | `listProjectAiSkills(projectId)` | `GET /projects/:projectId/ai/skills` |
 | `createProjectAiSkill(projectId, input)` | `POST /projects/:projectId/ai/skills` |
 | `updateProjectAiSkill(projectId, skillId, input)` | `PATCH /projects/:projectId/ai/skills/:skillId` |

@@ -20,6 +20,7 @@
     "prisma:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@ai-sdk/openai": "3.0.98",
     "@ai-sdk/openai-compatible": "^1.0.0",
     "@opentales/sdk": "workspace:*",
     "@prisma/client": "^6.1.0",

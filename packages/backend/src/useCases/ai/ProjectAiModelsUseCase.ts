@@ -5,6 +5,11 @@ import type { PrismaClient } from '@prisma/client';
 import type { AiModelCatalog, AiModelCatalogModel, AiModelCatalogProvider } from '@opentales/sdk';
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
 import { withTimeout } from '../../utils/promiseTimeout.js';
+import {
+  CODEX_API_ENDPOINT,
+  isCodexModelAllowed,
+  usesCodexExtendedLimits
+} from './codexModels.js';
 
 const MODELS_URL = process.env.OPENTALES_MODELS_URL ?? 'https://models.dev/api.json';
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -13,6 +18,7 @@ const LATEST_WINDOW_MS = 183 * 24 * 60 * 60 * 1000;
 const CACHE_PATH = path.join(os.homedir(), '.cache', 'opentales', 'models.json');
 const POPULAR_PROVIDERS = [
   'github-copilot',
+  'codex',
   'openai',
   'anthropic',
   'google',
@@ -85,7 +91,40 @@ function normalizeCatalog(raw: Record<string, unknown>, updatedAt = new Date().t
     .map(([providerId, value]) => normalizeProvider(providerId, value))
     .filter((provider): provider is AiModelCatalogProvider => Boolean(provider));
   markLatestModels(providers);
+  const codex = createCodexCatalogProvider(providers);
+  if (codex) providers.push(codex);
   return { providers: providers.sort(compareProviders), updatedAt, source: 'models.dev' };
+}
+
+export function createCodexCatalogProvider(
+  providers: AiModelCatalogProvider[]
+): AiModelCatalogProvider | null {
+  const openai = providers.find((provider) => provider.id === 'openai');
+  if (!openai) return null;
+  const models = openai.models
+    .filter((model) => isCodexModelAllowed(model.api.id || model.id))
+    .map((model) => {
+      const extendedLimits = usesCodexExtendedLimits(model.api.id || model.id);
+      return {
+        ...model,
+        providerId: 'codex',
+        api: { id: model.api.id || model.id, url: CODEX_API_ENDPOINT, npm: '@ai-sdk/openai' },
+        cost: { input: 0, output: 0 },
+        context: extendedLimits ? 400_000 : model.context,
+        maxInput: extendedLimits ? 272_000 : model.maxInput,
+        maxOutput: extendedLimits ? 128_000 : model.maxOutput,
+        visible: true
+      } satisfies AiModelCatalogModel;
+    });
+  if (!models.length) return null;
+  return {
+    id: 'codex',
+    name: 'Codex (ChatGPT)',
+    api: CODEX_API_ENDPOINT,
+    npm: '@ai-sdk/openai',
+    popular: true,
+    models
+  };
 }
 
 function normalizeProvider(providerId: string, value: unknown): AiModelCatalogProvider | null {
@@ -129,6 +168,7 @@ function normalizeModel(providerId: string, modelId: string, value: unknown): Ai
     },
     cost: cost ? { input: numberValue(cost.input), output: numberValue(cost.output) } : null,
     context: numberValue(value.context) ?? (limit ? numberValue(limit.context) : null),
+    maxInput: numberValue(value.max_input) ?? (limit ? numberValue(limit.input) : null),
     maxOutput: numberValue(value.max_output) ?? (limit ? numberValue(limit.output) : null),
     supportsTools: Boolean(value.tool_call ?? value.tools),
     supportsVision: Boolean(value.vision ?? value.attachment),

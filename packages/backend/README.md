@@ -100,6 +100,13 @@ Project routes require `Authorization: Bearer <token>`.
 | `DELETE` | `/projects/:projectId/folders/:folderId` | Delete a folder subtree |
 | `PATCH` | `/projects/:projectId/assets/:assetId` | Rename or move an asset into/out of folders |
 | `GET` | `/projects/:projectId/storage` | Calculate total project storage usage |
+| `GET` | `/projects/:projectId/ai-settings` | Read project AI provider settings without exposing credentials |
+| `PATCH` | `/projects/:projectId/ai-settings` | Enable AI and select a provider/model |
+| `POST` | `/projects/:projectId/ai-settings/github-copilot/auth/start` | Start GitHub Copilot device authorization |
+| `POST` | `/projects/:projectId/ai-settings/github-copilot/auth/poll` | Poll and persist GitHub Copilot authorization |
+| `POST` | `/projects/:projectId/ai-settings/codex/auth/start` | Start OpenAI Codex device authorization |
+| `POST` | `/projects/:projectId/ai-settings/codex/auth/poll` | Poll and persist an encrypted refreshable Codex session |
+| `GET` | `/projects/:projectId/ai/models` | List the cached models.dev catalog plus subscription-safe Codex models |
 
 AI skill routes under `/projects/:projectId/ai/skills` let project admins list, create, update, and delete project-scoped Agent Skills. Enabled skills are disclosed to agent sessions as a compact catalog and loaded on demand with read-only AI tools.
 

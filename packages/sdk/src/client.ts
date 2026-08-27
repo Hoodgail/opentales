@@ -38,6 +38,8 @@ import type {
   AiOutlineExpansion,
   AiRewriteSuggestion,
   AiToolManifest,
+  PollCodexAuthInput,
+  PollCodexAuthResult,
   PollGithubCopilotAuthInput,
   PollGithubCopilotAuthResult,
   CreateSubmissionInput,
@@ -75,6 +77,7 @@ import type {
   ReplanBuildInput,
   ReplanBuildResult,
   BranchBuildFromCheckpointInput,
+  StartCodexAuthResult,
   StartGithubCopilotAuthResult,
   TrashItem,
   Role,
@@ -1032,6 +1035,26 @@ export class OpenTalesClient {
   ): Promise<PollGithubCopilotAuthResult> {
     return this.request<PollGithubCopilotAuthResult>(
       `/projects/${projectId}/ai-settings/github-copilot/auth/poll`,
+      {
+        method: 'POST',
+        body: input
+      }
+    );
+  }
+
+  startCodexAuth(projectId: string): Promise<StartCodexAuthResult> {
+    return this.request<StartCodexAuthResult>(
+      `/projects/${projectId}/ai-settings/codex/auth/start`,
+      { method: 'POST' }
+    );
+  }
+
+  pollCodexAuth(
+    projectId: string,
+    input: PollCodexAuthInput
+  ): Promise<PollCodexAuthResult> {
+    return this.request<PollCodexAuthResult>(
+      `/projects/${projectId}/ai-settings/codex/auth/poll`,
       {
         method: 'POST',
         body: input

@@ -21,6 +21,7 @@ import {
   type CreateProjectFolderInput,
   type CreateProjectDocInput,
   type PaginatedProjectDocs,
+  type PollCodexAuthResult,
   type PollGithubCopilotAuthResult,
   type ProjectAiSettings,
   type ProjectAiSkill,
@@ -28,6 +29,7 @@ import {
   type ProjectFileTree,
   type ProjectFolder,
   type ProjectDocKind,
+  type StartCodexAuthResult,
   type StartGithubCopilotAuthResult,
   type UpdateProjectAiSkillInput,
   type UpdateProjectAiSettingsInput,
@@ -936,6 +938,32 @@ export function createAiStore() {
     }
   }
 
+  async function startCodexAuth(projectId: string): Promise<StartCodexAuthResult | null> {
+    settingsError = null;
+    try {
+      return await api.startCodexAuth(projectId);
+    } catch (err) {
+      settingsError = err instanceof Error ? err.message : 'Failed to start Codex auth';
+      return null;
+    }
+  }
+
+  async function pollCodexAuth(
+    projectId: string,
+    deviceAuthId: string,
+    userCode: string
+  ): Promise<PollCodexAuthResult | null> {
+    settingsError = null;
+    try {
+      const result = await api.pollCodexAuth(projectId, { deviceAuthId, userCode });
+      if (result.settings) settings = result.settings;
+      return result;
+    } catch (err) {
+      settingsError = err instanceof Error ? err.message : 'Failed to finish Codex auth';
+      return null;
+    }
+  }
+
   async function loadModelCatalog(projectId: string) {
     const generation = ensureProjectContext(projectId);
     modelCatalogLoading = true;
@@ -1281,6 +1309,8 @@ export function createAiStore() {
     loadModelCatalog,
     startGithubCopilotAuth,
     pollGithubCopilotAuth,
+    startCodexAuth,
+    pollCodexAuth,
 
     // skills
     get skills() { return skills; },

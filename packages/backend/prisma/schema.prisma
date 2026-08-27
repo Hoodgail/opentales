@@ -184,6 +184,7 @@ enum AiProviderKind {
   GATEWAY
   OPENAI_COMPATIBLE
   GITHUB_COPILOT
+  CODEX
 }
 
 enum ProjectDocKind {

@@ -14,6 +14,7 @@ import {
 } from '../../novelBuild/schemas.js';
 import { loadAiSkillCatalog, loadAiSkillReferences, type AiSkillCatalogItem } from '../markdownCatalog.js';
 import { loadAiModelForProject } from '../aiModel.js';
+import { isCodexModelAllowed } from '../codexModels.js';
 import { ContextAssembler, estimateTokens } from '../context/ContextAssembler.js';
 import { renderInferenceLayers } from '../prompts/layeredInference.js';
 import { serializeUntrustedData } from '../prompts/untrustedData.js';
@@ -493,15 +494,15 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     if (typeof taskPolicy.maxCostMicros === 'number' && reservation.costMicros > taskPolicy.maxCostMicros) {
       return `Task cost policy paused before ${task.key}: maximum authorized task cost ${reservation.costMicros}µ exceeds task ceiling ${taskPolicy.maxCostMicros}µ.`;
     }
-    const settings = await this.prisma.projectAiSettings.findUnique({ where: { projectId: run.projectId }, select: { model: true } });
+    const settings = await this.prisma.projectAiSettings.findUnique({ where: { projectId: run.projectId }, select: { model: true, providerKind: true } });
     const route = this.modelRoute(task);
     const modelId = route.preferred ?? settings?.model ?? null;
     const candidateModels = uniqueStrings([...(modelId ? [modelId] : []), ...route.fallbacks]);
-    const unknownModel = candidateModels.find((candidate) => !lookupModelPrice(this.modelPricing, candidate));
+    const unknownModel = candidateModels.find((candidate) => !lookupExecutionModelPrice(this.modelPricing, settings?.providerKind, candidate));
     if (!candidateModels.length || unknownModel) return `Cost budget cannot safely authorize task ${task.key}: pricing is unknown for model ${unknownModel ?? modelId ?? '(unconfigured)'}. OpenTales refreshes models.dev automatically; AI_MODEL_PRICING_JSON is available as an explicit sourced/versioned override.`;
     const judgeRequired = typeof jsonRecord(task.acceptanceCriteria).rubric === 'string' || task.qualityThreshold !== null;
     const judgeModelId = judgeRequired ? process.env.AI_JUDGE_MODEL?.trim() || modelId : null;
-    if (judgeRequired && !lookupModelPrice(this.modelPricing, judgeModelId)) return `Cost budget cannot safely authorize task ${task.key}: pricing is unknown for judge model ${judgeModelId ?? '(unconfigured)'}. OpenTales refreshes models.dev automatically; AI_MODEL_PRICING_JSON is available as an explicit sourced/versioned override.`;
+    if (judgeRequired && !lookupExecutionModelPrice(this.modelPricing, settings?.providerKind, judgeModelId)) return `Cost budget cannot safely authorize task ${task.key}: pricing is unknown for judge model ${judgeModelId ?? '(unconfigured)'}. OpenTales refreshes models.dev automatically; AI_MODEL_PRICING_JSON is available as an explicit sourced/versioned override.`;
     if (run.maxCostMicros === null) return null;
     const maximumTaskCost = reservation.costMicros;
     const remaining = Math.max(0, run.maxCostMicros - run.costMicrosUsed);
@@ -519,14 +520,14 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const outputTokens = numeric(policy.maxOutputTokens, defaults.maxOutputTokens);
     const judgeInputTokens = judgeRequired ? numeric(policy.maxInputTokens, defaults.maxInputTokens) : 0;
     const judgeOutputTokens = judgeRequired ? Math.min(4_000, numeric(policy.maxOutputTokens, defaults.maxOutputTokens)) : 0;
-    const settings = await this.prisma.projectAiSettings.findUnique({ where: { projectId: run.projectId }, select: { model: true } });
+    const settings = await this.prisma.projectAiSettings.findUnique({ where: { projectId: run.projectId }, select: { model: true, providerKind: true } });
     const route = this.modelRoute(task);
     const modelId = route.preferred ?? settings?.model ?? null;
     const executionModels = uniqueStrings([...(modelId ? [modelId] : []), ...route.fallbacks]);
     const modelAttempts = Math.min(clamp(numeric(policy.modelMaxAttempts, task.maxAttempts), 1, task.maxAttempts), executionModels.length);
-    const executionPrices = executionModels.slice(0, modelAttempts).map((candidate) => lookupModelPrice(this.modelPricing, candidate)).filter((price): price is ModelPrice => Boolean(price));
+    const executionPrices = executionModels.slice(0, modelAttempts).map((candidate) => lookupExecutionModelPrice(this.modelPricing, settings?.providerKind, candidate)).filter((price): price is ModelPrice => Boolean(price));
     const judgeModelId = judgeRequired ? process.env.AI_JUDGE_MODEL?.trim() || modelId : null;
-    const judgePrice = judgeRequired ? lookupModelPrice(this.modelPricing, judgeModelId) : null;
+    const judgePrice = judgeRequired ? lookupExecutionModelPrice(this.modelPricing, settings?.providerKind, judgeModelId) : null;
     return {
       tokens: (inputTokens + outputTokens) * Math.max(1, modelAttempts) + judgeInputTokens + judgeOutputTokens,
       costMicros: executionPrices.reduce((sum, price) => sum + calculateModelCostMicros(price, inputTokens, outputTokens), 0)
@@ -807,7 +808,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       defaultModelId: projectModel?.model ?? null
     });
     trace.model = generation.modelId ?? trace.model;
-    trace.price = lookupModelPrice(this.modelPricing, trace.model);
+    trace.price = lookupExecutionModelPrice(this.modelPricing, trace.provider, trace.model);
     if (!trace.model || !trace.price) throw attachExecutionUsage(new Error(`Executed model pricing is unknown for ${trace.model ?? '(unconfigured)'}`), generation.inputTokens, generation.outputTokens, trace.model);
     trace.usageByModel = normalizeMeasuredUsage(generation.usageByModel, trace.model, generation.inputTokens, generation.outputTokens);
     const authorizedModels = new Set(uniqueStrings([...(projectModel?.model ? [projectModel.model] : []), ...(contract.modelPolicy.preferred ? [contract.modelPolicy.preferred] : []), ...contract.modelPolicy.fallbacks]));
@@ -939,7 +940,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     await stopHeartbeat();
     const totalInputTokens = execution.trace.usageByModel.reduce((sum, usage) => sum + usage.inputTokens, 0);
     const totalOutputTokens = execution.trace.usageByModel.reduce((sum, usage) => sum + usage.outputTokens, 0);
-    const totalCostMicros = costForMeasuredUsage(this.modelPricing, execution.trace.usageByModel);
+    const totalCostMicros = costForMeasuredUsage(this.modelPricing, execution.trace.usageByModel, execution.trace.provider);
     await this.storyState.finishTrace(requiredUserId(claimed.run), claimed.run.projectId, claimed.run.id, execution.traceId, {
       lease: {
         taskId: claimed.task.id,
@@ -1088,7 +1089,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       throw attachExecutionUsage(error, usage.inputTokens ?? 0, usage.outputTokens ?? 0, usage.modelId ?? judgeModelId, usage.usageByModel);
     }
     const actualJudgeModelId = judged.modelId ?? judgeModelId;
-    if (!actualJudgeModelId || !lookupModelPrice(this.modelPricing, actualJudgeModelId)) {
+    if (!actualJudgeModelId || !lookupExecutionModelPrice(this.modelPricing, settings?.providerKind, actualJudgeModelId)) {
       throw attachExecutionUsage(new Error(`Executed judge model pricing is unknown for ${actualJudgeModelId ?? '(unconfigured)'}`), judged.inputTokens, judged.outputTokens, actualJudgeModelId);
     }
     const judgeUsage = normalizeMeasuredUsage(undefined, actualJudgeModelId, judged.inputTokens, judged.outputTokens)[0];
@@ -1497,7 +1498,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
   private async startTrace(claimed: ClaimedTask, provider: string | null, model: string | null, retrievedArtifactIds: string[], contextTokenCount: number): Promise<PendingTrace> {
     const idempotencyKey = `worker-trace:${claimed.task.id}:${claimed.task.attempts}:${claimed.task.revisionIteration}`;
     const startedAt = new Date();
-    const price = lookupModelPrice(this.modelPricing, model);
+    const price = lookupExecutionModelPrice(this.modelPricing, provider, model);
     const saved = await this.storyState.startTrace(
       requiredUserId(claimed.run),
       claimed.run.projectId,
@@ -1561,7 +1562,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     inputTokens += pessimisticTokenDelta;
     let costMicros: number;
     try {
-      costMicros = costForMeasuredUsage(this.modelPricing, measured);
+      costMicros = costForMeasuredUsage(this.modelPricing, measured, trace.provider);
     } catch {
       // Unknown provider pricing is an execution-contract violation. Charge the
       // full reserved ceiling rather than silently recording a free call; the
@@ -2139,12 +2140,33 @@ function mergeMeasuredUsage(...groups: MeasuredModelUsage[][]): MeasuredModelUsa
   return [...merged.values()];
 }
 
-function costForMeasuredUsage(pricing: ModelPricingTable, usage: MeasuredModelUsage[]): number {
+function costForMeasuredUsage(
+  pricing: ModelPricingTable,
+  usage: MeasuredModelUsage[],
+  provider?: string | null
+): number {
   return usage.reduce((sum, item) => {
-    const price = lookupModelPrice(pricing, item.modelId);
+    const price = lookupExecutionModelPrice(pricing, provider, item.modelId);
     if (!price) throw new Error(`Cannot account model usage because pricing is unknown for ${item.modelId}`);
     return sum + calculateModelCostMicros(price, item.inputTokens, item.outputTokens);
   }, 0);
+}
+
+export function lookupExecutionModelPrice(
+  pricing: ModelPricingTable,
+  provider: string | null | undefined,
+  modelId: string | null | undefined
+): ModelPrice | null {
+  if (provider === 'CODEX') {
+    if (!modelId || !isCodexModelAllowed(modelId)) return null;
+    return {
+      inputMicrosPerMillion: 0,
+      outputMicrosPerMillion: 0,
+      source: 'OpenAI ChatGPT subscription through Codex OAuth',
+      version: 'codex-oauth-v1'
+    };
+  }
+  return lookupModelPrice(pricing, modelId);
 }
 
 function traceModelParameters(task: BuildTask, price: ModelPrice | null, model?: string | null, chargedReservedCeiling = false): JsonValue {

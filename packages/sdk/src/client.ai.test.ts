@@ -3,6 +3,30 @@ import { OpenTalesClient } from './client.js';
 import type { AiAgentTimelinePage } from './types.js';
 
 describe('AI session SDK contracts', () => {
+  it('starts and polls Codex device authorization through scoped project routes', async () => {
+    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => new Response(JSON.stringify(
+      init?.body
+        ? { status: 'pending', interval: 5 }
+        : { deviceAuthId: 'device-1', userCode: 'ABCD', verificationUri: 'https://auth.openai.com/codex/device', expiresIn: 900, interval: 5 }
+    ), { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch;
+    const client = new OpenTalesClient({ baseUrl: 'https://api.test', token: 'token', fetcher });
+
+    await client.startCodexAuth('project-1');
+    await client.pollCodexAuth('project-1', { deviceAuthId: 'device-1', userCode: 'ABCD' });
+
+    expect(fetcher).toHaveBeenNthCalledWith(1,
+      'https://api.test/projects/project-1/ai-settings/codex/auth/start',
+      expect.objectContaining({ method: 'POST' })
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(2,
+      'https://api.test/projects/project-1/ai-settings/codex/auth/poll',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ deviceAuthId: 'device-1', userCode: 'ABCD' })
+      })
+    );
+  });
+
   it('updates a named session execution mode', async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({
       id: 'session-1', projectId: 'project-1', title: 'Session', approvalMode: 'auto'

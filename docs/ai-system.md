@@ -8,7 +8,7 @@ OpenTales AI is an opt-in project assistant for manuscript-aware chat and a dura
 | --- | --- | --- |
 | Backend AI controller | `packages/backend/src/controllers/AiController.ts` | Exposes settings, assistive endpoints, agent sessions, SSE, prompts, cancellation, and approval routes. |
 | Agent session use case | `packages/backend/src/useCases/ai/AiAgentSessionUseCase.ts` | Persists chat state, queues prompts, streams model output, records tool calls, and executes approved mutations. |
-| AI settings use case | `packages/backend/src/useCases/ai/ProjectAiSettingsUseCase.ts` | Stores project-level provider configuration and encrypted BYOK API keys. |
+| AI settings use case | `packages/backend/src/useCases/ai/ProjectAiSettingsUseCase.ts` | Stores project-level provider configuration, encrypted credentials, and provider authorization state. |
 | SDK client | `packages/sdk/src/client.ts` | Provides typed frontend calls for AI settings, assistive endpoints, agent sessions, streams, and approvals. |
 | Frontend AI store | `packages/frontend/src/lib/stores/ai.svelte.ts` | Holds settings, docs, active session, session list, stream state, generated feature results, and errors. |
 | Agent panel | `packages/frontend/src/lib/components/ide/AiAgentPanel.svelte` | Renders chat, session switching, queued prompts, pending approvals, and prompt input. |
@@ -44,14 +44,22 @@ AI must be enabled per project before calls can run. Settings are exposed throug
 ```ts
 client.getProjectAiSettings(projectId)
 client.updateProjectAiSettings(projectId, input)
+client.startGithubCopilotAuth(projectId)
+client.pollGithubCopilotAuth(projectId, input)
+client.startCodexAuth(projectId)
+client.pollCodexAuth(projectId, input)
 ```
 
 Provider modes:
 
 - `gateway`: Uses AI SDK model strings such as `openai/gpt-5.4`; credentials come from backend environment configuration.
 - `openai-compatible`: Uses `@ai-sdk/openai-compatible` with project-level `model`, optional `baseUrl`, and optional encrypted project API key.
+- `github-copilot`: Uses GitHub device authorization and the Copilot bearer-token transport.
+- `codex`: Uses [OpenAI device authorization](https://learn.chatgpt.com/docs/auth#login-on-headless-devices) for ChatGPT subscription access. The backend encrypts the access token, refresh token, expiry, and ChatGPT account routing identifier, refreshes expiring sessions with one deduplicated refresh, and sends Responses API requests to the Codex backend with the required account and residency headers.
 
-The backend does not return raw API keys. It returns whether a key exists. Sending `apiKey: null` clears a stored key, while omitting `apiKey` leaves the existing key unchanged.
+Codex models are derived from the cached models.dev OpenAI catalog and filtered through the subscription allow/deny policy documented in `CODEX.md`. They appear as `codex/<model-id>` in project settings, use the OpenAI Responses provider internally, and are costed at zero for Novel Build reservations because usage is covered by the connected ChatGPT subscription. Public API-key OpenAI usage remains separately priced.
+
+The backend does not return raw API keys or OAuth credentials. It returns whether a credential exists. Sending `apiKey: null` clears a stored key or connected provider session, while omitting `apiKey` leaves the existing credential unchanged. Codex tokens cannot be entered manually; reconnect through the device flow.
 
 ## Agent skills
 
@@ -265,6 +273,7 @@ The frontend displays `ai.sessionError` below the transcript. Approval diff tabs
 
 - AI is disabled by default per project.
 - Provider API keys are encrypted and never returned raw.
+- Codex refreshable OAuth sessions are encrypted at rest, never returned raw, and refreshed only through the fixed OpenAI token endpoint.
 - Read tools only expose project data after authenticated project access checks.
 - Mutating tools require explicit project write permission.
 - The frontend must never execute AI mutations directly. It should always call the approval endpoint.

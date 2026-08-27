@@ -1,12 +1,15 @@
 <script lang="ts">
-  import { ExternalLink, Eye, EyeOff, Key, Loader2, Pencil, Plus, Trash2 } from 'lucide-svelte';
+  import { ExternalLink, Eye, EyeOff, Key, Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-svelte';
   import type { AiModelCatalogModel, AiModelCatalogProvider, AiProviderKind } from '@opentales/sdk';
   import { ai } from '$lib/stores/ai.svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
 
+  const CODEX_POLLING_SAFETY_MARGIN_SECONDS = 3;
+
   const projectId = $derived(manuscript.projectId);
   const settings = $derived(ai.settings);
   const copilotConnected = $derived(Boolean(settings?.providerKind === 'github-copilot' && settings.hasApiKey));
+  const codexConnected = $derived(Boolean(settings?.providerKind === 'codex' && settings.hasApiKey));
   const openAiCompatibleKeyStored = $derived(
     Boolean(settings?.providerKind === 'openai-compatible' && settings.hasApiKey)
   );
@@ -33,6 +36,16 @@
   let copilotConnecting = $state(false);
   let copilotStatus = $state<string | null>(null);
   let copilotPollTimeout: ReturnType<typeof setTimeout> | null = null;
+  let codexAuth = $state<{
+    deviceAuthId: string;
+    userCode: string;
+    verificationUri: string;
+    interval: number;
+    expiresAt: number;
+  } | null>(null);
+  let codexConnecting = $state(false);
+  let codexStatus = $state<string | null>(null);
+  let codexPollTimeout: ReturnType<typeof setTimeout> | null = null;
 
   $effect(() => {
     const pid = projectId;
@@ -61,7 +74,22 @@
   });
 
   $effect(() => {
-    return () => stopCopilotPolling();
+    return () => {
+      stopCopilotPolling();
+      stopCodexPolling();
+    };
+  });
+
+  $effect(() => {
+    const kind = providerKind;
+    if (kind !== 'github-copilot' && (copilotConnecting || copilotAuth)) {
+      stopCopilotPolling();
+      copilotAuth = null;
+    }
+    if (kind !== 'codex' && (codexConnecting || codexAuth)) {
+      stopCodexPolling();
+      codexAuth = null;
+    }
   });
 
   function canEdit(): boolean {
@@ -84,7 +112,7 @@
       input.baseUrl = baseUrl.trim() || null;
     }
 
-    if (providerKind === 'github-copilot') {
+    if (providerKind === 'github-copilot' || providerKind === 'codex') {
       input.baseUrl = null;
     }
 
@@ -95,7 +123,10 @@
       input.apiKey = apiKeyInput.trim();
     }
     // Otherwise omit apiKey to keep existing
-    if (clearKey) stopCopilotPolling();
+    if (clearKey) {
+      stopCopilotPolling();
+      stopCodexPolling();
+    }
 
     try {
       await ai.updateSettings(projectId, input);
@@ -169,6 +200,91 @@
     if (resetStatus) copilotConnecting = false;
   }
 
+  async function connectCodex() {
+    if (!projectId || !canEdit() || codexConnecting) return;
+    stopCodexPolling();
+    codexConnecting = true;
+    codexStatus = null;
+
+    const result = await ai.startCodexAuth(projectId);
+    if (!result) {
+      codexConnecting = false;
+      return;
+    }
+
+    codexAuth = {
+      ...result,
+      expiresAt: Date.now() + result.expiresIn * 1000
+    };
+    codexStatus = `Enter code ${result.userCode} with OpenAI, then keep this panel open.`;
+    scheduleCodexPoll(result.interval);
+  }
+
+  async function pollCodexAuth() {
+    if (!projectId || !codexAuth) return;
+    if (Date.now() >= codexAuth.expiresAt) {
+      codexStatus = 'This Codex code expired. Start a new connection.';
+      codexConnecting = false;
+      codexAuth = null;
+      return;
+    }
+    const result = await ai.pollCodexAuth(projectId, codexAuth.deviceAuthId, codexAuth.userCode);
+    if (!result) {
+      codexConnecting = false;
+      return;
+    }
+
+    if (result.status === 'authorized') {
+      providerKind = 'codex';
+      model = result.settings?.model ?? 'codex/gpt-5.4';
+      clearKey = false;
+      keyDirty = false;
+      apiKeyInput = '';
+      codexStatus = 'Codex connected with your ChatGPT account.';
+      codexConnecting = false;
+      codexAuth = null;
+      return;
+    }
+    if (result.status === 'failed') {
+      codexStatus = result.message ?? 'Codex authorization failed.';
+      codexConnecting = false;
+      return;
+    }
+
+    const interval = result.interval ?? codexAuth.interval;
+    codexAuth = { ...codexAuth, interval };
+    codexStatus = 'Waiting for OpenAI authorization…';
+    scheduleCodexPoll(interval);
+  }
+
+  function scheduleCodexPoll(intervalSeconds: number) {
+    stopCodexPolling(false);
+    codexPollTimeout = setTimeout(() => {
+      void pollCodexAuth();
+    }, Math.max(1, intervalSeconds + CODEX_POLLING_SAFETY_MARGIN_SECONDS) * 1000);
+  }
+
+  function stopCodexPolling(resetStatus = true) {
+    if (codexPollTimeout) clearTimeout(codexPollTimeout);
+    codexPollTimeout = null;
+    if (resetStatus) codexConnecting = false;
+  }
+
+  function selectProviderKind(next: AiProviderKind) {
+    if (!canEdit() || next === providerKind) return;
+    providerKind = next;
+    model = next === 'gateway'
+      ? 'openai/gpt-5.4'
+      : next === 'github-copilot'
+        ? 'gpt-5'
+        : next === 'codex'
+          ? 'codex/gpt-5.4'
+          : 'gpt-5.4';
+    clearKey = false;
+    keyDirty = false;
+    apiKeyInput = '';
+  }
+
   function providerModelId(provider: AiModelCatalogProvider, item: AiModelCatalogModel): string {
     return provider.id === 'github-copilot' || provider.id === 'openai' ? item.id : `${provider.id}/${item.id}`;
   }
@@ -177,14 +293,16 @@
     if (!canEdit()) return;
     model = providerModelId(provider, item);
     if (provider.id === 'github-copilot') providerKind = 'github-copilot';
+    else if (provider.id === 'codex') providerKind = 'codex';
     else if (provider.id === 'openai') providerKind = 'openai-compatible';
     else providerKind = 'gateway';
   }
 
   function providerVisibleForCurrentKind(provider: AiModelCatalogProvider): boolean {
     if (providerKind === 'github-copilot') return provider.id === 'github-copilot';
+    if (providerKind === 'codex') return provider.id === 'codex';
     if (providerKind === 'openai-compatible') return provider.id === 'openai';
-    return provider.id !== 'github-copilot';
+    return provider.id !== 'github-copilot' && provider.id !== 'codex';
   }
 
   function filteredModels(provider: AiModelCatalogProvider): AiModelCatalogModel[] {
@@ -283,39 +401,54 @@
           <span class="mb-1 block text-[10px] uppercase tracking-wide text-muted-foreground">
             Provider
           </span>
-          <div class="flex overflow-hidden rounded-md border border-border text-[10px]">
+          <div class="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border text-[10px]">
             <button
               type="button"
-              onclick={() => (providerKind = 'gateway')}
+              onclick={() => selectProviderKind('gateway')}
+              aria-pressed={providerKind === 'gateway'}
               disabled={!canEdit()}
-              class={'flex-1 px-2 py-1.5 ' +
+              class={'px-2 py-1.5 ' +
                 (providerKind === 'gateway'
                   ? 'bg-accent text-accent-foreground'
-                  : 'text-muted-foreground hover:bg-muted')}
+                  : 'bg-background text-muted-foreground hover:bg-muted')}
             >
               Gateway
             </button>
             <button
               type="button"
-              onclick={() => (providerKind = 'openai-compatible')}
+              onclick={() => selectProviderKind('openai-compatible')}
+              aria-pressed={providerKind === 'openai-compatible'}
               disabled={!canEdit()}
-              class={'flex-1 px-2 py-1.5 ' +
+              class={'px-2 py-1.5 ' +
                 (providerKind === 'openai-compatible'
                   ? 'bg-accent text-accent-foreground'
-                  : 'text-muted-foreground hover:bg-muted')}
+                  : 'bg-background text-muted-foreground hover:bg-muted')}
             >
               OpenAI Compatible
             </button>
             <button
               type="button"
-              onclick={() => (providerKind = 'github-copilot')}
+              onclick={() => selectProviderKind('github-copilot')}
+              aria-pressed={providerKind === 'github-copilot'}
               disabled={!canEdit()}
-              class={'flex-1 px-2 py-1.5 ' +
+              class={'px-2 py-1.5 ' +
                 (providerKind === 'github-copilot'
                   ? 'bg-accent text-accent-foreground'
-                  : 'text-muted-foreground hover:bg-muted')}
+                  : 'bg-background text-muted-foreground hover:bg-muted')}
             >
               Copilot
+            </button>
+            <button
+              type="button"
+              onclick={() => selectProviderKind('codex')}
+              aria-pressed={providerKind === 'codex'}
+              disabled={!canEdit()}
+              class={'px-2 py-1.5 ' +
+                (providerKind === 'codex'
+                  ? 'bg-accent text-accent-foreground'
+                  : 'bg-background text-muted-foreground hover:bg-muted')}
+            >
+              Codex
             </button>
           </div>
         </div>
@@ -329,7 +462,7 @@
             type="text"
             bind:value={model}
             disabled={!canEdit()}
-            placeholder={providerKind === 'gateway' ? 'openai/gpt-5.4' : providerKind === 'github-copilot' ? 'gpt-5' : 'gpt-4o'}
+            placeholder={providerKind === 'gateway' ? 'openai/gpt-5.4' : providerKind === 'github-copilot' ? 'gpt-5' : providerKind === 'codex' ? 'codex/gpt-5.4' : 'gpt-4o'}
             class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-foreground outline-none focus:border-accent disabled:opacity-60"
           />
           <div class="mt-2 rounded-md border border-border bg-card/30 p-2">
@@ -384,6 +517,7 @@
                             <span class="mt-0.5 block truncate text-[10px] text-muted-foreground">
                               {providerModelId(provider, item)}
                               {#if item.context} · {Math.round(item.context / 1000)}k context{/if}
+                              {#if item.maxInput && item.maxInput !== item.context} · {Math.round(item.maxInput / 1000)}k max input{/if}
                               {#if formatCost(item.cost?.input)} · in {formatCost(item.cost?.input)}{/if}
                               {#if formatCost(item.cost?.output)} / out {formatCost(item.cost?.output)}{/if}
                               {#if item.supportsVision} · vision{/if}
@@ -461,6 +595,74 @@
             {/if}
             {#if copilotStatus}
               <span class="mt-1 block text-[10px] text-muted-foreground">{copilotStatus}</span>
+            {/if}
+          </div>
+        {/if}
+
+        {#if providerKind === 'codex'}
+          <div class="rounded-md border border-border bg-card/40 p-2 text-[11px]">
+            <div class="mb-2 flex items-center gap-1.5 font-medium text-foreground">
+              <Sparkles class="size-3.5" /> Codex with ChatGPT
+            </div>
+            <p class="text-muted-foreground">
+              Connect your ChatGPT subscription with OpenAI device authorization. OpenTales encrypts the refreshable session and sends model requests through the Codex Responses endpoint.
+            </p>
+            <p class="mt-1 text-[10px] text-muted-foreground">
+              Device code login must be allowed in your ChatGPT security settings.
+            </p>
+            <div class="mt-2 flex items-center gap-2">
+              {#if codexConnected && !codexConnecting && !clearKey}
+                <span class="flex items-center gap-1 text-emerald-400">
+                  <Key class="size-3" /> Connected
+                </span>
+              {/if}
+              {#if canEdit()}
+                <button
+                  type="button"
+                  onclick={connectCodex}
+                  disabled={codexConnecting}
+                  class="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-[10px] hover:bg-muted disabled:opacity-60"
+                >
+                  {#if codexConnecting}<Loader2 class="size-3 animate-spin" />{/if}
+                  {codexConnected ? 'Reconnect' : 'Connect with ChatGPT'}
+                </button>
+                {#if codexConnected}
+                  <button
+                    type="button"
+                    onclick={() => {
+                      clearKey = true;
+                      stopCodexPolling();
+                    }}
+                    class="rounded border border-destructive/40 px-2 py-1 text-[10px] text-destructive hover:bg-destructive/10"
+                  >
+                    Disconnect
+                  </button>
+                {/if}
+              {/if}
+            </div>
+
+            {#if codexAuth}
+              <div class="mt-2 rounded border border-accent/40 border-l-2 border-l-accent bg-background p-2">
+                <div class="text-[10px] uppercase tracking-wide text-muted-foreground">OpenAI code</div>
+                <div class="mt-1 font-mono text-lg tracking-[0.16em] text-foreground" aria-label={`OpenAI device code ${codexAuth.userCode}`}>
+                  {codexAuth.userCode}
+                </div>
+                <a
+                  href={codexAuth.verificationUri}
+                  target="_blank"
+                  rel="noreferrer"
+                  class="mt-1 inline-flex items-center gap-1 text-[10px] text-accent hover:underline"
+                >
+                  Open OpenAI device page <ExternalLink class="size-3" />
+                </a>
+              </div>
+            {/if}
+
+            {#if clearKey}
+              <span class="mt-1 block text-[10px] text-amber-400">Codex will be disconnected on save.</span>
+            {/if}
+            {#if codexStatus}
+              <span class="mt-1 block text-[10px] text-muted-foreground" role="status" aria-live="polite">{codexStatus}</span>
             {/if}
           </div>
         {/if}

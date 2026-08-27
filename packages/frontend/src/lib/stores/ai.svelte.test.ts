@@ -67,6 +67,33 @@ describe("AI session store lifecycle", () => {
     localStorage.clear();
   });
 
+  it("runs Codex device auth and applies the connected project settings", async () => {
+    vi.spyOn(OpenTalesClient.prototype, "startCodexAuth").mockResolvedValue({
+      deviceAuthId: "device-1",
+      userCode: "ABCD",
+      verificationUri: "https://auth.openai.com/codex/device",
+      expiresIn: 900,
+      interval: 5,
+    });
+    vi.spyOn(OpenTalesClient.prototype, "pollCodexAuth").mockResolvedValue({
+      status: "authorized",
+      settings: {
+        projectId: "project-1",
+        enabled: true,
+        providerKind: "codex",
+        model: "codex/gpt-5.4",
+        baseUrl: null,
+        hasApiKey: true,
+        updatedAt: now,
+      },
+    });
+    const store = createAiStore();
+
+    await expect(store.startCodexAuth("project-1")).resolves.toMatchObject({ userCode: "ABCD" });
+    await expect(store.pollCodexAuth("project-1", "device-1", "ABCD")).resolves.toMatchObject({ status: "authorized" });
+    expect(store.settings).toMatchObject({ providerKind: "codex", model: "codex/gpt-5.4", hasApiKey: true });
+  });
+
   it("drops stale project responses and clears the previous transcript immediately", async () => {
     const projectA = deferred<AiAgentSessionSummary[]>();
     vi.spyOn(OpenTalesClient.prototype, "listAiAgentSessions").mockImplementation(

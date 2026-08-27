@@ -1,8 +1,11 @@
 import type { PrismaClient } from '@prisma/client';
+import { createOpenAI } from '@ai-sdk/openai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { generateText } from 'ai';
 import { HttpError } from '../../http/HttpError.js';
 import { decryptSecret } from '../../utils/secretBox.js';
+import { bareCodexModelId, isCodexModelAllowed } from './codexModels.js';
+import { createCodexFetch } from './codexProvider.js';
 
 export type AiModel = Parameters<typeof generateText>[0]['model'];
 
@@ -32,6 +35,16 @@ export async function loadAiModelForProject(
       fetch: copilotFetch(token)
     } as Parameters<typeof createOpenAICompatible>[0] & { fetch: typeof fetch });
     return provider(model);
+  }
+  if (settings.providerKind === 'CODEX') {
+    if (!settings.apiKey) throw new HttpError(400, 'Codex is not connected for this project');
+    if (!isCodexModelAllowed(model)) throw new HttpError(400, 'Model is not available through Codex');
+    const provider = createOpenAI({
+      name: 'codex',
+      apiKey: 'codex-oauth',
+      fetch: createCodexFetch(prisma, projectId)
+    });
+    return provider.responses(bareCodexModelId(model));
   }
   return model;
 }

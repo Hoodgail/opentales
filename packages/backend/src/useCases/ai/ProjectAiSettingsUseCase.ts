@@ -1,7 +1,9 @@
 import type { AiProviderKind, PrismaClient } from '@prisma/client';
 import type {
+  PollCodexAuthResult,
   PollGithubCopilotAuthResult,
   ProjectAiSettings,
+  StartCodexAuthResult,
   StartGithubCopilotAuthResult,
   UpdateProjectAiSettingsInput
 } from '@opentales/sdk';
@@ -10,6 +12,16 @@ import { ProjectAccessRepository } from '../../repositories/ProjectAccessReposit
 import { withTimeout } from '../../utils/promiseTimeout.js';
 import { encryptSecret } from '../../utils/secretBox.js';
 import { defaultProjectAiSettings, toProjectAiSettings } from './aiMapper.js';
+import {
+  encryptedCodexCredentials,
+  pollCodexDeviceAuthorization,
+  startCodexDeviceAuthorization
+} from './codexProvider.js';
+import {
+  canonicalCodexModelId,
+  DEFAULT_CODEX_MODEL,
+  isCodexModelAllowed
+} from './codexModels.js';
 
 const GITHUB_COPILOT_CLIENT_ID = 'Ov23li8tweQw6odWQebz';
 const GITHUB_DEVICE_CODE_URL = 'https://github.com/login/device/code';
@@ -17,7 +29,8 @@ const GITHUB_ACCESS_TOKEN_URL = 'https://github.com/login/oauth/access_token';
 const PROVIDER_KIND: Record<string, AiProviderKind> = {
   gateway: 'GATEWAY',
   'openai-compatible': 'OPENAI_COMPATIBLE',
-  'github-copilot': 'GITHUB_COPILOT'
+  'github-copilot': 'GITHUB_COPILOT',
+  codex: 'CODEX'
 };
 const AI_SETTINGS_DB_TIMEOUT_MS = 10_000;
 
@@ -91,6 +104,22 @@ export class ProjectAiSettingsUseCase {
       AI_SETTINGS_DB_TIMEOUT_MS,
       'Timed out while loading AI settings'
     );
+    const effectiveProvider = data.providerKind ?? existing?.providerKind ?? 'GATEWAY';
+    if (effectiveProvider === 'CODEX') {
+      if (typeof input.apiKey === 'string') {
+        throw new HttpError(400, 'Use the Codex connection flow instead of entering a token manually');
+      }
+      if (input.baseUrl?.trim()) {
+        throw new HttpError(400, 'Codex uses the fixed OpenAI Codex endpoint');
+      }
+      data.baseUrl = null;
+      if (data.model !== undefined) {
+        if (!isCodexModelAllowed(data.model)) throw new HttpError(400, 'Model is not available through Codex');
+        data.model = canonicalCodexModelId(data.model);
+      } else if (data.providerKind === 'CODEX' && existing?.providerKind !== 'CODEX') {
+        data.model = DEFAULT_CODEX_MODEL;
+      }
+    }
     if (data.providerKind && existing?.providerKind && existing.providerKind !== data.providerKind && input.apiKey === undefined) {
       data.apiKey = null;
     }
@@ -157,6 +186,71 @@ export class ProjectAiSettingsUseCase {
       expiresIn: data.expires_in ?? 900,
       interval: data.interval ?? 5
     };
+  }
+
+  async startCodexAuth(userId: string, projectId: string): Promise<StartCodexAuthResult> {
+    await withTimeout(
+      this.access.assertPermission(userId, projectId, 'project:admin'),
+      AI_SETTINGS_DB_TIMEOUT_MS,
+      'Timed out while checking project permissions'
+    );
+    return startCodexDeviceAuthorization();
+  }
+
+  async pollCodexAuth(
+    userId: string,
+    projectId: string,
+    deviceAuthId: string,
+    userCode: string
+  ): Promise<PollCodexAuthResult> {
+    await withTimeout(
+      this.access.assertPermission(userId, projectId, 'project:admin'),
+      AI_SETTINGS_DB_TIMEOUT_MS,
+      'Timed out while checking project permissions'
+    );
+    const normalizedDeviceAuthId = deviceAuthId.trim();
+    const normalizedUserCode = userCode.trim();
+    if (!normalizedDeviceAuthId) throw new HttpError(400, 'deviceAuthId is required');
+    if (!normalizedUserCode) throw new HttpError(400, 'userCode is required');
+
+    const result = await pollCodexDeviceAuthorization(normalizedDeviceAuthId, normalizedUserCode);
+    if (result.status === 'pending') return result;
+    if (result.status === 'failed') return result;
+
+    const existing = await withTimeout(
+      this.prisma.projectAiSettings.findUnique({
+        where: { projectId },
+        select: { providerKind: true, model: true }
+      }),
+      AI_SETTINGS_DB_TIMEOUT_MS,
+      'Timed out while loading AI settings'
+    );
+    const selectedModel = existing?.providerKind === 'CODEX' && isCodexModelAllowed(existing.model)
+      ? canonicalCodexModelId(existing.model)
+      : DEFAULT_CODEX_MODEL;
+
+    const settings = await withTimeout(
+      this.prisma.projectAiSettings.upsert({
+        where: { projectId },
+        create: {
+          projectId,
+          enabled: false,
+          providerKind: 'CODEX',
+          model: selectedModel,
+          baseUrl: null,
+          apiKey: encryptedCodexCredentials(result.credentials)
+        },
+        update: {
+          providerKind: 'CODEX',
+          model: selectedModel,
+          baseUrl: null,
+          apiKey: encryptedCodexCredentials(result.credentials)
+        }
+      }),
+      AI_SETTINGS_DB_TIMEOUT_MS,
+      'Timed out while saving Codex credentials'
+    );
+    return { status: 'authorized', settings: toProjectAiSettings(settings) };
   }
 
   async pollGithubCopilotAuth(

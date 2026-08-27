@@ -243,6 +243,23 @@ export class AiController {
     );
   };
 
+  startCodexAuth = async (req: Request, res: Response) => {
+    res.json(await this.settingsUseCase.startCodexAuth(this.userId(req), req.params.projectId));
+  };
+
+  pollCodexAuth = async (req: Request, res: Response) => {
+    const deviceAuthId = typeof req.body?.deviceAuthId === 'string' ? req.body.deviceAuthId : '';
+    const userCode = typeof req.body?.userCode === 'string' ? req.body.userCode : '';
+    res.json(
+      await this.settingsUseCase.pollCodexAuth(
+        this.userId(req),
+        req.params.projectId,
+        deviceAuthId,
+        userCode
+      )
+    );
+  };
+
   answerQuestion = async (req: Request, res: Response) => {
     res.json(
       await this.agentSessionUseCase.answerQuestion(
