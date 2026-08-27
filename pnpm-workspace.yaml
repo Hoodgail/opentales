@@ -1,2 +1,8 @@
 packages:
   - "packages/*"
+allowBuilds:
+  '@prisma/client': true
+  '@prisma/engines': true
+  electron: true
+  esbuild: true
+  prisma: true
