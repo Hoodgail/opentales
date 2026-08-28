@@ -1,6 +1,13 @@
 import { defineConfig } from 'vitest/config';
 
 const databaseCoverageEnabled = Boolean(process.env.AI_WORKER_TEST_DATABASE_URL && process.env.NOVEL_BUILD_TEST_DATABASE_URL);
+const databaseIntegrationEnabled = Boolean(
+  process.env.AI_WORKER_TEST_DATABASE_URL
+  || process.env.NOVEL_BUILD_TEST_DATABASE_URL
+  || process.env.EXPORT_IMPORT_TEST_DATABASE_URL
+  || process.env.REVISION_TEST_DATABASE_URL
+  || process.env.RENAME_REFACTOR_TEST_DATABASE_URL
+);
 const databaseCriticalFiles = [
   'src/useCases/ai/workflow/NovelBuildWorker.ts',
   'src/useCases/novelBuild/NovelBuildUseCase.ts',
@@ -18,6 +25,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // CI points the PostgreSQL integration suites at one migrated database.
+    // Run those files sequentially so Serializable/RepeatableRead predicate
+    // locks from unrelated fixtures cannot create schedule-dependent failures.
+    fileParallelism: !databaseIntegrationEnabled,
     restoreMocks: true,
     coverage: {
       provider: 'v8',

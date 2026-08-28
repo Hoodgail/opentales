@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 const databaseUrl = process.env.REVISION_TEST_DATABASE_URL;
 process.env.DATABASE_URL ??= databaseUrl ?? 'postgresql://opentales:opentales@127.0.0.1:55432/opentales_test?schema=public';
 process.env.JWT_SECRET ??= 'revision-integration-secret';
@@ -11,8 +11,10 @@ const integration = describe.runIf(Boolean(databaseUrl));
 integration('named snapshots and writing annotations PostgreSQL integration', () => {
   let prisma: PrismaClient; let snapshots: InstanceType<typeof NamedSnapshotUseCase>; let annotations: InstanceType<typeof WritingAnnotationUseCase>;
   let userId: string; let outsiderId: string; let orgId: string; let projectId: string; let chapterId: string; let sceneId: string;
-  beforeAll(async () => {
+  beforeAll(() => {
     prisma = new PrismaClient({ datasources: { db: { url: databaseUrl! } } }); snapshots = new NamedSnapshotUseCase(prisma); annotations = new WritingAnnotationUseCase(prisma);
+  });
+  beforeEach(async () => {
     const suffix = randomUUID(); userId = `revision-user-${suffix}`; outsiderId = `revision-outsider-${suffix}`; orgId = `revision-org-${suffix}`; projectId = `revision-project-${suffix}`;
     await prisma.user.createMany({ data: [{ id: userId, username: userId, email: `${userId}@test.dev`, passwordHash: 'x' }, { id: outsiderId, username: outsiderId, email: `${outsiderId}@test.dev`, passwordHash: 'x' }] });
     await prisma.org.create({ data: { id: orgId, slug: orgId, name: 'Revision integration' } }); await prisma.membership.create({ data: { orgId, userId, role: 'OWNER' } });
@@ -20,7 +22,8 @@ integration('named snapshots and writing annotations PostgreSQL integration', ()
     const project = await new CreateChapterUseCase(prisma).execute(userId, projectId, { title: 'Chapter One', content: 'Chapter original.' }); chapterId = project.chapters[0].id;
     sceneId = (await new SceneUseCase(prisma).create(userId, projectId, chapterId, { title: 'Gate', content: 'The old gate opens.', goal: 'Enter safely', tension: 0.4 })).id;
   });
-  afterAll(async () => { if (!prisma) return; await prisma.org.deleteMany({ where: { id: orgId } }); await prisma.user.deleteMany({ where: { id: { in: [userId, outsiderId] } } }); await prisma.$disconnect(); });
+  afterEach(async () => { await prisma.org.deleteMany({ where: { id: orgId } }); await prisma.user.deleteMany({ where: { id: { in: [userId, outsiderId] } } }); });
+  afterAll(async () => { await prisma.$disconnect(); });
 
   it('round-trips named snapshots, semantic/prose diff, append-only restore and branches with isolation', async () => {
     const snapshot = await snapshots.create(userId, projectId, { idempotencyKey: 'snapshot:create', label: 'Before gate edit', message: 'Stable point', scope: 'chapter', chapterId });

@@ -7,6 +7,7 @@ import type {
 import { HttpError } from '../../http/HttpError.js';
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
 import { countWords } from '../../utils/wordCount.js';
+import { retryTransactionConflict } from '../../utils/prismaTransaction.js';
 import { stableHash } from '../novelBuild/schemas.js';
 
 const MAX_SNAPSHOT_BYTES = 10_000_000;
@@ -38,7 +39,7 @@ export class NamedSnapshotUseCase {
     const existing = await this.prisma.namedSnapshot.findUnique({ where: { projectId_idempotencyKey: { projectId, idempotencyKey: input.idempotencyKey } } });
     if (existing) { if (existing.requestHash !== requestHash) throw new HttpError(409, 'Snapshot idempotency key was reused with different input'); return toSnapshot(existing); }
     let result;
-    try { result = await this.prisma.$transaction(async (tx) => {
+    try { result = await retryTransactionConflict(() => this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "Project" WHERE id=${projectId} FOR SHARE`;
       const heads = await this.captureHeads(tx, projectId, input);
       if (!heads.length) throw new HttpError(409, 'Snapshot scope contains no writing heads');
@@ -54,7 +55,7 @@ export class NamedSnapshotUseCase {
         checkpointId: input.checkpointId ?? null, compilationId: input.compilationId ?? null,
         heads: json(heads), structuredState: json(structuredState), contentHash: stableHash(payload), sizeBytes
       } });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }); }
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead })); }
     catch (error) { if (!isUnique(error)) throw error; const replay = await this.prisma.namedSnapshot.findUnique({ where: { projectId_idempotencyKey: { projectId, idempotencyKey: input.idempotencyKey } } }); if (!replay || replay.requestHash !== requestHash) throw new HttpError(409, 'Snapshot idempotency key was reused with different input'); result = replay; }
     return toSnapshot(result);
   }
@@ -90,7 +91,7 @@ export class NamedSnapshotUseCase {
     await this.access.assertPermission(userId, projectId, 'project:write');
     if (input.confirm !== true) throw new HttpError(400, 'Explicit restore confirmation is required'); validateKey(input.idempotencyKey);
     const requestHash = stableHash(input);
-    return this.prisma.$transaction(async (tx) => {
+    return retryTransactionConflict(() => this.prisma.$transaction(async (tx) => {
       const snapshot = await this.requireSnapshot(tx, projectId, snapshotId);
       if (snapshot.deletedAt) throw new HttpError(409, 'Deleted snapshots cannot be restored');
       const replay = await tx.snapshotOperationReceipt.findUnique({ where: { snapshotId_idempotencyKey: { snapshotId, idempotencyKey: input.idempotencyKey } } });
@@ -112,7 +113,7 @@ export class NamedSnapshotUseCase {
       const result: RestoreNamedSnapshotResult = { snapshotId, restoredVersionIds, restoredAt: new Date().toISOString() };
       await tx.snapshotOperationReceipt.create({ data: { snapshotId, idempotencyKey: input.idempotencyKey, requestHash, operation: 'restore', result: json(result) } });
       return result;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }));
   }
 
   async branch(userId: string, projectId: string, snapshotId: string, input: BranchFromNamedSnapshotInput): Promise<BranchFromNamedSnapshotResult> {

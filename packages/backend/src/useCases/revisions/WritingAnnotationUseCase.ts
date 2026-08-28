@@ -6,6 +6,7 @@ import type {
 import { HttpError } from '../../http/HttpError.js';
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
 import { countWords } from '../../utils/wordCount.js';
+import { retryTransactionConflict } from '../../utils/prismaTransaction.js';
 import { stableHash } from '../novelBuild/schemas.js';
 
 const include = { replies: { orderBy: { createdAt: 'asc' as const } } } satisfies Prisma.WritingAnnotationThreadInclude;
@@ -54,13 +55,13 @@ export class WritingAnnotationUseCase {
 
   async reply(userId: string, projectId: string, threadId: string, input: ReplyToWritingAnnotationInput): Promise<WritingAnnotationThread> {
     await this.access.assertPermission(userId, projectId, 'project:write'); validateKey(input.idempotencyKey); const body = text(input.body, 'Reply body', 50_000); const requestHash = stableHash(input);
-    await this.prisma.$transaction(async (tx) => {
+    await retryTransactionConflict(() => this.prisma.$transaction(async (tx) => {
       const thread = await tx.writingAnnotationThread.findFirst({ where: { id: threadId, projectId } }); if (!thread) throw new HttpError(404, 'Annotation thread not found');
       const prior = await tx.writingAnnotationReply.findUnique({ where: { threadId_idempotencyKey: { threadId, idempotencyKey: input.idempotencyKey } } });
       if (prior) { if (prior.requestHash !== requestHash) throw new HttpError(409, 'Reply idempotency key was reused'); return; }
       await tx.writingAnnotationReply.create({ data: { threadId, authorId: userId, idempotencyKey: input.idempotencyKey, requestHash, body } });
       await tx.writingAnnotationThread.update({ where: { id: threadId }, data: { revision: { increment: 1 } } });
-    }); return toThread(await this.requireThread(projectId, threadId));
+    })); return toThread(await this.requireThread(projectId, threadId));
   }
 
   resolve(userId: string, projectId: string, threadId: string, input: UpdateWritingAnnotationStatusInput) { return this.changeStatus(userId, projectId, threadId, input, 'RESOLVED'); }
@@ -69,7 +70,7 @@ export class WritingAnnotationUseCase {
 
   async accept(userId: string, projectId: string, threadId: string, input: AcceptWritingSuggestionInput): Promise<WritingAnnotationThread> {
     await this.access.assertPermission(userId, projectId, 'project:write'); if (input.confirm !== true) throw new HttpError(400, 'Explicit suggestion acceptance is required'); validateKey(input.idempotencyKey); const requestHash = stableHash(input);
-    await this.prisma.$transaction(async (tx) => {
+    await retryTransactionConflict(() => this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "WritingAnnotationThread" WHERE id=${threadId} FOR UPDATE`;
       const thread = await tx.writingAnnotationThread.findFirst({ where: { id: threadId, projectId } }); if (!thread) throw new HttpError(404, 'Annotation thread not found');
       if (thread.status === 'ACCEPTED' && thread.decisionIdempotencyKey === input.idempotencyKey && thread.decisionRequestHash === requestHash) return;
@@ -85,7 +86,7 @@ export class WritingAnnotationUseCase {
       const cas = await tx.writingBranch.updateMany({ where: { id: branch.id, headVersionId: input.expectedHeadVersionId }, data: { headVersionId: version.id } }); if (cas.count !== 1) throw new HttpError(409, 'Writing changed concurrently');
       if (thread.sceneId) await tx.scene.updateMany({ where: { id: thread.sceneId, bodyWritingId: thread.writingId, chapter: { projectId } }, data: { actualWordCount: countWords(nextBody), revision: { increment: 1 } } });
       await tx.writingAnnotationThread.update({ where: { id: thread.id }, data: { status: 'ACCEPTED', acceptedVersionId: version.id, resolvedById: userId, resolvedAt: new Date(), decisionIdempotencyKey: input.idempotencyKey, decisionRequestHash: requestHash, revision: { increment: 1 } } });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }));
     return toThread(await this.requireThread(projectId, threadId));
   }
 
