@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Eye, EyeOff, Image as ImageIcon, Keyboard, PenLine, Sparkles, Target } from 'lucide-svelte';
+  import { Eye, EyeOff, Image as ImageIcon, Keyboard, KeyRound, PenLine, Sparkles, Target } from 'lucide-svelte';
   import type { CoverOrientation, ProjectVisibility } from '@opentales/sdk';
   import { liveTextField } from '$lib/actions/liveTextField';
   import { ai } from '$lib/stores/ai.svelte';
@@ -8,6 +8,7 @@
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import { preferences } from '$lib/stores/preferences.svelte';
   import AiSettingsSection from './AiSettingsSection.svelte';
+  import McpApiKeysSection from './McpApiKeysSection.svelte';
   import CollapsibleSettingsSection from './CollapsibleSettingsSection.svelte';
   import PanelHeader from './PanelHeader.svelte';
 
@@ -142,6 +143,13 @@
     {:else}
       <CollapsibleSettingsSection title="AI configuration" icon={Sparkles} summary={aiSummary()}>
         <AiSettingsSection />
+      </CollapsibleSettingsSection>
+      <CollapsibleSettingsSection
+        title="External agents"
+        icon={KeyRound}
+        summary="Codex, Claude Code, and other MCP clients"
+      >
+        <McpApiKeysSection />
       </CollapsibleSettingsSection>
       <CollapsibleSettingsSection title="Cover" icon={ImageIcon}>
         <div

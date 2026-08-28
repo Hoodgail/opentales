@@ -22,6 +22,8 @@
   "dependencies": {
     "@ai-sdk/openai": "3.0.98",
     "@ai-sdk/openai-compatible": "^1.0.0",
+    "@modelcontextprotocol/node": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
     "@opentales/sdk": "workspace:*",
     "@prisma/client": "^6.1.0",
     "@types/multer": "^2.1.0",

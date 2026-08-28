@@ -6,6 +6,10 @@
   "outputDirectory": "packages/frontend/build",
   "rewrites": [
     {
+      "source": "/mcp",
+      "destination": "https://opentales-api.lumina.pw/mcp"
+    },
+    {
       "source": "/(.*)",
       "destination": "/app.html"
     }

@@ -11,6 +11,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://opentales:opentales@postgres:5432/opentales?schema=public}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       CORS_ORIGIN: ${CORS_ORIGIN:-https://opentales.lumina.pw}
+      MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-https://opentales.lumina.pw,https://tale.yasui.io,https://opentales.hoodgail.me}
     expose:
       - "4000"
     networks:

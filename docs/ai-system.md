@@ -76,6 +76,12 @@ client.deleteProjectAiSkill(projectId, skillId)
 
 During agent runs, enabled skills follow progressive disclosure. The system prompt includes only name and description in an `<available_skills>` catalog. When a task matches a skill, the agent activates it with `readProjectAiSkill`, which returns the full skill content wrapped in `<skill_content name="...">` tags.
 
+## External MCP agents
+
+Project owners and admins can create revocable read-only or read/write credentials under **Project Settings → External agents**. Codex, Claude Code, and other Streamable HTTP clients connect to `${FRONTEND_ORIGIN}/mcp`; the key resolves one fixed project and the creator's live workspace role on every request.
+
+The MCP adapter registers the same tool objects used by interactive OpenTales agents, so names, Zod schemas, bounded reads, mutation use cases, and permission checks do not drift. Skills, agent prompts, and author instruction docs are also available through MCP resources and prompt templates. `task`, `askUser`, and fenced worker-lease tools remain internal because the external host owns orchestration/user interaction and the durable worker owns persisted Novel Build tasks. Full setup and security behavior are documented in [`mcp.md`](mcp.md).
+
 ## Agent sessions
 
 The agent panel supports multiple chat sessions per project. The frontend loads the session list and the active session through the SDK:

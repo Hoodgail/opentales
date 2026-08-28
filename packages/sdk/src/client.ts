@@ -66,6 +66,9 @@ import type {
   ProjectInvite,
   ProjectAiSettings,
   ProjectAiSkill,
+  ProjectMcpApiKey,
+  CreateProjectMcpApiKeyInput,
+  CreateProjectMcpApiKeyResult,
   ProjectDoc,
   ProjectFileTree,
   ProjectFolder,
@@ -1010,6 +1013,26 @@ export class OpenTalesClient {
 
   getProjectAiSettings(projectId: string): Promise<ProjectAiSettings> {
     return this.request<ProjectAiSettings>(`/projects/${projectId}/ai-settings`);
+  }
+
+  listProjectMcpApiKeys(projectId: string): Promise<ProjectMcpApiKey[]> {
+    return this.request<ProjectMcpApiKey[]>(`/projects/${projectId}/mcp-api-keys`);
+  }
+
+  createProjectMcpApiKey(
+    projectId: string,
+    input: CreateProjectMcpApiKeyInput
+  ): Promise<CreateProjectMcpApiKeyResult> {
+    return this.request<CreateProjectMcpApiKeyResult>(`/projects/${projectId}/mcp-api-keys`, {
+      method: 'POST',
+      body: input
+    });
+  }
+
+  revokeProjectMcpApiKey(projectId: string, keyId: string): Promise<ProjectMcpApiKey> {
+    return this.request<ProjectMcpApiKey>(`/projects/${projectId}/mcp-api-keys/${keyId}`, {
+      method: 'DELETE'
+    });
   }
 
   updateProjectAiSettings(

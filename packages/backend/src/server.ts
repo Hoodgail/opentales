@@ -2,6 +2,7 @@ import { env } from './config/env.js';
 import { prisma } from './config/prisma.js';
 import { createApp } from './app.js';
 import { startNovelBuildWorker } from './useCases/ai/workflow/NovelBuildWorker.js';
+import { closeMcpHandler } from './routes/mcpRoutes.js';
 
 const app = createApp();
 const workerEnabled =
@@ -14,6 +15,7 @@ const server = app.listen(env.port, () => {
 
 async function shutdown() {
   await novelBuildWorker?.stop();
+  await closeMcpHandler();
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
   });

@@ -6,6 +6,7 @@ export type Role = 'OWNER' | 'ADMIN' | 'EDITOR' | 'VIEWER';
 export type CoverOrientation = 'landscape' | 'portrait';
 export type ProjectVisibility = 'private' | 'public';
 export type AiProviderKind = 'gateway' | 'openai-compatible' | 'github-copilot' | 'codex';
+export type ProjectMcpApiKeyPermission = 'read-only' | 'read-write';
 export type AiRewriteMode = 'tighter' | 'softer' | 'more-visceral' | 'more-lyrical';
 export type ProjectDocKind = 'note' | 'brainstorm' | 'instructions' | 'reference' | 'other';
 export type CollaborationDocumentKind =
@@ -479,6 +480,30 @@ export interface ProjectAiSettings {
   baseUrl: string | null;
   hasApiKey: boolean;
   updatedAt: string | null;
+}
+
+export interface ProjectMcpApiKey {
+  id: string;
+  projectId: string;
+  name: string;
+  permission: ProjectMcpApiKeyPermission;
+  prefix: string;
+  expiresAt: string | null;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+}
+
+export interface CreateProjectMcpApiKeyInput {
+  name: string;
+  permission?: ProjectMcpApiKeyPermission;
+  expiresAt?: string | null;
+}
+
+export interface CreateProjectMcpApiKeyResult {
+  key: ProjectMcpApiKey;
+  /** The bearer secret is returned exactly once and cannot be retrieved later. */
+  secret: string;
 }
 
 export interface UpdateProjectAiSettingsInput {

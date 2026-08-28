@@ -14,6 +14,11 @@ enum Role {
   VIEWER
 }
 
+enum ProjectMcpApiKeyPermission {
+  READ_ONLY
+  READ_WRITE
+}
+
 enum CoverOrientation {
   LANDSCAPE
   PORTRAIT
@@ -423,6 +428,7 @@ model User {
   resolvedAnnotations   WritingAnnotationThread[] @relation("WritingAnnotationResolver")
   annotationReplies     WritingAnnotationReply[]
   createdImports        ProjectImport[]           @relation("ProjectImportCreatedBy")
+  mcpApiKeys            ProjectMcpApiKey[]        @relation("ProjectMcpApiKeyCreator")
 }
 
 model Org {
@@ -535,6 +541,7 @@ model Project {
   writingAnnotations     WritingAnnotationThread[]
   imports                ProjectImport[]
   renameRefactorReceipts RenameRefactorReceipt[]
+  mcpApiKeys             ProjectMcpApiKey[]
 
   @@unique([orgId, slug])
   @@index([orgId])
@@ -707,6 +714,28 @@ model ProjectAiSkill {
 
   @@unique([projectId, name])
   @@index([projectId, enabled])
+}
+
+model ProjectMcpApiKey {
+  id          String                     @id @default(cuid())
+  projectId   String
+  createdById String
+  name        String
+  permission  ProjectMcpApiKeyPermission @default(READ_WRITE)
+  secretHash  String                     @unique
+  prefix      String
+  expiresAt   DateTime?
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime                   @default(now())
+  updatedAt   DateTime                   @updatedAt
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User    @relation("ProjectMcpApiKeyCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+  @@index([createdById])
+  @@index([projectId, revokedAt, expiresAt])
 }
 
 model BetaShareLink {

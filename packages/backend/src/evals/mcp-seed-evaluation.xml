@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Stable read-only evaluation fixture for a freshly seeded demo project. -->
+<evaluation>
+  <qa_pair>
+    <question>In the freshly seeded demo project, identify the person whose promise to the deceased owner may require violating the law and who also has an old conflict with the estate claimant. What is the person's full name?</question>
+    <answer>Marcus Hale</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>In the freshly seeded demo project, the protagonist follows a clue to a building with an uncatalogued basement collection. Which location is it?</question>
+    <answer>Oldgate Public Library</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>In the freshly seeded demo project, one drafted chapter departs from the protagonist's viewpoint and looks back two decades. What is that chapter's title?</question>
+    <answer>Things Marcus Knew</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>In the freshly seeded demo project, a map reveals two recognizable pins and one unknown pin. Of the recognizable places, which one is both concentrated with the claimant's holdings and planned for the second-act confrontation?</question>
+    <answer>Oldgate Harbor</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>In the freshly seeded demo project, compare every character's recorded relationships. Which character has the fewest?</question>
+    <answer>Iris Thorne</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>In the freshly seeded demo project, which act currently contains no chapter IDs even though the high-level outline assigns the story's resolution to it?</question>
+    <answer>Act III — Reckoning</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>In the freshly seeded demo project, identify the character with a permanent mark caused by her profession, then give that profession as a single word.</question>
+    <answer>Archivist</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>In the freshly seeded demo project, which obstacle is solved by finding a key in an uncatalogued archive rather than by a legal or interpersonal decision? Give the obstacle title.</question>
+    <answer>The cipher itself</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>In the freshly seeded demo project, the antagonist's claim is technically supported by paperwork. In which act does the outline say the protagonist's final truth choice occurs? Answer with the act number only.</question>
+    <answer>3</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>In the freshly seeded demo project, identify the executor who knew the protagonist's grandmother, then return his occupation exactly as recorded.</question>
+    <answer>Retired Judge</answer>
+  </qa_pair>
+</evaluation>

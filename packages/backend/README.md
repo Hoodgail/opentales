@@ -11,6 +11,7 @@ Express API for OpenTales. It uses Prisma with PostgreSQL and keeps business log
 - Chapter, character, location, project, and story structure updates
 - Path-based project docs, nested folders, and foldered assets
 - Project-scoped AI settings and Agent Skills
+- Project-scoped, revocable MCP API keys for external agents
 - Project storage usage accounting across assets and writing content
 - Versioned prose through `Writing`, `WritingBranch`, and `WritingVersion`
 - Durable, restart-safe Novel Build task graphs with scoped leases, checkpoints, traces, and evaluations
@@ -107,6 +108,11 @@ Project routes require `Authorization: Bearer <token>`.
 | `POST` | `/projects/:projectId/ai-settings/codex/auth/start` | Start OpenAI Codex device authorization |
 | `POST` | `/projects/:projectId/ai-settings/codex/auth/poll` | Poll and persist an encrypted refreshable Codex session |
 | `GET` | `/projects/:projectId/ai/models` | List the cached models.dev catalog plus subscription-safe Codex models |
+| `GET` | `/projects/:projectId/mcp-api-keys` | List safe MCP key metadata (project admin) |
+| `POST` | `/projects/:projectId/mcp-api-keys` | Create a project-scoped MCP bearer key and return its secret once |
+| `DELETE` | `/projects/:projectId/mcp-api-keys/:keyId` | Revoke an MCP key immediately |
+
+External agents connect to `POST/GET /mcp` with `Authorization: Bearer otmcp_...`. The endpoint is a stateless Streamable HTTP MCP server whose key fixes the project scope. It adapts the existing AI tool schemas and use cases, publishes skills and agent prompts as MCP resources/prompts, and omits only session-only or durable-worker-lease tools. See [`../../docs/mcp.md`](../../docs/mcp.md).
 
 AI skill routes under `/projects/:projectId/ai/skills` let project admins list, create, update, and delete project-scoped Agent Skills. Enabled skills are disclosed to agent sessions as a compact catalog and loaded on demand with read-only AI tools.
 

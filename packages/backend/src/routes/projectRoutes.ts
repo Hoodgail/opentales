@@ -7,6 +7,7 @@ import { ProjectController } from '../controllers/ProjectController.js';
 import { StatsController } from '../controllers/StatsController.js';
 import { StorageController } from '../controllers/StorageController.js';
 import { TrashController } from '../controllers/TrashController.js';
+import { McpApiKeyController } from '../controllers/McpApiKeyController.js';
 import { asyncHandler } from '../http/asyncHandler.js';
 import { requireAuth } from '../middleware/authMiddleware.js';
 
@@ -18,6 +19,7 @@ const folders = new ProjectFolderController();
 const trash = new TrashController();
 const stats = new StatsController();
 const storage = new StorageController();
+const mcpApiKeys = new McpApiKeyController();
 export const projectRoutes = Router();
 
 projectRoutes.use(requireAuth);
@@ -46,6 +48,9 @@ projectRoutes.post(
 );
 
 projectRoutes.get('/:projectId/ai-settings', asyncHandler(ai.getSettings));
+projectRoutes.get('/:projectId/mcp-api-keys', asyncHandler(mcpApiKeys.list));
+projectRoutes.post('/:projectId/mcp-api-keys', asyncHandler(mcpApiKeys.create));
+projectRoutes.delete('/:projectId/mcp-api-keys/:keyId', asyncHandler(mcpApiKeys.revoke));
 projectRoutes.patch('/:projectId/ai-settings', asyncHandler(ai.updateSettings));
 projectRoutes.post(
   '/:projectId/ai-settings/github-copilot/auth/start',

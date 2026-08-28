@@ -98,4 +98,39 @@ describe('AI session SDK contracts', () => {
       expect.objectContaining({ method: 'GET' })
     );
   });
+
+  it('manages project-scoped MCP API keys through authenticated project routes', async () => {
+    const fetcher = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response('{}', {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    }));
+    const client = new OpenTalesClient({
+      baseUrl: 'https://api.test',
+      token: 'session-token',
+      fetcher: fetcher as unknown as typeof fetch
+    });
+
+    await client.listProjectMcpApiKeys('project-1');
+    await client.createProjectMcpApiKey('project-1', {
+      name: 'Codex',
+      permission: 'read-write',
+      expiresAt: null
+    });
+    await client.revokeProjectMcpApiKey('project-1', 'key-1');
+
+    expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
+      'https://api.test/projects/project-1/mcp-api-keys',
+      'https://api.test/projects/project-1/mcp-api-keys',
+      'https://api.test/projects/project-1/mcp-api-keys/key-1'
+    ]);
+    expect(fetcher.mock.calls.map((call) => call[1]?.method)).toEqual(['GET', 'POST', 'DELETE']);
+    expect(fetcher.mock.calls[1]?.[1]?.body).toBe(JSON.stringify({
+      name: 'Codex',
+      permission: 'read-write',
+      expiresAt: null
+    }));
+    for (const call of fetcher.mock.calls) {
+      expect(new Headers(call[1]?.headers).get('authorization')).toBe('Bearer session-token');
+    }
+  });
 });

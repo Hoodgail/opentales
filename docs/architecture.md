@@ -75,6 +75,8 @@ Username/email + password with `bcrypt` hashing and a JWT in an HTTP-only cookie
 
 Most operations check membership and role at the use-case level via a small `assertCan(role, action)` helper. Public routes (`/public/projects/...`, `/assets/:id`, `/read/...`) are unauthenticated by design.
 
+External agents use a separate project-scoped bearer credential at `/mcp`. Only owners/admins can issue a key. Its secret is hashed and shown once; each request revalidates expiry, revocation, project ownership, and the creator's current workspace membership. The key fixes `projectId` server-side, while the existing use cases remain the authority for read/write/admin checks. See [`mcp.md`](mcp.md).
+
 ## Frontend (`packages/frontend`)
 
 SvelteKit + Svelte 5 (runes) + Tailwind v4 + Monaco.
@@ -194,6 +196,7 @@ For a feature shipping today, three URL surfaces matter:
 | `/` | none | Landing page (prerendered HTML, SEO-tuned) |
 | `/projects` | required | The IDE |
 | `/read/:org/:project` | none | Read view of a public project's published chapters |
+| `/mcp` | project MCP key | Stateless Streamable HTTP tools, resources, and prompts for one project |
 
 Anything else is internal (`/invite/:token`, the API).
 

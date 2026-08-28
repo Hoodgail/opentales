@@ -66,6 +66,7 @@ Important DTOs:
 - `ProjectFileTree`
 - `ProjectStorageUsage`
 - `ProjectAiSkill`
+- `ProjectMcpApiKey`, `CreateProjectMcpApiKeyResult`
 - `AiAgentSession`, `AiAgentSessionPart`, `AiAgentToolCall`
 - `Character`
 - `Location`
@@ -109,6 +110,9 @@ Important DTOs:
 | `startCodexAuth(projectId)` | `POST /projects/:projectId/ai-settings/codex/auth/start` |
 | `pollCodexAuth(projectId, input)` | `POST /projects/:projectId/ai-settings/codex/auth/poll` |
 | `listAiModels(projectId)` | `GET /projects/:projectId/ai/models` |
+| `listProjectMcpApiKeys(projectId)` | `GET /projects/:projectId/mcp-api-keys` |
+| `createProjectMcpApiKey(projectId, input)` | `POST /projects/:projectId/mcp-api-keys` |
+| `revokeProjectMcpApiKey(projectId, keyId)` | `DELETE /projects/:projectId/mcp-api-keys/:keyId` |
 | `listProjectAiSkills(projectId)` | `GET /projects/:projectId/ai/skills` |
 | `createProjectAiSkill(projectId, input)` | `POST /projects/:projectId/ai/skills` |
 | `updateProjectAiSkill(projectId, skillId, input)` | `PATCH /projects/:projectId/ai/skills/:skillId` |

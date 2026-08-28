@@ -47,6 +47,7 @@ A novel is a codebase of human meaning — characters, places, plot threads, and
 - **Durable Novel Builds.** Turn one brainstorm into a structured, restart-safe plan and sandboxed scene-by-scene manuscript workflow.
 - **Story compiler.** Versioned canon, entity state, timeline, setups/payoffs, semantic search, and evidence-backed diagnostics.
 - **Reviewable AI branches.** Inspect, edit, compare, approve, merge, or reject generated prose without changing main prematurely.
+- **External writing agents.** Create project-scoped MCP keys and connect Codex, Claude Code, or another agent to the same tools, skills, prompts, and permission checks.
 - **Publishing pipeline.** Validated DOCX, PDF, EPUB3, Markdown, text, HTML, and project archives with safe import previews.
 - **Drafts inbox.** Editors submit drafts; owners merge or decline with side-by-side diff. Like GitHub PRs, for prose.
 - **Public read view.** Publish chapters individually under a project's public URL.
@@ -134,6 +135,7 @@ packages/backend/prisma/schema.prisma  Canonical data model
 | **[Getting started](docs/getting-started.md)** | Local setup walkthrough — your first project in five minutes. |
 | **[Architecture](docs/architecture.md)** | High-level system design, package layout, data model, and conventions. |
 | **[AI system](docs/ai-system.md)** | How project AI settings, agent sessions, streaming, tool calls, and Manual/Auto execution modes work. |
+| **[External agents over MCP](docs/mcp.md)** | Project-scoped API keys, remote tools/resources/prompts, client setup, security, and deployment. |
 | **[Novel Builds](docs/novel-build.md)** | Durable workflow, story state, sandbox branches, diagnostics, review/merge, and export/import. |
 | **[Generated capabilities](docs/generated-capabilities.md)** | Source-derived route and built-in skill inventory, checked in CI. |
 | **[Export and import](docs/export-import.md)** | Private verified manuscript exports, secure downloads, import preview, and transactional apply. |

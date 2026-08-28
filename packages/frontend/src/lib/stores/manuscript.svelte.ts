@@ -16,6 +16,9 @@ import {
   type OrgMember,
   type ProjectInvite,
   type ProjectSummary,
+  type ProjectMcpApiKey,
+  type CreateProjectMcpApiKeyInput,
+  type CreateProjectMcpApiKeyResult,
   type BetaShareLink,
   type CreateBetaShareLinkInput,
   type Role,
@@ -326,6 +329,13 @@ function createStore() {
         ? summaries.find((p) => p.id === targetProjectId) ?? summaries[0]
         : summaries[0];
 
+      if (target.id !== projectId.value) {
+        members.splice(0, members.length);
+        invites.splice(0, invites.length);
+        currentUserRole = null;
+        membersLoaded = false;
+      }
+
       const project = await api.getProject(target.id);
       applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
 
@@ -405,6 +415,9 @@ function createStore() {
     if (id === projectId.value) return;
     syncAiProjectContext(id);
     membersLoaded = false;
+    members.splice(0, members.length);
+    invites.splice(0, invites.length);
+    currentUserRole = null;
     submissionsLoaded = false;
     trashLoaded = false;
     trash.splice(0, trash.length);
@@ -737,6 +750,33 @@ function createStore() {
 
   async function setSelectedId(id: string | null) {
     selectedId = id;
+  }
+
+  async function listProjectMcpApiKeys(): Promise<ProjectMcpApiKey[]> {
+    if (!projectId.value) return [];
+    return api.listProjectMcpApiKeys(projectId.value);
+  }
+
+  async function createProjectMcpApiKey(
+    input: CreateProjectMcpApiKeyInput
+  ): Promise<CreateProjectMcpApiKeyResult | null> {
+    if (!projectId.value) return null;
+    try {
+      return await api.createProjectMcpApiKey(projectId.value, input);
+    } catch (caught) {
+      error = caught instanceof Error ? caught.message : 'Failed to create MCP API key';
+      return null;
+    }
+  }
+
+  async function revokeProjectMcpApiKey(keyId: string): Promise<ProjectMcpApiKey | null> {
+    if (!projectId.value) return null;
+    try {
+      return await api.revokeProjectMcpApiKey(projectId.value, keyId);
+    } catch (caught) {
+      error = caught instanceof Error ? caught.message : 'Failed to revoke MCP API key';
+      return null;
+    }
   }
 
   async function navigateToChapter(
@@ -1302,6 +1342,9 @@ function createStore() {
     listBetaShareLinks,
     createBetaShareLink,
     revokeBetaShareLink,
+    listProjectMcpApiKeys,
+    createProjectMcpApiKey,
+    revokeProjectMcpApiKey,
     changeMemberRole,
     removeMember,
     createInvite,

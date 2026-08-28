@@ -12,6 +12,7 @@ import { novelBuildRoutes } from './routes/novelBuildRoutes.js';
 import { revisionRoutes } from './routes/revisionRoutes.js';
 import { refactorRoutes } from './routes/refactorRoutes.js';
 import { exportImportRoutes } from './routes/exportImportRoutes.js';
+import { mcpRoutes } from './routes/mcpRoutes.js';
 
 export function createApp() {
   const app = express();
@@ -26,6 +27,8 @@ export function createApp() {
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok' });
   });
+
+  app.use('/mcp', mcpRoutes);
 
   app.use('/auth', authRoutes);
   // Asset upload requires auth; reads are unauthenticated so <img> tags work.
