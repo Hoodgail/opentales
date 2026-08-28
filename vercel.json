@@ -7,7 +7,7 @@
   "rewrites": [
     {
       "source": "/mcp",
-      "destination": "https://opentales-api.lumina.pw/mcp"
+      "destination": "https://opentales-api.hoodgail.me/mcp"
     },
     {
       "source": "/(.*)",

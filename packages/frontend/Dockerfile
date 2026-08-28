@@ -8,7 +8,7 @@ COPY packages/backend/package.json packages/backend/package.json
 RUN pnpm install --frozen-lockfile
 COPY packages/frontend packages/frontend
 COPY packages/sdk packages/sdk
-ARG VITE_API_URL=https://opentales-api.lumina.pw
+ARG VITE_API_URL=https://opentales-api.hoodgail.me
 ENV VITE_API_URL=$VITE_API_URL
 RUN pnpm --dir packages/frontend build
 
