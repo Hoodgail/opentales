@@ -212,7 +212,7 @@ export function normalizeArtifactBatchForContract(
   return {
     ...input,
     operations: input.operations.map((operation) => operation.action === 'upsert'
-      ? { ...operation, bindings: operation.bindings.filter((binding) => binding.bindingKind !== 'build-unit') }
+      ? { ...operation, bindings: (operation.bindings ?? []).filter((binding) => binding.bindingKind !== 'build-unit') }
       : operation)
   };
 }

@@ -113,6 +113,13 @@ describe('bounded build tool projections', () => {
     expect(normalizeArtifactBatchForContract(input, contract).operations[0]).toMatchObject({
       bindings: [{ bindingKind: 'entity', entityId: 'character-1' }]
     });
+    const withoutBindings = {
+      ...input,
+      operations: [{ ...input.operations[0], bindings: undefined }]
+    } as unknown as typeof input;
+    expect(normalizeArtifactBatchForContract(withoutBindings, contract).operations[0]).toMatchObject({
+      bindings: []
+    });
   });
 
   it('returns a compact summary without full manifests, task policies, brainstorms, or artifact bodies', async () => {
