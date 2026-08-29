@@ -18,6 +18,7 @@ const {
   extractWorkerResult,
   lookupExecutionModelPrice,
   measuredInvocationUsage,
+  normalizeJudgeResultCandidate,
   parseJudgeResult,
   preferredStoryIntakeModel,
   prepareQualityGateStep,
@@ -41,6 +42,20 @@ describe('durable Novel Build execution contract', () => {
       feedback: 'Observable planning evidence passes.'
     });
     expect(() => parseJudgeResult('No JSON here.')).toThrow(/schema-valid JSON/);
+    expect(normalizeJudgeResultCandidate({
+      scores: {
+        Completeness: { score: 0.9, reason: 'All required artifacts exist.' },
+        causality: { value: 0.85 },
+        coherence: '0.88',
+        contract: 0.95
+      },
+      feedback: { summary: 'The plan is complete and internally consistent.' },
+      evidence: ['All manifest outputs are validated.']
+    })).toEqual({
+      scores: { completeness: 0.9, causality: 0.85, coherence: 0.88, contract: 0.95 },
+      feedback: 'The plan is complete and internally consistent.',
+      evidence: [{ type: 'judge', summary: 'All manifest outputs are validated.' }]
+    });
   });
 
   it('gives aggregate planning tasks a bounded large-context invocation envelope', () => {

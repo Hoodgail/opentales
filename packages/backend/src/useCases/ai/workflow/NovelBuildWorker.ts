@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { BuildRun, BuildTask, Prisma, PrismaClient } from '@prisma/client';
-import { hasToolCall, stepCountIs, streamText, type ToolSet } from 'ai';
+import { hasToolCall, stepCountIs, streamText, tool, type ToolSet } from 'ai';
 import { z } from 'zod';
 import type { JsonValue } from '@opentales/sdk';
 import type { BuildTaskLease } from '@opentales/sdk';
@@ -52,6 +52,11 @@ const judgeResultSchema = z.object({
   feedback: z.string(),
   evidence: z.array(z.object({ type: z.string(), id: z.string().optional(), summary: z.string() })).max(200).default([])
 });
+const rawJudgeResultSchema = z.object({
+  scores: z.unknown(),
+  feedback: z.unknown().optional(),
+  evidence: z.unknown().optional()
+}).passthrough();
 const AGGREGATE_ARTIFACT_TASK_TYPES = new Set([
   'create-character-bibles',
   'create-plot-threads',
@@ -2086,6 +2091,11 @@ async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Promise<Bui
   const modelId = process.env.AI_JUDGE_MODEL?.trim() || input.contract.modelPolicy.preferred || null;
   const model = await input.resolveModel(modelId);
   let streamError: unknown;
+  const reportJudgeResult = tool({
+    description: 'Submit observable rubric scores, concise feedback, and evidence. Nested score details are accepted and normalized locally.',
+    inputSchema: rawJudgeResultSchema,
+    execute: async (value) => normalizeJudgeResultCandidate(value)
+  });
   const generation = streamText({
     model,
     system: [
@@ -2094,12 +2104,19 @@ async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Promise<Bui
       'Return only JSON with non-empty numeric scores, concise feedback, and an evidence array.'
     ].join('\n'),
     prompt: renderJudgePrompt(input),
+    tools: { reportJudgeResult },
+    toolChoice: { type: 'tool', toolName: 'reportJudgeResult' },
+    stopWhen: hasToolCall('reportJudgeResult'),
     abortSignal: input.abortSignal,
     maxOutputTokens: Math.min(4_000, input.contract.budget.maxOutputTokens),
     providerOptions: providerOptionsForAiModel(model),
     onError: ({ error }) => { streamError ??= error; }
   });
-  const [usage, text] = await Promise.all([generation.totalUsage, generation.text]);
+  const [usage, text, steps] = await Promise.all([
+    generation.totalUsage,
+    generation.text,
+    generation.steps
+  ]);
   if (streamError) {
     throw attachExecutionUsage(
       streamError,
@@ -2109,8 +2126,12 @@ async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Promise<Bui
       modelId ? normalizeMeasuredUsage(undefined, modelId, usage?.inputTokens ?? 0, usage?.outputTokens ?? 0) : []
     );
   }
+  const reported = steps.flatMap((step) => step.toolResults ?? []).find((value) =>
+    jsonRecord(value).toolName === 'reportJudgeResult'
+  );
+  const normalized = judgeResultSchema.safeParse(jsonRecord(reported).output);
   return {
-    result: parseJudgeResult(text),
+    result: normalized.success ? normalized.data : parseJudgeResult(text),
     inputTokens: usage?.inputTokens ?? 0,
     outputTokens: usage?.outputTokens ?? 0,
     modelId
@@ -2129,13 +2150,59 @@ export function parseJudgeResult(text: string): z.infer<typeof judgeResultSchema
     : '';
   for (const candidate of [trimmed, ...fenced, embedded].filter(Boolean)) {
     try {
-      const parsed = judgeResultSchema.safeParse(JSON.parse(candidate));
-      if (parsed.success) return parsed.data;
+      return normalizeJudgeResultCandidate(JSON.parse(candidate));
     } catch {
       // Try the next observable JSON candidate.
     }
   }
   throw new Error('Independent judge did not return schema-valid JSON');
+}
+
+export function normalizeJudgeResultCandidate(value: unknown): z.infer<typeof judgeResultSchema> {
+  const candidate = jsonRecord(value);
+  const scores: Record<string, number> = {};
+  const rawScores = candidate.scores;
+  const addScore = (rawKey: unknown, rawValue: unknown) => {
+    if (typeof rawKey !== 'string' || !rawKey.trim()) return;
+    const detail = jsonRecord(rawValue);
+    const score = typeof rawValue === 'number'
+      ? rawValue
+      : typeof rawValue === 'string' && rawValue.trim() !== ''
+        ? Number(rawValue)
+        : [detail.score, detail.value, detail.rating].find((item) => typeof item === 'number');
+    if (typeof score !== 'number' || !Number.isFinite(score)) return;
+    const key = rawKey.trim().replace(/[\s_-]+(.)/g, (_match, letter: string) => letter.toUpperCase());
+    scores[key.charAt(0).toLowerCase() + key.slice(1)] = score;
+  };
+  if (Array.isArray(rawScores)) {
+    for (const item of rawScores) {
+      const score = jsonRecord(item);
+      addScore(score.dimension ?? score.name ?? score.id ?? score.key, score.score ?? score.value ?? score.rating);
+    }
+  } else {
+    for (const [key, score] of Object.entries(jsonRecord(rawScores))) addScore(key, score);
+  }
+  const feedbackValue = candidate.feedback;
+  const feedbackRecord = jsonRecord(feedbackValue);
+  const feedback = typeof feedbackValue === 'string'
+    ? feedbackValue
+    : Array.isArray(feedbackValue)
+      ? feedbackValue.filter((item): item is string => typeof item === 'string').join('\n')
+      : [feedbackRecord.summary, feedbackRecord.message, feedbackRecord.feedback]
+        .find((item): item is string => typeof item === 'string') ?? '';
+  const evidence = (Array.isArray(candidate.evidence) ? candidate.evidence : []).flatMap((item) => {
+    if (typeof item === 'string' && item.trim()) return [{ type: 'judge', summary: item.trim() }];
+    const record = jsonRecord(item);
+    const summary = [record.summary, record.reason, record.description, record.evidence]
+      .find((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
+    if (!summary) return [];
+    return [{
+      type: typeof record.type === 'string' && record.type.trim() ? record.type.trim() : 'judge',
+      ...(typeof record.id === 'string' && record.id.trim() ? { id: record.id.trim() } : {}),
+      summary: summary.trim()
+    }];
+  });
+  return judgeResultSchema.parse({ scores, feedback, evidence });
 }
 
 export function renderJudgePrompt(input: Pick<BuildJudgeExecutorInput, 'rubric' | 'contract' | 'deterministicChecks' | 'observableResult' | 'evidencePack'>): string {
