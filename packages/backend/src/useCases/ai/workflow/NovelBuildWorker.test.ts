@@ -16,6 +16,7 @@ const {
   executionFailureDisposition,
   extractWorkerResult,
   lookupExecutionModelPrice,
+  preferredStoryIntakeModel,
   prepareStoryBriefStep,
   resolveUntouchedBuiltInSkillUpgrades,
   startNovelBuildWorker
@@ -39,6 +40,21 @@ describe('durable Novel Build execution contract', () => {
       activeTools: ['reportTaskResult'],
       toolChoice: { type: 'tool', toolName: 'reportTaskResult' }
     });
+  });
+
+  it('routes only unpinned Sol story intake through the bounded Luna tier', () => {
+    expect(preferredStoryIntakeModel(
+      'create-story-brief', 'CODEX', 'codex/gpt-5.6-sol'
+    )).toBe('codex/gpt-5.6-luna');
+    expect(preferredStoryIntakeModel(
+      'create-story-brief', 'CODEX', 'codex/gpt-5.6-sol', 'codex/gpt-5.5'
+    )).toBe('codex/gpt-5.5');
+    expect(preferredStoryIntakeModel(
+      'create-world-bible', 'CODEX', 'codex/gpt-5.6-sol'
+    )).toBeUndefined();
+    expect(preferredStoryIntakeModel(
+      'create-story-brief', 'GATEWAY', 'codex/gpt-5.6-sol'
+    )).toBeUndefined();
   });
 
   it('surfaces provider validation details without retrying or charging an unreported reservation', () => {

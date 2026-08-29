@@ -1246,6 +1246,18 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const runScope = jsonRecord(claimed.run.authorizationScope);
     const role = roleForTask(claimed.task.assignedAgent);
     const modelRoute = this.modelRoute(claimed.task);
+    const configuredModel = !modelRoute.preferred && claimed.task.type === 'create-story-brief'
+      ? await this.prisma.projectAiSettings.findUnique({
+        where: { projectId: claimed.run.projectId },
+        select: { providerKind: true, model: true }
+      })
+      : null;
+    const preferredModel = preferredStoryIntakeModel(
+      claimed.task.type,
+      configuredModel?.providerKind ?? null,
+      configuredModel?.model ?? null,
+      modelRoute.preferred
+    );
     const chapterIds = stringArray(policy.chapterIds).length
       ? stringArray(policy.chapterIds)
       : role === 'reviser' ? stringArray(runScope.chapterIds) : [];
@@ -1285,7 +1297,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         maxCostUsd: typeof policy.maxCostMicros === 'number' ? policy.maxCostMicros / 1_000_000 : undefined
       },
       modelPolicy: {
-        preferred: modelRoute.preferred,
+        preferred: preferredModel,
         fallbacks: modelRoute.fallbacks,
         tier: modelRoute.tier
       },
@@ -1625,6 +1637,20 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     });
     this.pendingTraces.delete(claimed.task.id);
   }
+}
+
+export function preferredStoryIntakeModel(
+  taskType: string,
+  providerKind: string | null,
+  configuredModel: string | null,
+  routedModel?: string
+): string | undefined {
+  if (routedModel) return routedModel;
+  return taskType === 'create-story-brief'
+    && providerKind === 'CODEX'
+    && configuredModel === 'codex/gpt-5.6-sol'
+    ? 'codex/gpt-5.6-luna'
+    : undefined;
 }
 
 interface BuiltInSkillUpgrade {
