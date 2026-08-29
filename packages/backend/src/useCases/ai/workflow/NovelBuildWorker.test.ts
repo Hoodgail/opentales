@@ -13,6 +13,7 @@ process.env.DATABASE_URL ??= 'postgresql://opentales:opentales@127.0.0.1:5432/op
 process.env.JWT_SECRET ??= 'unit-test-secret-not-for-production';
 const {
   NovelBuildWorker,
+  defaultTaskBudget,
   executionFailureDisposition,
   extractWorkerResult,
   lookupExecutionModelPrice,
@@ -24,6 +25,22 @@ const {
 } = await import('./NovelBuildWorker.js');
 
 describe('durable Novel Build execution contract', () => {
+  it('gives aggregate planning tasks a bounded large-context invocation envelope', () => {
+    expect(defaultTaskBudget({ type: 'create-beats' } as any)).toMatchObject({
+      maxInputTokens: 256_000,
+      maxOutputTokens: 48_000,
+      maxToolCalls: 16
+    });
+    expect(defaultTaskBudget({ type: 'create-scene-plans' } as any)).toMatchObject({
+      maxInputTokens: 256_000,
+      maxOutputTokens: 48_000
+    });
+    expect(defaultTaskBudget({ type: 'create-story-brief' } as any)).toMatchObject({
+      maxInputTokens: 96_000,
+      maxOutputTokens: 12_000
+    });
+  });
+
   it('keeps multi-step provider usage separate for per-invocation limits', () => {
     const usage = measuredInvocationUsage([
       { usage: { inputTokens: 52_000, outputTokens: 5_200 } },

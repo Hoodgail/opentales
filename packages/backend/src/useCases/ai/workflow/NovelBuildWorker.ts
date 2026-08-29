@@ -821,8 +821,15 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     trace.usageByModel = normalizeMeasuredUsage(generation.usageByModel, trace.model, generation.inputTokens, generation.outputTokens);
     const authorizedModels = new Set(uniqueStrings([...(projectModel?.model ? [projectModel.model] : []), ...(contract.modelPolicy.preferred ? [contract.modelPolicy.preferred] : []), ...contract.modelPolicy.fallbacks]));
     if (trace.usageByModel.some((usage) => !authorizedModels.has(usage.modelId))) throw new Error('Provider usage reported a model outside the reserved route');
-    if (trace.usageByModel.some((usage) => usage.inputTokens > contract.budget.maxInputTokens || usage.outputTokens > contract.budget.maxOutputTokens)) {
-      throw new Error(`Provider usage exceeded the task invocation limit (maxInputTokens=${contract.budget.maxInputTokens}, maxOutputTokens=${contract.budget.maxOutputTokens})`);
+    const overrun = trace.usageByModel.find((usage) =>
+      usage.inputTokens > contract.budget.maxInputTokens || usage.outputTokens > contract.budget.maxOutputTokens
+    );
+    if (overrun) {
+      throw new Error(
+        `Provider usage exceeded the task invocation limit `
+        + `(inputTokens=${overrun.inputTokens}/${contract.budget.maxInputTokens}, `
+        + `outputTokens=${overrun.outputTokens}/${contract.budget.maxOutputTokens})`
+      );
     }
     const result = workerResultSchema.parse(generation.result);
     const inputTokens = generation.inputTokens;
@@ -1708,13 +1715,13 @@ function deterministicTask(task: BuildTask): boolean {
   return policy.deterministic === true || ['checkpoint', 'drafting-complete-barrier', 'export-preparation', 'assemble-chapter-context', 'assemble-scene-context', 'run-chapter-diagnostics', 'run-scene-diagnostics'].includes(task.type);
 }
 
-function defaultTaskBudget(task: BuildTask): {
+export function defaultTaskBudget(task: BuildTask): {
   maxInputTokens: number;
   maxOutputTokens: number;
   maxToolCalls: number;
   maxDurationMs: number;
 } {
-  if (task.type === 'create-character-bibles') {
+  if (AGGREGATE_ARTIFACT_TASK_TYPES.has(task.type)) {
     return {
       maxInputTokens: 256_000,
       maxOutputTokens: 48_000,
