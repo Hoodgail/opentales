@@ -671,7 +671,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         output: { counts: lint.counts, issues: lint.issues.slice(0, 100) }
       }];
       result = {
-        status: lint.counts.error > 0 ? 'blocked' : 'complete',
+        status: 'complete',
         decisions: [],
         artifactIds: [],
         evidence: [
@@ -682,9 +682,9 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
             summary: `${issue.code}: ${issue.message}`
           }))
         ],
-        checks: { deterministicValidationRequired: lint.counts.error === 0 },
-        quality: { deterministic: lint.counts.error === 0 ? 1 : 0 },
-        unresolvedQuestions: lint.counts.error ? [`${lint.counts.error} error diagnostic(s) require correction`] : []
+        checks: { runtimeCriticEvidenceRequired: true },
+        quality: { deterministicEvidenceCollected: 1 },
+        unresolvedQuestions: []
       };
     } else if (claimed.task.type === 'run-chapter-diagnostics' || claimed.task.type === 'run-scene-diagnostics') {
       const policy = jsonRecord(claimed.task.executionPolicy);
