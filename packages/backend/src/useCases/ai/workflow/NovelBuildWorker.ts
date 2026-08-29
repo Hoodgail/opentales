@@ -1948,7 +1948,12 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
         stopWhen: [hasToolCall('reportTaskResult'), stepCountIs(input.stepLimit)],
         abortSignal: input.abortSignal,
         maxOutputTokens: input.contract.budget.maxOutputTokens,
-        providerOptions: providerOptionsForAiModel(model),
+        providerOptions: providerOptionsForAiModel(
+          model,
+          input.contract.metadata.taskType === 'create-story-brief'
+            ? { reasoningEffort: 'low', textVerbosity: 'low' }
+            : {}
+        ),
         prepareStep: input.contract.metadata.taskType === 'create-story-brief'
           ? ({ steps }) => prepareStoryBriefStep(steps)
           : undefined,

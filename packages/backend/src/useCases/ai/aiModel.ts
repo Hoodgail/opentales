@@ -9,12 +9,17 @@ import { createCodexFetch } from './codexProvider.js';
 
 export type AiModel = Parameters<typeof generateText>[0]['model'];
 
-export function providerOptionsForAiModel(model: AiModel) {
+export interface CodexInferenceTuning {
+  reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  textVerbosity?: 'low' | 'medium' | 'high';
+}
+
+export function providerOptionsForAiModel(model: AiModel, tuning: CodexInferenceTuning = {}) {
   const provider = model && typeof model === 'object' && 'provider' in model
     ? String(model.provider)
     : '';
   return provider.startsWith('codex.')
-    ? { openai: { store: false, include: ['reasoning.encrypted_content'] } }
+    ? { openai: { store: false, include: ['reasoning.encrypted_content'], ...tuning } }
     : undefined;
 }
 

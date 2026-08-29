@@ -15,6 +15,14 @@ describe('Codex model resolution', () => {
     expect(providerOptionsForAiModel(model)).toEqual({
       openai: { store: false, include: ['reasoning.encrypted_content'] }
     });
+    expect(providerOptionsForAiModel(model, { reasoningEffort: 'low', textVerbosity: 'low' })).toEqual({
+      openai: {
+        store: false,
+        include: ['reasoning.encrypted_content'],
+        reasoningEffort: 'low',
+        textVerbosity: 'low'
+      }
+    });
     expect(providerOptionsForAiModel('gateway/model')).toBeUndefined();
   });
 
