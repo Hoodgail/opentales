@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { BuildRun, BuildTask, Prisma, PrismaClient } from '@prisma/client';
-import { hasToolCall, Output, stepCountIs, streamText, type ToolSet } from 'ai';
+import { hasToolCall, stepCountIs, streamText, type ToolSet } from 'ai';
 import { z } from 'zod';
 import type { JsonValue } from '@opentales/sdk';
 import type { BuildTaskLease } from '@opentales/sdk';
@@ -1989,7 +1989,9 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
         ),
         prepareStep: input.contract.metadata.taskType === 'create-story-brief'
           ? ({ steps }) => prepareStoryBriefStep(steps)
-          : undefined,
+          : input.contract.metadata.taskType === 'quality-gate'
+            ? () => prepareQualityGateStep()
+            : undefined,
         onError: ({ error }) => { streamError ??= error; }
       });
       const [usage, text, steps] = await Promise.all([
@@ -2073,6 +2075,13 @@ export function prepareStoryBriefStep(steps: Array<{ toolResults?: unknown[] }>)
   };
 }
 
+export function prepareQualityGateStep() {
+  return {
+    activeTools: ['reportTaskResult'],
+    toolChoice: { type: 'tool' as const, toolName: 'reportTaskResult' }
+  };
+}
+
 async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Promise<BuildJudgeExecutorOutput> {
   const modelId = process.env.AI_JUDGE_MODEL?.trim() || input.contract.modelPolicy.preferred || null;
   const model = await input.resolveModel(modelId);
@@ -2081,16 +2090,16 @@ async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Promise<Bui
     model,
     system: [
       'You are an independent fiction-quality evaluator. You have diagnostics-only authority and cannot mutate or self-certify the candidate.',
-      'Score only the supplied rubric and observable evidence. Do not expose hidden reasoning.'
+      'Score only the supplied rubric and observable evidence. Do not expose hidden reasoning.',
+      'Return only JSON with non-empty numeric scores, concise feedback, and an evidence array.'
     ].join('\n'),
     prompt: renderJudgePrompt(input),
-    output: Output.object({ schema: judgeResultSchema }),
     abortSignal: input.abortSignal,
     maxOutputTokens: Math.min(4_000, input.contract.budget.maxOutputTokens),
     providerOptions: providerOptionsForAiModel(model),
     onError: ({ error }) => { streamError ??= error; }
   });
-  const [usage, output] = await Promise.all([generation.totalUsage, generation.output]);
+  const [usage, text] = await Promise.all([generation.totalUsage, generation.text]);
   if (streamError) {
     throw attachExecutionUsage(
       streamError,
@@ -2101,11 +2110,32 @@ async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Promise<Bui
     );
   }
   return {
-    result: judgeResultSchema.parse(output),
+    result: parseJudgeResult(text),
     inputTokens: usage?.inputTokens ?? 0,
     outputTokens: usage?.outputTokens ?? 0,
     modelId
   };
+}
+
+export function parseJudgeResult(text: string): z.infer<typeof judgeResultSchema> {
+  const trimmed = text.trim();
+  const fenced = [...trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)]
+    .map((match) => match[1]?.trim() ?? '')
+    .filter(Boolean);
+  const firstBrace = trimmed.indexOf('{');
+  const lastBrace = trimmed.lastIndexOf('}');
+  const embedded = firstBrace >= 0 && lastBrace > firstBrace
+    ? trimmed.slice(firstBrace, lastBrace + 1)
+    : '';
+  for (const candidate of [trimmed, ...fenced, embedded].filter(Boolean)) {
+    try {
+      const parsed = judgeResultSchema.safeParse(JSON.parse(candidate));
+      if (parsed.success) return parsed.data;
+    } catch {
+      // Try the next observable JSON candidate.
+    }
+  }
+  throw new Error('Independent judge did not return schema-valid JSON');
 }
 
 export function renderJudgePrompt(input: Pick<BuildJudgeExecutorInput, 'rubric' | 'contract' | 'deterministicChecks' | 'observableResult' | 'evidencePack'>): string {

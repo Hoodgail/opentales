@@ -18,13 +18,31 @@ const {
   extractWorkerResult,
   lookupExecutionModelPrice,
   measuredInvocationUsage,
+  parseJudgeResult,
   preferredStoryIntakeModel,
+  prepareQualityGateStep,
   prepareStoryBriefStep,
   resolveUntouchedBuiltInSkillUpgrades,
   startNovelBuildWorker
 } = await import('./NovelBuildWorker.js');
 
 describe('durable Novel Build execution contract', () => {
+  it('uses a terminal report for quality gates and parses locally validated judge JSON', () => {
+    expect(prepareQualityGateStep()).toEqual({
+      activeTools: ['reportTaskResult'],
+      toolChoice: { type: 'tool', toolName: 'reportTaskResult' }
+    });
+    expect(parseJudgeResult(`Judge result:\n\`\`\`json\n${JSON.stringify({
+      scores: { coherence: 0.9, causality: 0.8 },
+      feedback: 'Observable planning evidence passes.',
+      evidence: [{ type: 'artifact', id: 'artifact-1', summary: 'Validated brief' }]
+    })}\n\`\`\``)).toMatchObject({
+      scores: { coherence: 0.9, causality: 0.8 },
+      feedback: 'Observable planning evidence passes.'
+    });
+    expect(() => parseJudgeResult('No JSON here.')).toThrow(/schema-valid JSON/);
+  });
+
   it('gives aggregate planning tasks a bounded large-context invocation envelope', () => {
     expect(defaultTaskBudget({ type: 'create-beats' } as any)).toMatchObject({
       maxInputTokens: 256_000,
