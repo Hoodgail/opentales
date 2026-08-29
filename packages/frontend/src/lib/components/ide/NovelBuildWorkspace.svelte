@@ -11,6 +11,7 @@
     Play,
     Plus,
     RefreshCw,
+    Wrench,
     Workflow
   } from 'lucide-svelte';
   import { tick } from 'svelte';
@@ -125,6 +126,7 @@
   let actionDialog: HTMLElement | undefined = $state();
   let actionReturnFocus: HTMLElement | null = null;
   const selectedTask = $derived(run?.tasks.find((task) => task.id === selectedTaskId) ?? run?.tasks.find((task) => task.status === 'running') ?? null);
+  const exhaustedFailedTask = $derived(run?.tasks.find((task) => task.status === 'failed' && task.attempts >= task.maxAttempts) ?? null);
 
   $effect(() => {
     if (!run || run.id === runSeen) return;
@@ -247,7 +249,13 @@
           <button type="button" onclick={onRefresh} disabled={loading} aria-label="Refresh build" class="flex size-8 items-center justify-center rounded border border-border text-muted-foreground outline-none hover:text-foreground disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent"><RefreshCw class={cn('size-3.5', loading && 'motion-safe:animate-spin')} /></button>
           {#if !['completed','cancelled'].includes(run.status)}
             {#if run.authorizedAt}
-              {#if run.status === 'paused' || run.status === 'failed'}<button type="button" onclick={() => void onResume(run)} disabled={mutating} class="inline-flex h-8 items-center gap-1 rounded bg-accent px-2 text-[10px] font-medium text-accent-foreground outline-none disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-accent"><Play class="size-3" />Resume</button>{:else}<button type="button" onclick={() => void onPause(run)} disabled={mutating} class="inline-flex h-8 items-center gap-1 rounded border border-border px-2 text-[10px] text-foreground outline-none hover:border-accent/50 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-accent"><Pause class="size-3" />Pause</button>{/if}
+              {#if run.status === 'paused' || run.status === 'failed'}
+                {#if exhaustedFailedTask}
+                  <button type="button" onclick={(event) => openConfirm({ kind: 'rerun', task: exhaustedFailedTask }, event)} disabled={mutating} title={`Reset ${exhaustedFailedTask.key} and invalidate its downstream output`} class="inline-flex h-8 items-center gap-1 rounded bg-amber-400 px-2 text-[10px] font-medium text-black outline-none disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-amber-300"><Wrench class="size-3" />Rerun {exhaustedFailedTask.key}</button>
+                {:else}
+                  <button type="button" onclick={() => void onResume(run)} disabled={mutating} class="inline-flex h-8 items-center gap-1 rounded bg-accent px-2 text-[10px] font-medium text-accent-foreground outline-none disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-accent"><Play class="size-3" />Resume</button>
+                {/if}
+              {:else}<button type="button" onclick={() => void onPause(run)} disabled={mutating} class="inline-flex h-8 items-center gap-1 rounded border border-border px-2 text-[10px] text-foreground outline-none hover:border-accent/50 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-accent"><Pause class="size-3" />Pause</button>{/if}
             {/if}
             <button type="button" onclick={(event) => openConfirm({ kind: 'cancel' }, event)} disabled={mutating} class="inline-flex h-8 items-center gap-1 rounded border border-destructive/40 px-2 text-[10px] text-destructive-foreground outline-none hover:bg-destructive/10 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-destructive"><Ban class="size-3" />Cancel</button>
           {/if}

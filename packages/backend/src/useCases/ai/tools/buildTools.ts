@@ -15,6 +15,9 @@ import { applyContentEdit, countWords, editContentInputSchema, invocationToolCal
 
 export const buildMutatingToolNames = [
   'startNovelBuild',
+  'resumeNovelBuild',
+  'retryBuildTask',
+  'rerunBuildTask',
   'applyArtifactBatch',
   'applyChapterPatch',
   'createCheckpoint'
@@ -150,6 +153,15 @@ const buildStateInputSchema = z.object({
   buildRunId: z.string().trim().min(1),
   detail: z.enum(['summary', 'context', 'tasks']).default('summary')
 }).strict();
+const buildLifecycleSchema = z.object({
+  buildRunId: z.string().trim().min(1),
+  idempotencyKey: z.string().trim().min(1),
+  expectedRevision: z.number().int().nonnegative(),
+  reason: z.string().trim().min(1).max(1_000).optional()
+}).strict();
+const buildTaskLifecycleSchema = buildLifecycleSchema.extend({
+  taskId: z.string().trim().min(1)
+}).strict();
 const buildUnitPatchSchema = z.object({
   buildRunId: z.string().trim().min(1),
   taskId: z.string().trim().min(1),
@@ -246,6 +258,51 @@ export function buildWorkflowTools(
       inputSchema: buildStateInputSchema,
       execute: async ({ buildRunId, detail }) => getBuildState(prisma, context.projectId, buildRunId, detail)
     }),
+    resumeNovelBuild: tool({
+      description: 'Resume a paused or failed Novel Build when no failed task has exhausted its attempt budget. If getBuildState reports an exhausted failed task, call rerunBuildTask on that exact boundary instead.',
+      inputSchema: buildLifecycleSchema,
+      execute: async (input, options?: AgentToolInvocationContext) => approval.handleApproval(
+        'resumeNovelBuild',
+        input,
+        () => new NovelBuildUseCase(prisma).resume(context.userId, context.projectId, input.buildRunId, {
+          idempotencyKey: input.idempotencyKey,
+          expectedRevision: input.expectedRevision,
+          reason: input.reason
+        }),
+        invocationToolCallId(options),
+        options?.abortSignal
+      )
+    }),
+    retryBuildTask: tool({
+      description: 'Retry one failed BuildTask only while attempts remain. Use rerunBuildTask when attempts equals maxAttempts.',
+      inputSchema: buildTaskLifecycleSchema,
+      execute: async (input, options?: AgentToolInvocationContext) => approval.handleApproval(
+        'retryBuildTask',
+        input,
+        () => new NovelBuildUseCase(prisma).retry(context.userId, context.projectId, input.buildRunId, input.taskId, {
+          idempotencyKey: input.idempotencyKey,
+          expectedRevision: input.expectedRevision,
+          reason: input.reason
+        }),
+        invocationToolCallId(options),
+        options?.abortSignal
+      )
+    }),
+    rerunBuildTask: tool({
+      description: 'Explicitly rerun one failed or stale BuildTask boundary. Resets its attempt budget and invalidates transitive downstream output before continuing; inspect getBuildState detail=tasks first.',
+      inputSchema: buildTaskLifecycleSchema,
+      execute: async (input, options?: AgentToolInvocationContext) => approval.handleApproval(
+        'rerunBuildTask',
+        input,
+        () => new NovelBuildUseCase(prisma).rerun(context.userId, context.projectId, input.buildRunId, input.taskId, {
+          idempotencyKey: input.idempotencyKey,
+          expectedRevision: input.expectedRevision,
+          reason: input.reason
+        }, { waitForAbort: false }),
+        invocationToolCallId(options),
+        options?.abortSignal
+      )
+    }),
     listBuildUnits: tool({
       description: 'List isolated build manuscript units and their build-branch heads. Durable drafters must use these units instead of canonical chapters/scenes.',
       inputSchema: z.object({ buildRunId: z.string().trim().min(1), kind: z.enum(['chapter', 'scene']).optional(), parentUnitId: z.string().nullable().optional() }),
@@ -335,6 +392,30 @@ export async function executeBuildMutation(
         startNovelBuildSchema.parse(input)
       )
     );
+  }
+  if (toolName === 'resumeNovelBuild') {
+    const parsed = buildLifecycleSchema.parse(input);
+    return new NovelBuildUseCase(prisma).resume(context.userId, context.projectId, parsed.buildRunId, {
+      idempotencyKey: parsed.idempotencyKey,
+      expectedRevision: parsed.expectedRevision,
+      reason: parsed.reason
+    });
+  }
+  if (toolName === 'retryBuildTask') {
+    const parsed = buildTaskLifecycleSchema.parse(input);
+    return new NovelBuildUseCase(prisma).retry(context.userId, context.projectId, parsed.buildRunId, parsed.taskId, {
+      idempotencyKey: parsed.idempotencyKey,
+      expectedRevision: parsed.expectedRevision,
+      reason: parsed.reason
+    });
+  }
+  if (toolName === 'rerunBuildTask') {
+    const parsed = buildTaskLifecycleSchema.parse(input);
+    return new NovelBuildUseCase(prisma).rerun(context.userId, context.projectId, parsed.buildRunId, parsed.taskId, {
+      idempotencyKey: parsed.idempotencyKey,
+      expectedRevision: parsed.expectedRevision,
+      reason: parsed.reason
+    }, { waitForAbort: false });
   }
   if (toolName === 'applyArtifactBatch') return applyArtifactBatch(prisma, context.projectId, artifactBatchSchema.parse(input), null);
   if (toolName === 'applyChapterPatch') return applyChapterPatch(prisma, context, chapterPatchSchema.parse(input));

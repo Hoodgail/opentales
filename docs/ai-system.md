@@ -82,7 +82,7 @@ Project owners and admins can create revocable read-only or read/write credentia
 
 Hosted Claude connects through OAuth 2.1 with Dynamic Client Registration and PKCE S256. Its browser consent flow signs the user into OpenTales, lists only accessible projects, and mints short-lived access plus rotating refresh tokens for the selected project and access level. API keys remain available for local clients that can supply a Bearer header; they are never OAuth client IDs.
 
-The MCP adapter registers the same tool objects used by interactive OpenTales agents, so names, Zod schemas, bounded reads, mutation use cases, and permission checks do not drift. Skills, agent prompts, and author instruction docs are also available through MCP resources and prompt templates. `task`, `askUser`, and fenced worker-lease tools remain internal because the external host owns orchestration/user interaction and the durable worker owns persisted Novel Build tasks. Full setup and security behavior are documented in [`mcp.md`](mcp.md).
+The MCP adapter registers the same tool objects used by interactive OpenTales agents, so names, Zod schemas, bounded reads, mutation use cases, and permission checks do not drift. Skills, agent prompts, and author instruction docs are also available through MCP resources and prompt templates. Build lifecycle tools expose resume, bounded retry, and explicit failed-boundary rerun; `task`, `askUser`, and fenced worker-lease tools remain internal because the external host owns orchestration/user interaction and the durable worker owns persisted Novel Build task execution. Full setup and security behavior are documented in [`mcp.md`](mcp.md).
 
 ## Agent sessions
 

@@ -88,7 +88,9 @@ The server adapts the tool definitions in `packages/backend/src/useCases/ai/tool
 The following runtime-only capabilities are intentionally not remote workspace tools:
 
 - `task` and `askUser` depend on an OpenTales-managed interactive agent session. External hosts already own delegation and user interaction, so the server exposes agent prompts instead.
-- `applyBuildUnitPatch`, `compileBuildManuscript`, and `reportTaskResult` require a fenced durable-worker lease. Public agents use Novel Build creation, state, artifact, checkpoint, and monitoring tools while the backend worker owns persisted tasks.
+- `applyBuildUnitPatch`, `compileBuildManuscript`, and `reportTaskResult` require a fenced durable-worker lease. Public agents use Novel Build creation, state, resume, retry, explicit boundary rerun, artifact, checkpoint, and monitoring tools while the backend worker owns persisted task execution.
+
+When a failed task has exhausted its retry budget, call `getBuildState` with `detail: "tasks"`, then call `rerunBuildTask` with that task's ID and the run's current revision. This explicitly invalidates transitive downstream output and resets the boundary's attempt budget. `resumeNovelBuild` intentionally refuses to bypass an exhausted failed boundary.
 
 Mutations called through a read/write key execute immediately on the server after any approval enforced by the MCP host. Tool annotations identify reads and destructive operations so compatible clients can apply local approval policy. The result must confirm a change before an agent claims it succeeded.
 

@@ -22,6 +22,7 @@ describe('OpenTales MCP capability surface', () => {
     expect(tools.find((tool) => tool.name === 'readChapter')?.annotations?.readOnlyHint).toBe(true);
     expect(tools.find((tool) => tool.name === 'createChapter')?.annotations?.readOnlyHint).toBe(false);
     expect(tools.find((tool) => tool.name === 'deleteChapter')?.annotations?.destructiveHint).toBe(true);
+    expect(tools.find((tool) => tool.name === 'rerunBuildTask')?.annotations?.readOnlyHint).toBe(false);
     expect(tools.some((tool) => tool.name === 'task')).toBe(false);
     expect(tools.some((tool) => tool.name === 'askUser')).toBe(false);
     expect(tools.some((tool) => tool.name === 'applyBuildUnitPatch')).toBe(false);
@@ -35,6 +36,7 @@ describe('OpenTales MCP capability surface', () => {
     expect(names).toContain('runStoryLint');
     expect(names).not.toContain('createChapter');
     expect(names).not.toContain('startNovelBuild');
+    expect(names).not.toContain('rerunBuildTask');
     expect(names).not.toContain('commitCanonDelta');
   });
 

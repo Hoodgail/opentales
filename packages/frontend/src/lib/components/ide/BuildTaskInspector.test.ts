@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BuildTask } from '@opentales/sdk';
 import BuildTaskInspector from './BuildTaskInspector.svelte';
 
@@ -30,5 +30,22 @@ describe('BuildTaskInspector tabs', () => {
     expect(trace.getAttribute('tabindex')).toBe('0');
     expect(document.activeElement).toBe(trace);
     expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe('build-task-tab-task-1-trace');
+  });
+
+  it('replaces exhausted retry with the explicit failed-boundary rerun action', async () => {
+    const exhausted = {
+      ...task,
+      status: 'failed',
+      attempts: task.maxAttempts,
+      lastError: 'Provider failed after exhausting retries.'
+    } satisfies BuildTask;
+    const onRetry = vi.fn();
+    const onRerun = vi.fn();
+    render(BuildTaskInspector, { task: exhausted, tasks: [exhausted], traces: [], evaluations: [], onRetry, onRerun });
+
+    expect(screen.queryByRole('button', { name: 'Retry task' })).toBeNull();
+    await fireEvent.click(screen.getByRole('button', { name: 'Rerun failed boundary' }));
+    expect(onRetry).not.toHaveBeenCalled();
+    expect(onRerun).toHaveBeenCalledWith(exhausted, expect.any(MouseEvent));
   });
 });
