@@ -1761,7 +1761,7 @@ function roleForTask(assignedAgent: string): RuntimeRole {
   return 'creator';
 }
 
-function objectiveForTask(task: BuildTask, buildObjective: string, manifestValue: Prisma.JsonValue): string {
+export function objectiveForTask(task: BuildTask, buildObjective: string, manifestValue: Prisma.JsonValue): string {
   const manifest = jsonRecord(manifestValue);
   const requiredTypes = stringArray(jsonRecord(task.acceptanceCriteria).requiredArtifactTypes);
   const cardinality = (Array.isArray(manifest.artifactSpecs) ? manifest.artifactSpecs : [])
@@ -1777,12 +1777,15 @@ function objectiveForTask(task: BuildTask, buildObjective: string, manifestValue
     cardinality.length
       ? `Manifest artifact cardinality is authoritative and overrides conflicting suggestions in input artifacts: ${cardinality.join(', ')}.`
       : '',
-    'Persist every required structured artifact with status VALIDATED using scoped tools before reporting its ID.',
+    requiredTypes.length
+      ? 'Persist every required structured artifact with status VALIDATED using scoped tools before reporting its ID.'
+      : 'This task requires no artifact output. Report observable checks and evaluation evidence directly.',
     'Report only observable decisions, artifact IDs, validator evidence, checks, and quality scores.'
   ].filter(Boolean).join(' ');
 }
 
-function outputTypeForTask(task: BuildTask): string {
+export function outputTypeForTask(task: BuildTask): string {
+  if (task.type === 'quality-gate') return 'task-result';
   if (/critic|review|diagnostic|quality|proof/i.test(task.type)) return 'revision-issue';
   if (/draft|chapter/i.test(task.type)) return 'chapter-draft';
   return 'task-result';

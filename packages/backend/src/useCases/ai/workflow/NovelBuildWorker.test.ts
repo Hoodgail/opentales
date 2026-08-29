@@ -19,6 +19,8 @@ const {
   lookupExecutionModelPrice,
   measuredInvocationUsage,
   normalizeJudgeResultCandidate,
+  objectiveForTask,
+  outputTypeForTask,
   parseJudgeResult,
   preferredStoryIntakeModel,
   prepareQualityGateStep,
@@ -28,6 +30,20 @@ const {
 } = await import('./NovelBuildWorker.js');
 
 describe('durable Novel Build execution contract', () => {
+  it('treats quality gates as report-only contracts without fake artifact requirements', () => {
+    const task = {
+      key: 'planning-quality-gate',
+      type: 'quality-gate',
+      acceptanceCriteria: { rubric: 'complete-book-plan-v1' }
+    } as any;
+    expect(outputTypeForTask(task)).toBe('task-result');
+    const objective = objectiveForTask(task, 'Build the requested plan.', {
+      artifactSpecs: [{ type: 'revision-issue', minCount: 1, maxCount: 1 }]
+    } as any);
+    expect(objective).toContain('requires no artifact output');
+    expect(objective).not.toContain('Persist every required structured artifact');
+  });
+
   it('uses a terminal report for quality gates and parses locally validated judge JSON', () => {
     expect(prepareQualityGateStep()).toEqual({
       activeTools: ['reportTaskResult'],
