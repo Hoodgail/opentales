@@ -217,6 +217,35 @@ export function normalizeArtifactBatchForContract(
   };
 }
 
+export function normalizeArtifactContentForManifest(
+  type: StoryArtifactType,
+  content: unknown,
+  manifest: unknown
+): unknown {
+  if (type !== 'story-brief') return content;
+  const value = jsonRecord(content);
+  const target = jsonRecord(jsonRecord(manifest).target);
+  const normalized = { ...value };
+  for (const field of [
+    'genre',
+    'targetAudience',
+    'tone',
+    'targetWordCount',
+    'minWordCount',
+    'maxWordCount',
+    'targetChapterCount',
+    'targetSceneCount',
+    'targetCharacterCount'
+  ] as const) {
+    if (target[field] !== undefined && target[field] !== null) normalized[field] = target[field];
+  }
+  const lockedConstraints = stringArray(target.constraints);
+  if (lockedConstraints.length) {
+    normalized.constraints = [...new Set([...lockedConstraints, ...stringArray(value.constraints)])];
+  }
+  return normalized;
+}
+
 export function buildWorkflowTools(
   prisma: PrismaClient,
   context: ToolContext & { userId: string },
@@ -595,7 +624,10 @@ export async function applyArtifactBatch(
       serviceOperations.push({ op: 'invalidate', artifactId: current.id, expectedVersion: current.version });
       continue;
     }
-    const content = validateArtifactContent(operation.type, operation.content);
+    const content = validateArtifactContent(
+      operation.type,
+      normalizeArtifactContentForManifest(operation.type, operation.content, run.manifest)
+    );
     const current = await prisma.storyArtifact.findFirst({
       where: { projectId, buildRunId: input.buildRunId, type: toPrismaArtifactType(operation.type), key: operation.key, invalidatedAt: null, status: { notIn: ['SUPERSEDED', 'INVALIDATED'] } },
       orderBy: { version: 'desc' }

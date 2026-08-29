@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   getBuildState,
   normalizeArtifactBatchForContract,
+  normalizeArtifactContentForManifest,
   normalizeReportedTaskResult
 } from './buildTools.js';
 
@@ -119,6 +120,45 @@ describe('bounded build tool projections', () => {
     } as unknown as typeof input;
     expect(normalizeArtifactBatchForContract(withoutBindings, contract).operations[0]).toMatchObject({
       bindings: []
+    });
+  });
+
+  it('keeps immutable build targets authoritative in generated story briefs', () => {
+    expect(normalizeArtifactContentForManifest('story-brief', {
+      premise: 'A premise',
+      genre: 'wrong genre',
+      tone: ['wrong tone'],
+      constraints: ['Generated constraint'],
+      targetWordCount: 110_000,
+      minWordCount: 90_000,
+      maxWordCount: 130_000,
+      targetChapterCount: 30,
+      targetSceneCount: 90,
+      targetCharacterCount: 24
+    }, {
+      target: {
+        genre: 'Science fantasy',
+        targetAudience: 'YA / New Adult',
+        tone: ['wonder', 'betrayal'],
+        constraints: ['Stop after planning'],
+        targetWordCount: 80_000,
+        minWordCount: 72_000,
+        maxWordCount: 88_000,
+        targetChapterCount: 24,
+        targetSceneCount: 78,
+        targetCharacterCount: 9
+      }
+    })).toMatchObject({
+      genre: 'Science fantasy',
+      targetAudience: 'YA / New Adult',
+      tone: ['wonder', 'betrayal'],
+      constraints: ['Stop after planning', 'Generated constraint'],
+      targetWordCount: 80_000,
+      minWordCount: 72_000,
+      maxWordCount: 88_000,
+      targetChapterCount: 24,
+      targetSceneCount: 78,
+      targetCharacterCount: 9
     });
   });
 

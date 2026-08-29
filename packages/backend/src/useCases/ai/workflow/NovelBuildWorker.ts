@@ -727,6 +727,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     });
     const ownerAuthority = JSON.stringify({
       objective: claimed.run.objective,
+      buildTarget: jsonRecord(claimed.run.manifest).target ?? null,
       activeReplanDirective: directive ? {
         id: directive.id,
         directive: directive.directive,
