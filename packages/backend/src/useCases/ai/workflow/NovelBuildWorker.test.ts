@@ -14,6 +14,7 @@ process.env.JWT_SECRET ??= 'unit-test-secret-not-for-production';
 const {
   NovelBuildWorker,
   defaultTaskBudget,
+  deterministicExecutionTask,
   executionFailureDisposition,
   extractWorkerResult,
   lookupExecutionModelPrice,
@@ -23,7 +24,6 @@ const {
   outputTypeForTask,
   parseJudgeResult,
   preferredStoryIntakeModel,
-  prepareQualityGateStep,
   prepareStoryBriefStep,
   resolveUntouchedBuiltInSkillUpgrades,
   startNovelBuildWorker
@@ -44,11 +44,9 @@ describe('durable Novel Build execution contract', () => {
     expect(objective).not.toContain('Persist every required structured artifact');
   });
 
-  it('uses a terminal report for quality gates and parses locally validated judge JSON', () => {
-    expect(prepareQualityGateStep()).toEqual({
-      activeTools: ['reportTaskResult'],
-      toolChoice: { type: 'tool', toolName: 'reportTaskResult' }
-    });
+  it('uses deterministic quality-gate candidates and parses locally validated judge JSON', () => {
+    expect(deterministicExecutionTask({ type: 'quality-gate', executionPolicy: {} } as any)).toBe(true);
+    expect(deterministicExecutionTask({ type: 'create-world-bible', executionPolicy: {} } as any)).toBe(false);
     expect(parseJudgeResult(`Judge result:\n\`\`\`json\n${JSON.stringify({
       scores: { coherence: 0.9, causality: 0.8 },
       feedback: 'Observable planning evidence passes.',

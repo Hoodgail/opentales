@@ -582,7 +582,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const stopHeartbeat = this.startTaskHeartbeat(claimed, controller);
     try {
       const execution = await raceWithAbort(
-        deterministicTask(claimed.task)
+        deterministicExecutionTask(claimed.task)
           ? this.executeDeterministicTask(claimed)
           : this.executeModelTask(claimed, controller.signal),
         controller.signal
@@ -971,6 +971,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       },
       requestHash: stableHash({ result: execution.result, validation, judge: judge?.result ?? null, toolCalls: execution.toolCalls, toolResults: execution.toolResults }),
       status: 'completed',
+      provider: execution.trace.provider,
       model: execution.trace.model,
       modelParameters: traceModelParameters(execution.trace.claimed.task, execution.trace.price),
       toolCalls: jsonSafe(execution.toolCalls) as JsonValue,
@@ -1092,6 +1093,13 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const contract = await this.contractFor(claimed);
     const settings = await this.prisma.projectAiSettings.findUnique({ where: { projectId: claimed.run.projectId }, select: { model: true, providerKind: true } });
     const judgeModelId = process.env.AI_JUDGE_MODEL?.trim() || contract.modelPolicy.preferred || settings?.model || null;
+    const configuredJudgePrice = lookupExecutionModelPrice(this.modelPricing, settings?.providerKind, judgeModelId);
+    if (!judgeModelId || !configuredJudgePrice) {
+      throw attachExecutionUsage(new Error(`Executed judge model pricing is unknown for ${judgeModelId ?? '(unconfigured)'}`), 0, 0, judgeModelId);
+    }
+    execution.trace.provider ??= settings?.providerKind ?? null;
+    execution.trace.model ??= judgeModelId;
+    execution.trace.price ??= configuredJudgePrice;
     const evidencePack = await this.buildJudgeEvidencePack(claimed, execution, contract.budget.maxInputTokens);
     let judged: BuildJudgeExecutorOutput;
     try {
@@ -1109,9 +1117,12 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       throw attachExecutionUsage(error, usage.inputTokens ?? 0, usage.outputTokens ?? 0, usage.modelId ?? judgeModelId, usage.usageByModel);
     }
     const actualJudgeModelId = judged.modelId ?? judgeModelId;
-    if (!actualJudgeModelId || !lookupExecutionModelPrice(this.modelPricing, settings?.providerKind, actualJudgeModelId)) {
+    const actualJudgePrice = lookupExecutionModelPrice(this.modelPricing, settings?.providerKind, actualJudgeModelId);
+    if (!actualJudgeModelId || !actualJudgePrice) {
       throw attachExecutionUsage(new Error(`Executed judge model pricing is unknown for ${actualJudgeModelId ?? '(unconfigured)'}`), judged.inputTokens, judged.outputTokens, actualJudgeModelId);
     }
+    execution.trace.model = actualJudgeModelId;
+    execution.trace.price = actualJudgePrice;
     const judgeUsage = normalizeMeasuredUsage(undefined, actualJudgeModelId, judged.inputTokens, judged.outputTokens)[0];
     execution.trace.usageByModel.push(judgeUsage);
     const parsed = judgeResultSchema.parse(judged.result);
@@ -1720,6 +1731,10 @@ function deterministicTask(task: BuildTask): boolean {
   return policy.deterministic === true || ['checkpoint', 'drafting-complete-barrier', 'export-preparation', 'assemble-chapter-context', 'assemble-scene-context', 'run-chapter-diagnostics', 'run-scene-diagnostics'].includes(task.type);
 }
 
+export function deterministicExecutionTask(task: BuildTask): boolean {
+  return deterministicTask(task) || task.type === 'quality-gate';
+}
+
 export function defaultTaskBudget(task: BuildTask): {
   maxInputTokens: number;
   maxOutputTokens: number;
@@ -1997,9 +2012,7 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
         ),
         prepareStep: input.contract.metadata.taskType === 'create-story-brief'
           ? ({ steps }) => prepareStoryBriefStep(steps)
-          : input.contract.metadata.taskType === 'quality-gate'
-            ? () => prepareQualityGateStep()
-            : undefined,
+          : undefined,
         onError: ({ error }) => { streamError ??= error; }
       });
       const [usage, text, steps] = await Promise.all([
@@ -2080,13 +2093,6 @@ export function prepareStoryBriefStep(steps: Array<{ toolResults?: unknown[] }>)
     toolChoice: artifactPersisted
       ? { type: 'tool' as const, toolName }
       : 'auto' as const
-  };
-}
-
-export function prepareQualityGateStep() {
-  return {
-    activeTools: ['reportTaskResult'],
-    toolChoice: { type: 'tool' as const, toolName: 'reportTaskResult' }
   };
 }
 
