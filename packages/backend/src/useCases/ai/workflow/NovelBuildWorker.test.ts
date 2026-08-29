@@ -16,8 +16,10 @@ const {
   defaultTaskBudget,
   deterministicExecutionTask,
   executionFailureDisposition,
+  extractJudgeResult,
   extractWorkerResult,
   hasRuntimeCriticEvidence,
+  judgeEvidenceCharacterBudget,
   lookupExecutionModelPrice,
   measuredInvocationUsage,
   normalizeJudgeResultCandidate,
@@ -79,6 +81,19 @@ describe('durable Novel Build execution contract', () => {
       feedback: 'The plan is complete and internally consistent.',
       evidence: [{ type: 'judge', summary: 'All manifest outputs are validated.' }]
     });
+    expect(extractJudgeResult([], [{
+      toolName: 'reportJudgeResult',
+      input: {
+        scores: { completeness: 90, causality: 85, coherence: 88, contract: 95 },
+        feedback: 'Recovered from the provider tool-call arguments.',
+        evidence: []
+      }
+    }], '')).toMatchObject({
+      scores: { completeness: 0.9, causality: 0.85, coherence: 0.88, contract: 0.95 },
+      feedback: 'Recovered from the provider tool-call arguments.'
+    });
+    expect(judgeEvidenceCharacterBudget(96_000)).toBe(80_000);
+    expect(judgeEvidenceCharacterBudget(12_000)).toBe(16_000);
   });
 
   it('gives aggregate planning tasks a bounded large-context invocation envelope', () => {

@@ -52,11 +52,6 @@ const judgeResultSchema = z.object({
   feedback: z.string(),
   evidence: z.array(z.object({ type: z.string(), id: z.string().optional(), summary: z.string() })).max(200).default([])
 });
-const rawJudgeResultSchema = z.object({
-  scores: z.unknown(),
-  feedback: z.unknown().optional(),
-  evidence: z.unknown().optional()
-}).passthrough();
 const AGGREGATE_ARTIFACT_TASK_TYPES = new Set([
   'create-character-bibles',
   'create-plot-threads',
@@ -1197,15 +1192,15 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         : Promise.resolve([]),
       this.storyState.diagnostics(requiredUserId(claimed.run), claimed.run.projectId, claimed.run.id)
     ]);
-    const maximumCharacters = Math.max(12_000, Math.min(200_000, (maxInputTokens - 2_000) * 4));
+    const maximumCharacters = judgeEvidenceCharacterBudget(maxInputTokens);
     const artifactCharacters = Math.floor(maximumCharacters * 0.3);
     const unitCharacters = Math.floor(maximumCharacters * 0.45);
     const diagnosticCharacters = Math.floor(maximumCharacters * 0.15);
     const toolCharacters = maximumCharacters - artifactCharacters - unitCharacters - diagnosticCharacters;
     const artifactLimit = perItemLimit(artifactCharacters, artifacts.length, 300, 8_000);
     const unitLimit = perItemLimit(unitCharacters, units.length, 300, 12_000);
-    const diagnosticLimit = perItemLimit(diagnosticCharacters, diagnostics.diagnostics.length, 200, 2_000);
-    const toolLimit = perItemLimit(toolCharacters, Math.max(execution.toolCalls.length, execution.toolResults.length), 200, 2_000);
+    const diagnosticLimit = perItemLimit(diagnosticCharacters, diagnostics.diagnostics.length * 3, 200, 2_000);
+    const toolLimit = perItemLimit(toolCharacters, execution.toolCalls.length + execution.toolResults.length, 200, 2_000);
     const pack: JudgeEvidencePack = {
       artifacts: artifacts.map((artifact) => ({
         id: artifact.id,
@@ -1928,6 +1923,10 @@ function perItemLimit(totalCharacters: number, itemCount: number, minimum: numbe
   return Math.max(minimum, Math.min(maximum, Math.floor(totalCharacters / itemCount)));
 }
 
+export function judgeEvidenceCharacterBudget(maxInputTokens: number): number {
+  return Math.max(12_000, Math.min(80_000, Math.max(0, maxInputTokens - 4_000) * 2));
+}
+
 function boundedText(value: string, maximumCharacters: number): string {
   return value.length > maximumCharacters
     ? `${value.slice(0, Math.max(0, maximumCharacters - 32))}\n[${value.length - maximumCharacters} chars truncated]`
@@ -2151,17 +2150,28 @@ async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Promise<Bui
   const modelId = process.env.AI_JUDGE_MODEL?.trim() || input.contract.modelPolicy.preferred || null;
   const model = await input.resolveModel(modelId);
   let streamError: unknown;
+  const scoreShape = Object.fromEntries(
+    rubricDimensions(input.rubric).map((dimension) => [dimension, z.number().describe(`Score ${dimension} from 0 to 1`)] as const)
+  );
   const reportJudgeResult = tool({
-    description: 'Submit observable rubric scores, concise feedback, and evidence. Nested score details are accepted and normalized locally.',
-    inputSchema: rawJudgeResultSchema,
-    execute: async (value) => normalizeJudgeResultCandidate(value)
+    description: 'Submit every required rubric score from 0 to 1, concise feedback, and observable evidence.',
+    inputSchema: z.object({
+      scores: z.object(scoreShape),
+      feedback: z.string().default(''),
+      evidence: z.array(z.object({
+        type: z.string().default('judge'),
+        id: z.string().optional(),
+        summary: z.string()
+      })).max(200).default([])
+    }),
+    execute: async (value) => value
   });
   const generation = streamText({
     model,
     system: [
       'You are an independent fiction-quality evaluator. You have diagnostics-only authority and cannot mutate or self-certify the candidate.',
       'Score only the supplied rubric and observable evidence. Do not expose hidden reasoning.',
-      'Return only JSON with non-empty numeric scores, concise feedback, and an evidence array.'
+      'Call reportJudgeResult exactly once with every required score dimension, concise feedback, and observable evidence.'
     ].join('\n'),
     prompt: renderJudgePrompt(input),
     tools: { reportJudgeResult },
@@ -2169,13 +2179,14 @@ async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Promise<Bui
     stopWhen: hasToolCall('reportJudgeResult'),
     abortSignal: input.abortSignal,
     maxOutputTokens: Math.min(4_000, input.contract.budget.maxOutputTokens),
-    providerOptions: providerOptionsForAiModel(model),
+    providerOptions: providerOptionsForAiModel(model, { reasoningEffort: 'low', textVerbosity: 'low' }),
     onError: ({ error }) => { streamError ??= error; }
   });
-  const [usage, text, steps] = await Promise.all([
+  const [usage, text, steps, finishReason] = await Promise.all([
     generation.totalUsage,
     generation.text,
-    generation.steps
+    generation.steps,
+    generation.finishReason
   ]);
   if (streamError) {
     throw attachExecutionUsage(
@@ -2186,16 +2197,52 @@ async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Promise<Bui
       modelId ? normalizeMeasuredUsage(undefined, modelId, usage?.inputTokens ?? 0, usage?.outputTokens ?? 0) : []
     );
   }
-  const reported = steps.flatMap((step) => step.toolResults ?? []).find((value) =>
-    jsonRecord(value).toolName === 'reportJudgeResult'
-  );
-  const normalized = judgeResultSchema.safeParse(jsonRecord(reported).output);
+  const toolCalls = steps.flatMap((step) => step.toolCalls ?? []);
+  const toolResults = steps.flatMap((step) => step.toolResults ?? []);
+  let result: z.infer<typeof judgeResultSchema>;
+  try {
+    result = extractJudgeResult(toolResults, toolCalls, text);
+  } catch (error) {
+    const failure = new Error(
+      `${error instanceof Error ? error.message : 'Independent judge result was invalid'} `
+      + `(finishReason=${finishReason}, toolCalls=${toolCalls.length}, toolResults=${toolResults.length}, textCharacters=${text.length})`
+    );
+    Object.assign(failure, { providerUsageComplete: true });
+    throw attachExecutionUsage(
+      failure,
+      usage?.inputTokens ?? 0,
+      usage?.outputTokens ?? 0,
+      modelId,
+      modelId ? normalizeMeasuredUsage(undefined, modelId, usage?.inputTokens ?? 0, usage?.outputTokens ?? 0) : []
+    );
+  }
   return {
-    result: normalized.success ? normalized.data : parseJudgeResult(text),
+    result,
     inputTokens: usage?.inputTokens ?? 0,
     outputTokens: usage?.outputTokens ?? 0,
     modelId
   };
+}
+
+export function extractJudgeResult(toolResults: unknown[], toolCalls: unknown[], text: string): z.infer<typeof judgeResultSchema> {
+  const candidates = [
+    ...[...toolResults].reverse().flatMap((value) => {
+      const result = jsonRecord(value);
+      return result.toolName === 'reportJudgeResult' ? [result.output] : [];
+    }),
+    ...[...toolCalls].reverse().flatMap((value) => {
+      const call = jsonRecord(value);
+      return call.toolName === 'reportJudgeResult' ? [call.input ?? call.args ?? call.arguments] : [];
+    })
+  ];
+  for (const candidate of candidates) {
+    try {
+      return normalizeJudgeResultCandidate(candidate);
+    } catch {
+      // Try the next observable provider representation.
+    }
+  }
+  return parseJudgeResult(text);
 }
 
 export function parseJudgeResult(text: string): z.infer<typeof judgeResultSchema> {
@@ -2231,8 +2278,9 @@ export function normalizeJudgeResultCandidate(value: unknown): z.infer<typeof ju
         ? Number(rawValue)
         : [detail.score, detail.value, detail.rating].find((item) => typeof item === 'number');
     if (typeof score !== 'number' || !Number.isFinite(score)) return;
+    const normalizedScore = score > 1 && score <= 100 ? score / 100 : score;
     const key = rawKey.trim().replace(/[\s_-]+(.)/g, (_match, letter: string) => letter.toUpperCase());
-    scores[key.charAt(0).toLowerCase() + key.slice(1)] = score;
+    scores[key.charAt(0).toLowerCase() + key.slice(1)] = normalizedScore;
   };
   if (Array.isArray(rawScores)) {
     for (const item of rawScores) {
