@@ -16,6 +16,7 @@ const {
   executionFailureDisposition,
   extractWorkerResult,
   lookupExecutionModelPrice,
+  measuredInvocationUsage,
   preferredStoryIntakeModel,
   prepareStoryBriefStep,
   resolveUntouchedBuiltInSkillUpgrades,
@@ -23,6 +24,22 @@ const {
 } = await import('./NovelBuildWorker.js');
 
 describe('durable Novel Build execution contract', () => {
+  it('keeps multi-step provider usage separate for per-invocation limits', () => {
+    const usage = measuredInvocationUsage([
+      { usage: { inputTokens: 52_000, outputTokens: 5_200 } },
+      { usage: { inputTokens: 48_000, outputTokens: 5_400 } },
+      { usage: { inputTokens: 52_692, outputTokens: 6_026 } }
+    ], 'codex/gpt-5.6-sol', 152_692, 16_626);
+
+    expect(usage).toHaveLength(3);
+    expect(usage.reduce((sum, item) => sum + item.inputTokens, 0)).toBe(152_692);
+    expect(usage.reduce((sum, item) => sum + item.outputTokens, 0)).toBe(16_626);
+    expect(usage.every((item) => item.inputTokens <= 96_000 && item.outputTokens <= 12_000)).toBe(true);
+    expect(measuredInvocationUsage([
+      { usage: { inputTokens: 96_001, outputTokens: 1 } }
+    ], 'codex/gpt-5.6-sol', 96_001, 1)[0]).toMatchObject({ inputTokens: 96_001 });
+  });
+
   it('forces the single story-brief mutation before its terminal report', () => {
     expect(prepareStoryBriefStep([])).toEqual({
       activeTools: ['applyArtifactBatch'],

@@ -1992,7 +1992,12 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
       ]);
       if (streamError) {
         const partialUsage = actualModelId
-          ? normalizeMeasuredUsage(undefined, actualModelId, usage?.inputTokens ?? 0, usage?.outputTokens ?? 0)
+          ? measuredInvocationUsage(
+            steps,
+            actualModelId,
+            usage?.inputTokens ?? 0,
+            usage?.outputTokens ?? 0
+          )
           : [];
         throw attachExecutionUsage(
           streamError,
@@ -2004,7 +2009,14 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
       }
       cumulativeInputTokens += usage?.inputTokens ?? 0;
       cumulativeOutputTokens += usage?.outputTokens ?? 0;
-      if (actualModelId) usageByModel.push(...normalizeMeasuredUsage(undefined, actualModelId, usage?.inputTokens ?? 0, usage?.outputTokens ?? 0));
+      if (actualModelId) {
+        usageByModel.push(...measuredInvocationUsage(
+          steps,
+          actualModelId,
+          usage?.inputTokens ?? 0,
+          usage?.outputTokens ?? 0
+        ));
+      }
       let result: WorkerResult;
       try {
         result = extractWorkerResult(
@@ -2280,6 +2292,30 @@ function normalizeMeasuredUsage(
     throw new Error('usageByModel totals do not match measured provider token usage');
   }
   return normalized;
+}
+
+export function measuredInvocationUsage(
+  steps: Array<{ usage?: { inputTokens?: number; outputTokens?: number } }>,
+  modelId: string,
+  totalInputTokens: number,
+  totalOutputTokens: number
+): MeasuredModelUsage[] {
+  const perStep = steps.map((step) => ({
+    modelId,
+    inputTokens: step.usage?.inputTokens,
+    outputTokens: step.usage?.outputTokens
+  }));
+  if (perStep.length > 0 && perStep.every((usage) =>
+    typeof usage.inputTokens === 'number' && typeof usage.outputTokens === 'number'
+  )) {
+    return normalizeMeasuredUsage(
+      perStep as MeasuredModelUsage[],
+      modelId,
+      totalInputTokens,
+      totalOutputTokens
+    );
+  }
+  return normalizeMeasuredUsage(undefined, modelId, totalInputTokens, totalOutputTokens);
 }
 
 function tokenCount(value: number, label: string): number {
