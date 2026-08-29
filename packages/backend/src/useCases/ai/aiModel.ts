@@ -9,6 +9,15 @@ import { createCodexFetch } from './codexProvider.js';
 
 export type AiModel = Parameters<typeof generateText>[0]['model'];
 
+export function providerOptionsForAiModel(model: AiModel) {
+  const provider = model && typeof model === 'object' && 'provider' in model
+    ? String(model.provider)
+    : '';
+  return provider.startsWith('codex.')
+    ? { openai: { store: false, include: ['reasoning.encrypted_content'] } }
+    : undefined;
+}
+
 export async function loadAiModelForProject(
   prisma: PrismaClient,
   projectId: string,

@@ -137,6 +137,15 @@ const checkpointSchema = z.object({
   stateSnapshot: z.unknown().optional()
 });
 
+const reportedCheckValueSchema = z.union([
+  z.boolean(),
+  z.object({ passed: z.boolean() }).passthrough()
+]);
+const reportedQualityValueSchema = z.union([
+  z.number().min(0).max(1),
+  z.string().trim().min(1),
+  z.object({ score: z.number().min(0).max(1) }).passthrough()
+]);
 const taskResultSchema = z.object({
   buildRunId: z.string().trim().min(1),
   taskId: z.string().trim().min(1),
@@ -145,8 +154,8 @@ const taskResultSchema = z.object({
   decisions: z.array(z.object({ decision: z.string().trim().min(1), reason: z.string().trim().min(1) })).max(100).default([]),
   artifactIds: z.array(z.string()).max(10_000).default([]),
   evidence: z.array(z.object({ type: z.string(), id: z.string().optional(), summary: z.string() })).max(5_000).default([]),
-  checks: z.record(z.string(), z.boolean()).default({}),
-  quality: z.record(z.string(), z.number().min(0).max(1)).default({}),
+  checks: z.record(z.string(), reportedCheckValueSchema).default({}),
+  quality: z.record(z.string(), reportedQualityValueSchema).default({}),
   unresolvedQuestions: z.array(z.string()).max(30).default([])
 });
 const buildStateInputSchema = z.object({
@@ -178,6 +187,35 @@ const buildUnitPatchSchema = z.object({
 }).refine((input) => input.body !== undefined || input.title !== undefined || input.status !== undefined || input.tension !== undefined || input.metadata !== undefined, 'At least one unit change is required');
 
 export type ReportedTaskResult = z.infer<typeof taskResultSchema>;
+
+export function normalizeReportedTaskResult(input: ReportedTaskResult) {
+  const checks = Object.fromEntries(Object.entries(input.checks).map(([key, value]) => [
+    key,
+    typeof value === 'boolean' ? value : value.passed
+  ]));
+  const quality = Object.fromEntries(Object.entries(input.quality).flatMap(([key, value]) => {
+    const score = typeof value === 'number'
+      ? value
+      : typeof value === 'object' && value !== null && 'score' in value
+        ? value.score
+        : null;
+    return typeof score === 'number' ? [[key, score]] : [];
+  }));
+  return { ...input, checks, quality };
+}
+
+export function normalizeArtifactBatchForContract(
+  input: z.infer<typeof artifactBatchSchema>,
+  contract: TaskContract | null
+): z.infer<typeof artifactBatchSchema> {
+  if (!contract?.scope.buildTaskId || contract.scope.manuscriptUnitIds.length > 0) return input;
+  return {
+    ...input,
+    operations: input.operations.map((operation) => operation.action === 'upsert'
+      ? { ...operation, bindings: operation.bindings.filter((binding) => binding.bindingKind !== 'build-unit') }
+      : operation)
+  };
+}
 
 export function buildWorkflowTools(
   prisma: PrismaClient,
@@ -352,9 +390,18 @@ export function buildWorkflowTools(
       }
     }),
     applyArtifactBatch: tool({
-      description: 'Atomically create/version/invalidate up to 100 structured story artifacts on one build. Idempotency and expected-version checks are required.',
+      description: 'Atomically create/version/invalidate up to 100 structured story artifacts on one build. Idempotency and expected-version checks are required. Omit build-unit bindings unless the active task contract assigns real manuscriptUnitIds.',
       inputSchema: artifactBatchSchema,
-      execute: async (input, options?: AgentToolInvocationContext) => approval.handleApproval('applyArtifactBatch', input, () => applyArtifactBatch(prisma, context.projectId, input, executionLease), invocationToolCallId(options), options?.abortSignal)
+      execute: async (input, options?: AgentToolInvocationContext) => {
+        const scopedInput = normalizeArtifactBatchForContract(input, taskContract);
+        return approval.handleApproval(
+          'applyArtifactBatch',
+          scopedInput,
+          () => applyArtifactBatch(prisma, context.projectId, scopedInput, executionLease),
+          invocationToolCallId(options),
+          options?.abortSignal
+        );
+      }
     }),
     applyChapterPatch: tool({
       description: 'Apply a stale-safe full replacement or exact edits only to the assigned chapter on the build-bound AI writing branch.',
@@ -367,7 +414,7 @@ export function buildWorkflowTools(
       execute: async (input, options?: AgentToolInvocationContext) => approval.handleApproval('createCheckpoint', input, () => createCheckpoint(prisma, context, input), invocationToolCallId(options), options?.abortSignal)
     }),
     reportTaskResult: tool({
-      description: 'Report the assigned task result as decisions, persisted artifact IDs, validator evidence, checks, and quality scores. This never records hidden reasoning and cannot self-approve quality.',
+      description: 'Report the assigned task result as decisions, persisted artifact IDs, validator evidence, checks, and quality scores. Checks may be booleans or detailed objects containing passed; quality may include numeric scores or detailed objects containing score. This never records hidden reasoning and cannot self-approve quality.',
       inputSchema: taskResultSchema,
       execute: async (input) => {
         if (!taskContract?.scope.buildTaskId) throw new HttpError(403, 'Task results require an assigned typed build task contract');
@@ -683,7 +730,13 @@ export async function reportTaskResult(
     // remain RUNNING while the independent evaluator persists checks and the
     // worker alone decides DONE/retry/escalation. The observable report is
     // captured in the worker trace.
-    return { ok: true, taskId: task.id, status: 'RUNNING', evaluatorRequired: true, observableResult: input };
+    return {
+      ok: true,
+      taskId: task.id,
+      status: 'RUNNING',
+      evaluatorRequired: true,
+      observableResult: normalizeReportedTaskResult(input)
+    };
   });
 }
 

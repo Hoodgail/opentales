@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
-import { loadAiModelForProject } from './aiModel.js';
+import { loadAiModelForProject, providerOptionsForAiModel } from './aiModel.js';
 
 describe('Codex model resolution', () => {
   it('uses the OpenAI Responses provider with the bare allowed model id', async () => {
@@ -12,6 +12,10 @@ describe('Codex model resolution', () => {
       provider: 'codex.responses',
       modelId: 'gpt-5.4'
     });
+    expect(providerOptionsForAiModel(model)).toEqual({
+      openai: { store: false, include: ['reasoning.encrypted_content'] }
+    });
+    expect(providerOptionsForAiModel('gateway/model')).toBeUndefined();
   });
 
   it('rejects models outside the Codex subscription allowlist before inference', async () => {

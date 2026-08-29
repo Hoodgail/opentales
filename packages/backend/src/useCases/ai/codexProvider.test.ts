@@ -126,7 +126,10 @@ describe('Codex OAuth provider', () => {
     expect(headers.get('x-api-key')).toBeNull();
     expect(headers.get('originator')).toBe('opentales');
     expect(headers.get('session-id')).toMatch(/^[0-9a-f-]{36}$/);
-    expect(JSON.parse(String(init?.body))).toEqual({ model: 'gpt-5.4', input: [], store: false, stream: true });
+    expect(JSON.parse(String(init?.body))).toEqual({
+      model: 'gpt-5.4', input: [], store: false, stream: true,
+      include: ['reasoning.encrypted_content']
+    });
   });
 
   it('runs a normal AI SDK text task through the Codex Responses transport', async () => {
@@ -166,6 +169,7 @@ describe('Codex OAuth provider', () => {
     expect(String(url)).toBe(CODEX_API_ENDPOINT);
     expect(JSON.parse(String(init?.body))).not.toHaveProperty('max_output_tokens');
     expect(JSON.parse(String(init?.body))).toHaveProperty('store', false);
+    expect(JSON.parse(String(init?.body))).toHaveProperty('include', ['reasoning.encrypted_content']);
   });
 
   it('deduplicates concurrent refreshes and persists rotated credentials atomically', async () => {

@@ -13,7 +13,7 @@ import {
   validateArtifactContent
 } from '../../novelBuild/schemas.js';
 import { loadAiSkillCatalog, loadAiSkillReferences, type AiSkillCatalogItem } from '../markdownCatalog.js';
-import { loadAiModelForProject } from '../aiModel.js';
+import { loadAiModelForProject, providerOptionsForAiModel } from '../aiModel.js';
 import { isCodexModelAllowed } from '../codexModels.js';
 import { ContextAssembler, estimateTokens } from '../context/ContextAssembler.js';
 import { renderInferenceLayers } from '../prompts/layeredInference.js';
@@ -1938,6 +1938,7 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
     const actualModelId = modelId ?? input.defaultModelId ?? input.contract.modelPolicy.preferred ?? null;
     try {
       const model = await input.resolveModel(modelId);
+      let streamError: unknown;
       const generation = streamText({
         model,
         system: input.system,
@@ -1945,21 +1946,42 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
         tools: input.tools,
         stopWhen: [hasToolCall('reportTaskResult'), stepCountIs(input.stepLimit)],
         abortSignal: input.abortSignal,
-        maxOutputTokens: input.contract.budget.maxOutputTokens
+        maxOutputTokens: input.contract.budget.maxOutputTokens,
+        providerOptions: providerOptionsForAiModel(model),
+        onError: ({ error }) => { streamError ??= error; }
       });
       const [usage, text, steps] = await Promise.all([
         generation.totalUsage,
         generation.text,
         generation.steps
       ]);
+      if (streamError) {
+        const partialUsage = actualModelId
+          ? normalizeMeasuredUsage(undefined, actualModelId, usage?.inputTokens ?? 0, usage?.outputTokens ?? 0)
+          : [];
+        throw attachExecutionUsage(
+          streamError,
+          usage?.inputTokens ?? 0,
+          usage?.outputTokens ?? 0,
+          actualModelId,
+          partialUsage
+        );
+      }
       cumulativeInputTokens += usage?.inputTokens ?? 0;
       cumulativeOutputTokens += usage?.outputTokens ?? 0;
       if (actualModelId) usageByModel.push(...normalizeMeasuredUsage(undefined, actualModelId, usage?.inputTokens ?? 0, usage?.outputTokens ?? 0));
-      return {
-        result: extractWorkerResult(
+      let result: WorkerResult;
+      try {
+        result = extractWorkerResult(
           steps.flatMap((step) => step.toolResults ?? []),
           text
-        ),
+        );
+      } catch (error) {
+        if (error && typeof error === 'object') Object.assign(error, { providerUsageComplete: true });
+        throw error;
+      }
+      return {
+        result,
         inputTokens: cumulativeInputTokens,
         outputTokens: cumulativeOutputTokens,
         toolCalls: steps.flatMap((step) => step.toolCalls ?? []),
@@ -1986,6 +2008,7 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
 async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Promise<BuildJudgeExecutorOutput> {
   const modelId = process.env.AI_JUDGE_MODEL?.trim() || input.contract.modelPolicy.preferred || null;
   const model = await input.resolveModel(modelId);
+  let streamError: unknown;
   const generation = streamText({
     model,
     system: [
@@ -1995,9 +2018,20 @@ async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Promise<Bui
     prompt: renderJudgePrompt(input),
     output: Output.object({ schema: judgeResultSchema }),
     abortSignal: input.abortSignal,
-    maxOutputTokens: Math.min(4_000, input.contract.budget.maxOutputTokens)
+    maxOutputTokens: Math.min(4_000, input.contract.budget.maxOutputTokens),
+    providerOptions: providerOptionsForAiModel(model),
+    onError: ({ error }) => { streamError ??= error; }
   });
   const [usage, output] = await Promise.all([generation.totalUsage, generation.output]);
+  if (streamError) {
+    throw attachExecutionUsage(
+      streamError,
+      usage?.inputTokens ?? 0,
+      usage?.outputTokens ?? 0,
+      modelId,
+      modelId ? normalizeMeasuredUsage(undefined, modelId, usage?.inputTokens ?? 0, usage?.outputTokens ?? 0) : []
+    );
+  }
   return {
     result: judgeResultSchema.parse(output),
     inputTokens: usage?.inputTokens ?? 0,
@@ -2044,6 +2078,7 @@ export function executionFailureDisposition(error: unknown): {
     && statusCode < 500
     && ![408, 409, 425, 429].includes(statusCode);
   const explicitlyNonRetryable = value.isRetryable === false || cause.isRetryable === false;
+  const providerUsageComplete = value.providerUsageComplete === true || cause.providerUsageComplete === true;
   const baseMessage = error instanceof Error && error.message.trim()
     ? error.message.trim()
     : 'Novel Build task failed';
@@ -2053,7 +2088,7 @@ export function executionFailureDisposition(error: unknown): {
       ? `${baseMessage}: ${detail}`
       : baseMessage,
     retryable: !rejectedBeforeExecution && !explicitlyNonRetryable,
-    mayHaveUnreportedUsage: !rejectedBeforeExecution
+    mayHaveUnreportedUsage: !rejectedBeforeExecution && !providerUsageComplete
   };
 }
 

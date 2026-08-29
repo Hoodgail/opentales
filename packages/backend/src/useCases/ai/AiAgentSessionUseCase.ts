@@ -26,7 +26,7 @@ import { HttpError } from '../../http/HttpError.js';
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
 import { findAgent, loadAiAgents, subagentsForTask, type AiAgentInfo } from './agents.js';
 import { loadAiSkillCatalog, loadAiSkillReferences } from './markdownCatalog.js';
-import { loadAiModelForProject } from './aiModel.js';
+import { loadAiModelForProject, providerOptionsForAiModel } from './aiModel.js';
 import { renderSystemPrompt, renderUserContext } from './prompts/promptEngine.js';
 import { buildRecentTranscript } from './prompts/conversationHistory.js';
 import { renderInferenceLayers } from './prompts/layeredInference.js';
@@ -751,7 +751,8 @@ export class AiAgentSessionUseCase {
           tools: this.buildAgentTools(projectId, session.id, queued.id, userId, agents, activeAgent, promptPayload.taskContract, skillAllowedTools, promptPayload.buildRunId, promptPayload.approvalMode),
           stopWhen: stepCountIs(stepLimitForTask(promptPayload.taskContract)),
           system: systemPrompt,
-          messages
+          messages,
+          providerOptions: providerOptionsForAiModel(model)
         });
 
         for await (const part of result.fullStream) {

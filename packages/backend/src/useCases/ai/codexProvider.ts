@@ -341,6 +341,10 @@ function shapeCodexRequestBody(
     // default (`store: true`). Codex CLI-compatible clients must opt out of
     // response storage on every request, including tool-driven generations.
     parsed.store = false;
+    const include = Array.isArray(parsed.include)
+      ? parsed.include.filter((value): value is string => typeof value === 'string')
+      : [];
+    parsed.include = [...new Set([...include, 'reasoning.encrypted_content'])];
     return JSON.stringify(parsed);
   } catch {
     return body;

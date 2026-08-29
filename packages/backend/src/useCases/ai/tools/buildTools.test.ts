@@ -1,6 +1,10 @@
 import type { PrismaClient } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
-import { getBuildState } from './buildTools.js';
+import {
+  getBuildState,
+  normalizeArtifactBatchForContract,
+  normalizeReportedTaskResult
+} from './buildTools.js';
 
 const now = new Date('2026-08-26T00:00:00.000Z');
 
@@ -58,6 +62,59 @@ function fixture() {
 }
 
 describe('bounded build tool projections', () => {
+  it('normalizes detailed model self-reports into flat observable checks and scores', () => {
+    expect(normalizeReportedTaskResult({
+      buildRunId: 'build-1',
+      taskId: 'task-1',
+      idempotencyKey: 'report-1',
+      status: 'complete',
+      decisions: [],
+      artifactIds: ['artifact-1'],
+      evidence: [],
+      checks: {
+        requiredArtifactTypes: { passed: true, observed: ['story-brief'] },
+        scope: false
+      },
+      quality: {
+        rubric: 'story-brief-v1',
+        score: 0.96,
+        specificity: { score: 0.9, note: 'specific' }
+      },
+      unresolvedQuestions: []
+    })).toMatchObject({
+      checks: { requiredArtifactTypes: true, scope: false },
+      quality: { score: 0.96, specificity: 0.9 }
+    });
+  });
+
+  it('drops invented build-unit bindings from unscoped planning artifacts', () => {
+    const input = {
+      buildRunId: 'build-1',
+      taskId: 'task-1',
+      idempotencyKey: 'artifact-1',
+      operations: [{
+        action: 'upsert' as const,
+        type: 'story-brief' as const,
+        key: 'story-brief',
+        title: 'Story Brief',
+        schemaVersion: '1',
+        content: {},
+        status: 'VALIDATED' as const,
+        bindings: [
+          { bindingKind: 'build-unit' as const, role: 'invented', unitId: 'story-brief:1' },
+          { bindingKind: 'entity' as const, role: 'subject', entityType: 'character', entityId: 'character-1' }
+        ]
+      }]
+    };
+    const contract = {
+      scope: { buildTaskId: 'task-1', manuscriptUnitIds: [] }
+    } as unknown as Parameters<typeof normalizeArtifactBatchForContract>[1];
+
+    expect(normalizeArtifactBatchForContract(input, contract).operations[0]).toMatchObject({
+      bindings: [{ bindingKind: 'entity', entityId: 'character-1' }]
+    });
+  });
+
   it('returns a compact summary without full manifests, task policies, brainstorms, or artifact bodies', async () => {
     const { prisma } = fixture();
     const summary = await getBuildState(prisma, 'project-1', 'build-1');

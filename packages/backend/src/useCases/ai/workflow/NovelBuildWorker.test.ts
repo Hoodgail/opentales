@@ -39,6 +39,13 @@ describe('durable Novel Build execution contract', () => {
       retryable: true,
       mayHaveUnreportedUsage: true
     });
+    expect(executionFailureDisposition(Object.assign(new Error('Invalid observable result'), {
+      providerUsageComplete: true
+    }))).toEqual({
+      message: 'Invalid observable result',
+      retryable: true,
+      mayHaveUnreportedUsage: false
+    });
   });
 
   it('accounts Codex subscription models at zero without making other providers free', () => {
