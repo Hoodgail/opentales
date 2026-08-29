@@ -11,6 +11,22 @@ export default defineConfig({
       '/mcp': {
         target: 'http://localhost:4000',
         changeOrigin: true
+      },
+      '/token': {
+        target: 'http://localhost:4000',
+        changeOrigin: true
+      },
+      '/register': {
+        target: 'http://localhost:4000',
+        changeOrigin: true
+      },
+      '/revoke': {
+        target: 'http://localhost:4000',
+        changeOrigin: true
+      },
+      '/.well-known': {
+        target: 'http://localhost:4000',
+        changeOrigin: true
       }
     }
   },

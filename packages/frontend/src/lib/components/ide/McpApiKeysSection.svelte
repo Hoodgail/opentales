@@ -146,8 +146,8 @@
 <div class="space-y-3 text-xs">
   <div>
     <p class="text-[11px] leading-relaxed text-muted-foreground">
-      Connect Codex, Claude Code, or another MCP client directly to this project. The endpoint
-      loads the project tools, Agent Skills, author instructions, and agent prompts.
+      Connect Codex, Claude Code, hosted Claude, or another MCP client directly to this project.
+      The endpoint loads the project tools, Agent Skills, author instructions, and agent prompts.
     </p>
     <div class="mt-2 flex items-center gap-1.5 rounded-md border border-border bg-muted/40 p-1.5">
       <code class="min-w-0 flex-1 truncate font-mono text-[10px] text-foreground">
@@ -162,6 +162,11 @@
         {#if copied === 'endpoint'}<Check class="size-3" />{:else}<Copy class="size-3" />{/if}
       </button>
     </div>
+    <p class="mt-2 rounded-md border border-border bg-muted/30 p-2 text-[10px] leading-relaxed text-muted-foreground">
+      <strong class="text-foreground">Claude.ai:</strong> add only this server URL and leave custom
+      client credentials empty. Claude will open OpenTales sign-in and project consent. API keys are
+      for clients that support a Bearer-token environment variable or header.
+    </p>
   </div>
 
   {#if !canManage()}

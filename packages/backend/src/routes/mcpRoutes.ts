@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import { prisma } from '../config/prisma.js';
-import { requireMcpApiKey, validateMcpOrigin } from '../middleware/mcpAuthMiddleware.js';
+import { requireMcpAuth, validateMcpOrigin } from '../middleware/mcpAuthMiddleware.js';
 import { createOpenTalesMcpServer } from '../mcp/OpenTalesMcpServer.js';
 
 const handler = createMcpHandler(
@@ -22,6 +22,6 @@ export async function closeMcpHandler(): Promise<void> {
   await handler.close();
 }
 
-mcpRoutes.all('/', validateMcpOrigin, requireMcpApiKey, (req, res, next) => {
+mcpRoutes.all('/', validateMcpOrigin, requireMcpAuth, (req, res, next) => {
   nodeHandler(req, res, req.body).catch(next);
 });

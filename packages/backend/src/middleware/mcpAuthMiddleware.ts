@@ -5,12 +5,17 @@ import { env } from '../config/env.js';
 import { prisma } from '../config/prisma.js';
 import { HttpError } from '../http/HttpError.js';
 import { hashMcpApiKey } from '../useCases/ai/ProjectMcpApiKeysUseCase.js';
+import {
+  hashOAuthSecret,
+  OAUTH_ACCESS_TOKEN_PREFIX
+} from '../useCases/ai/McpOAuthUseCase.js';
 import { roleHas } from '../utils/permissions.js';
 
 export type McpProjectAccess = 'read-only' | 'read-write';
 
 export interface McpAuthContext {
-  apiKeyId: string;
+  credentialId: string;
+  credentialType: 'api-key' | 'oauth';
   projectId: string;
   projectTitle: string;
   orgId: string;
@@ -43,23 +48,35 @@ export function validateMcpOrigin(req: Request, res: Response, next: NextFunctio
   next();
 }
 
-export async function requireMcpApiKey(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function requireMcpAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const authorization = req.header('authorization');
     const secret = authorization?.startsWith('Bearer ')
       ? authorization.slice('Bearer '.length).trim()
       : '';
-    if (!secret) throw new HttpError(401, 'MCP API key required');
-    req.auth = await authenticateMcpApiKey(prisma, secret);
+    if (!secret) throw new HttpError(401, 'MCP credential required');
+    req.auth = await authenticateMcpCredential(prisma, secret);
     next();
   } catch (error) {
     if (!(error instanceof HttpError)) console.error('MCP authentication failed', error);
     const status = error instanceof HttpError ? error.status : 500;
-    if (status === 401) res.setHeader('WWW-Authenticate', 'Bearer realm="OpenTales MCP"');
+    if (status === 401) {
+      res.setHeader(
+        'WWW-Authenticate',
+        `Bearer resource_metadata="${env.mcpOAuthIssuer}/.well-known/oauth-protected-resource/mcp", scope="opentales:project:read opentales:project:write"`
+      );
+    }
     res.status(status).json({
-      message: status === 401 ? 'Invalid, expired, or revoked MCP API key' : 'Unable to authenticate MCP request'
+      message: status === 401 ? 'Invalid, expired, or revoked MCP credential' : 'Unable to authenticate MCP request'
     });
   }
+}
+
+export const requireMcpApiKey = requireMcpAuth;
+
+export async function authenticateMcpCredential(client: PrismaClient, secret: string): Promise<AuthInfo> {
+  if (secret.startsWith(OAUTH_ACCESS_TOKEN_PREFIX)) return authenticateMcpOAuthToken(client, secret);
+  return authenticateMcpApiKey(client, secret);
 }
 
 export async function authenticateMcpApiKey(
@@ -97,7 +114,8 @@ export async function authenticateMcpApiKey(
   const canWrite = key.permission === 'READ_WRITE' && roleHas(membership.role, 'project:write');
   const access: McpProjectAccess = canWrite ? 'read-write' : 'read-only';
   const context: McpAuthContext = {
-    apiKeyId: key.id,
+    credentialId: key.id,
+    credentialType: 'api-key',
     projectId: key.project.id,
     projectTitle: key.project.title,
     orgId: key.project.orgId,
@@ -130,11 +148,66 @@ export async function authenticateMcpApiKey(
   };
 }
 
+export async function authenticateMcpOAuthToken(
+  client: PrismaClient,
+  secret: string
+): Promise<AuthInfo> {
+  if (!/^otoauth_[A-Za-z0-9_-]{40,}$/.test(secret)) throw new HttpError(401, 'Invalid MCP OAuth token');
+  const token = await client.mcpOAuthToken.findUnique({
+    where: { accessTokenHash: hashOAuthSecret(secret) },
+    include: {
+      project: { select: { id: true, orgId: true, title: true, deletedAt: true } },
+      user: { select: { memberships: { select: { orgId: true, role: true } } } }
+    }
+  });
+  const now = new Date();
+  if (
+    !token
+    || token.revokedAt
+    || token.project.deletedAt
+    || token.resource !== env.mcpPublicUrl
+    || token.accessExpiresAt.getTime() <= now.getTime()
+    || !token.scopes.includes('opentales:project:read')
+  ) throw new HttpError(401, 'Invalid MCP OAuth token');
+  const membership = token.user.memberships.find((candidate) => candidate.orgId === token.project.orgId);
+  if (!membership) throw new HttpError(401, 'Invalid MCP OAuth token');
+  const canWrite = token.permission === 'READ_WRITE'
+    && token.scopes.includes('opentales:project:write')
+    && roleHas(membership.role, 'project:write');
+  const access: McpProjectAccess = canWrite ? 'read-write' : 'read-only';
+  const context: McpAuthContext = {
+    credentialId: token.id,
+    credentialType: 'oauth',
+    projectId: token.project.id,
+    projectTitle: token.project.title,
+    orgId: token.project.orgId,
+    userId: token.userId,
+    role: membership.role,
+    access
+  };
+  const staleBefore = new Date(now.getTime() - 5 * 60 * 1000);
+  if (!token.lastUsedAt || token.lastUsedAt < staleBefore) {
+    client.mcpOAuthToken.updateMany({
+      where: { id: token.id, OR: [{ lastUsedAt: null }, { lastUsedAt: { lt: staleBefore } }] },
+      data: { lastUsedAt: now }
+    }).catch((error) => console.error('Failed to update MCP OAuth-token usage timestamp', error));
+  }
+  return {
+    token: secret,
+    clientId: token.clientId,
+    scopes: scopesFor(membership.role, access),
+    expiresAt: Math.floor(token.accessExpiresAt.getTime() / 1000),
+    resource: new URL(token.resource),
+    extra: { ...context }
+  };
+}
+
 export function mcpAuthContext(authInfo: AuthInfo | undefined): McpAuthContext {
   const extra = authInfo?.extra;
   if (
     !extra
-    || typeof extra.apiKeyId !== 'string'
+    || typeof extra.credentialId !== 'string'
+    || (extra.credentialType !== 'api-key' && extra.credentialType !== 'oauth')
     || typeof extra.projectId !== 'string'
     || typeof extra.projectTitle !== 'string'
     || typeof extra.orgId !== 'string'
@@ -145,7 +218,8 @@ export function mcpAuthContext(authInfo: AuthInfo | undefined): McpAuthContext {
     throw new HttpError(401, 'Authenticated MCP context is missing');
   }
   return {
-    apiKeyId: extra.apiKeyId,
+    credentialId: extra.credentialId,
+    credentialType: extra.credentialType,
     projectId: extra.projectId,
     projectTitle: extra.projectTitle,
     orgId: extra.orgId,

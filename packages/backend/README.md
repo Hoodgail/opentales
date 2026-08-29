@@ -114,6 +114,8 @@ Project routes require `Authorization: Bearer <token>`.
 
 External agents connect to `POST/GET /mcp` with `Authorization: Bearer otmcp_...`. The endpoint is a stateless Streamable HTTP MCP server whose key fixes the project scope. It adapts the existing AI tool schemas and use cases, publishes skills and agent prompts as MCP resources/prompts, and omits only session-only or durable-worker-lease tools. See [`../../docs/mcp.md`](../../docs/mcp.md).
 
+Claude.ai discovers the OAuth provider through `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-authorization-server`. OpenTales supports public Dynamic Client Registration at `/register`, authorization-code + PKCE exchange and refresh at `/token`, revocation at `/revoke`, and authenticated project consent under `/oauth/authorize`.
+
 AI skill routes under `/projects/:projectId/ai/skills` let project admins list, create, update, and delete project-scoped Agent Skills. Enabled skills are disclosed to agent sessions as a compact catalog and loaded on demand with read-only AI tools.
 
 Novel Build routes under `/projects/:projectId/builds` expose human controls and reads: intake/authorization/lifecycle/replan, sandbox manuscript units, compilation/comparison, reviews, artifacts, versioned story state, observability, search/references, and diagnostics. Claim/heartbeat/task-result/trace/branch-patch operations remain backend-internal.

@@ -506,6 +506,43 @@ export interface CreateProjectMcpApiKeyResult {
   secret: string;
 }
 
+export interface McpOAuthProject {
+  projectId: string;
+  title: string;
+  orgName: string;
+  role: Role;
+  canWrite: boolean;
+}
+
+export interface McpOAuthAuthorizationRequest {
+  responseType: string;
+  clientId: string;
+  redirectUri: string;
+  codeChallenge: string;
+  codeChallengeMethod: string;
+  state?: string;
+  resource?: string;
+  scope?: string;
+}
+
+export interface McpOAuthAuthorizationContext {
+  clientName: string;
+  redirectUri: string;
+  requestedScopes: string[];
+  writeRequested: boolean;
+  projects: McpOAuthProject[];
+}
+
+export interface AuthorizeMcpOAuthInput extends McpOAuthAuthorizationRequest {
+  projectId?: string;
+  access?: ProjectMcpApiKeyPermission;
+  decision: 'approve' | 'deny';
+}
+
+export interface AuthorizeMcpOAuthResult {
+  redirectUrl: string;
+}
+
 export interface UpdateProjectAiSettingsInput {
   enabled?: boolean;
   providerKind?: AiProviderKind;

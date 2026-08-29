@@ -10,6 +10,22 @@
       "destination": "https://opentales-api.hoodgail.me/mcp"
     },
     {
+      "source": "/token",
+      "destination": "https://opentales-api.hoodgail.me/token"
+    },
+    {
+      "source": "/register",
+      "destination": "https://opentales-api.hoodgail.me/register"
+    },
+    {
+      "source": "/revoke",
+      "destination": "https://opentales-api.hoodgail.me/revoke"
+    },
+    {
+      "source": "/.well-known/(.*)",
+      "destination": "https://opentales-api.hoodgail.me/.well-known/$1"
+    },
+    {
       "source": "/(.*)",
       "destination": "/app.html"
     }

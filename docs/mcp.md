@@ -68,6 +68,19 @@ A project-shareable `.mcp.json` can reference an environment variable without co
 
 See the [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp) for local, project, and user configuration scopes.
 
+## Connect Claude.ai
+
+Hosted Claude uses OAuth rather than a fixed API-key header:
+
+1. Add `https://opentales.hoodgail.me/mcp` as a custom connector.
+2. Leave custom client ID and client secret empty. Claude dynamically registers itself.
+3. OpenTales opens `/authorize`, where you sign in, select exactly one project, and approve read-only or read/write access.
+4. Claude exchanges a one-time PKCE authorization code for a one-hour access token and rotating refresh token.
+
+Never paste an `otmcp_...` key into Claude's OAuth client ID field. API keys identify a project credential; OAuth client IDs identify the connecting application. If a key appears in an authorization URL, revoke it immediately and recreate the connector without custom credentials.
+
+OpenTales publishes RFC 9728 protected-resource metadata and RFC 8414 authorization-server metadata, supports Dynamic Client Registration, requires PKCE S256, validates exact redirect URIs, binds tokens to the canonical MCP resource, hashes codes/tokens at rest, and rechecks the user's live workspace membership on every MCP request. Removing the connector can revoke its token; expiry, project deletion, membership removal, and role demotion also reduce or remove access.
+
 ## Exposed capabilities
 
 The server adapts the tool definitions in `packages/backend/src/useCases/ai/tools` directly, preserving their names, Zod input schemas, descriptions, pagination, bounded-read behavior, and use-case permission checks. Read/write keys receive every project-applicable tool. Read-only keys receive all read and diagnostic tools, with mutations removed from `tools/list`.
@@ -111,6 +124,8 @@ Native Codex and Claude Code clients normally omit `Origin`. When a browser send
 
 ```env
 MCP_ALLOWED_ORIGINS="https://tale.yasui.io,https://opentales.hoodgail.me"
+MCP_PUBLIC_URL="https://opentales.hoodgail.me/mcp"
+MCP_OAUTH_ISSUER="https://opentales.hoodgail.me"
 ```
 
 Tool text responses are capped at 100,000 characters by default. Oversized results return a valid structured preview with instructions to use pagination, filters, grep, or bounded reads. Operators can change the cap with `MCP_MAX_TOOL_RESPONSE_CHARS`.
@@ -128,3 +143,5 @@ These JWT-authenticated editor routes back the settings UI:
 | `DELETE` | `/projects/:projectId/mcp-api-keys/:keyId` | Revoke a key immediately |
 
 The TypeScript SDK exposes `listProjectMcpApiKeys`, `createProjectMcpApiKey`, and `revokeProjectMcpApiKey` for these routes.
+
+OAuth discovery, registration, and token routes are public protocol endpoints at `/.well-known/oauth-protected-resource/mcp`, `/.well-known/oauth-authorization-server`, `/register`, `/token`, and `/revoke`. The authenticated consent UI calls `/oauth/authorize/context` and `/oauth/authorize` through the SDK.

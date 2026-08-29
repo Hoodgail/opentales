@@ -133,4 +133,28 @@ describe('AI session SDK contracts', () => {
       expect(new Headers(call[1]?.headers).get('authorization')).toBe('Bearer session-token');
     }
   });
+
+  it('loads and approves an MCP OAuth request through authenticated consent routes', async () => {
+    const fetcher = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response('{}', {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    }));
+    const client = new OpenTalesClient({
+      baseUrl: 'https://api.test', token: 'session-token', fetcher: fetcher as unknown as typeof fetch
+    });
+    const request = {
+      responseType: 'code', clientId: 'otclient_1', redirectUri: 'https://claude.ai/callback',
+      codeChallenge: 'a'.repeat(43), codeChallengeMethod: 'S256', state: 'state-1'
+    };
+
+    await client.getMcpOAuthAuthorizationContext(request);
+    await client.authorizeMcpOAuth({
+      ...request, decision: 'approve', projectId: 'project-1', access: 'read-write'
+    });
+
+    expect(String(fetcher.mock.calls[0]?.[0])).toContain('/oauth/authorize/context?');
+    expect(String(fetcher.mock.calls[0]?.[0])).toContain('clientId=otclient_1');
+    expect(fetcher.mock.calls[1]?.[0]).toBe('https://api.test/oauth/authorize');
+    expect(fetcher.mock.calls[1]?.[1]).toMatchObject({ method: 'POST' });
+  });
 });

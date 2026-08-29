@@ -104,7 +104,8 @@ function auth(access: 'read-only' | 'read-write'): AuthInfo {
       ? ['opentales:project:read', 'opentales:project:write']
       : ['opentales:project:read'],
     extra: {
-      apiKeyId: 'key-1',
+      credentialId: 'key-1',
+      credentialType: 'api-key',
       projectId: 'project-1',
       projectTitle: 'The Lantern Book',
       orgId: 'org-1',

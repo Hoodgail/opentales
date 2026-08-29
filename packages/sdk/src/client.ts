@@ -69,6 +69,10 @@ import type {
   ProjectMcpApiKey,
   CreateProjectMcpApiKeyInput,
   CreateProjectMcpApiKeyResult,
+  McpOAuthAuthorizationRequest,
+  McpOAuthAuthorizationContext,
+  AuthorizeMcpOAuthInput,
+  AuthorizeMcpOAuthResult,
   ProjectDoc,
   ProjectFileTree,
   ProjectFolder,
@@ -1032,6 +1036,21 @@ export class OpenTalesClient {
   revokeProjectMcpApiKey(projectId: string, keyId: string): Promise<ProjectMcpApiKey> {
     return this.request<ProjectMcpApiKey>(`/projects/${projectId}/mcp-api-keys/${keyId}`, {
       method: 'DELETE'
+    });
+  }
+
+  getMcpOAuthAuthorizationContext(
+    input: McpOAuthAuthorizationRequest
+  ): Promise<McpOAuthAuthorizationContext> {
+    return this.request<McpOAuthAuthorizationContext>(
+      `/oauth/authorize/context${this.queryString(input as unknown as Record<string, unknown>)}`
+    );
+  }
+
+  authorizeMcpOAuth(input: AuthorizeMcpOAuthInput): Promise<AuthorizeMcpOAuthResult> {
+    return this.request<AuthorizeMcpOAuthResult>('/oauth/authorize', {
+      method: 'POST',
+      body: input
     });
   }
 

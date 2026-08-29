@@ -429,6 +429,8 @@ model User {
   annotationReplies     WritingAnnotationReply[]
   createdImports        ProjectImport[]           @relation("ProjectImportCreatedBy")
   mcpApiKeys            ProjectMcpApiKey[]        @relation("ProjectMcpApiKeyCreator")
+  mcpOAuthCodes         McpOAuthAuthorizationCode[]
+  mcpOAuthTokens        McpOAuthToken[]
 }
 
 model Org {
@@ -542,6 +544,8 @@ model Project {
   imports                ProjectImport[]
   renameRefactorReceipts RenameRefactorReceipt[]
   mcpApiKeys             ProjectMcpApiKey[]
+  mcpOAuthCodes          McpOAuthAuthorizationCode[]
+  mcpOAuthTokens         McpOAuthToken[]
 
   @@unique([orgId, slug])
   @@index([orgId])
@@ -736,6 +740,73 @@ model ProjectMcpApiKey {
   @@index([projectId, createdAt])
   @@index([createdById])
   @@index([projectId, revokedAt, expiresAt])
+}
+
+model McpOAuthClient {
+  clientId                String   @id
+  clientName              String
+  redirectUris            String[]
+  grantTypes              String[]
+  responseTypes           String[]
+  tokenEndpointAuthMethod String   @default("none")
+  clientUri               String?
+  logoUri                 String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  authorizationCodes McpOAuthAuthorizationCode[]
+  tokens             McpOAuthToken[]
+
+  @@index([createdAt])
+}
+
+model McpOAuthAuthorizationCode {
+  id            String                     @id @default(cuid())
+  codeHash      String                     @unique
+  clientId      String
+  projectId     String
+  userId        String
+  permission    ProjectMcpApiKeyPermission
+  redirectUri   String
+  codeChallenge String
+  resource      String
+  scopes        String[]
+  expiresAt     DateTime
+  consumedAt    DateTime?
+  createdAt     DateTime                   @default(now())
+
+  client  McpOAuthClient @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  project Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, expiresAt])
+  @@index([projectId, userId])
+}
+
+model McpOAuthToken {
+  id               String                     @id @default(cuid())
+  accessTokenHash  String                     @unique
+  refreshTokenHash String                     @unique
+  clientId         String
+  projectId        String
+  userId           String
+  permission       ProjectMcpApiKeyPermission
+  resource         String
+  scopes           String[]
+  accessExpiresAt  DateTime
+  refreshExpiresAt DateTime
+  lastUsedAt       DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+
+  client  McpOAuthClient @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  project Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, revokedAt])
+  @@index([projectId, userId])
+  @@index([refreshExpiresAt])
 }
 
 model BetaShareLink {

@@ -113,6 +113,8 @@ Important DTOs:
 | `listProjectMcpApiKeys(projectId)` | `GET /projects/:projectId/mcp-api-keys` |
 | `createProjectMcpApiKey(projectId, input)` | `POST /projects/:projectId/mcp-api-keys` |
 | `revokeProjectMcpApiKey(projectId, keyId)` | `DELETE /projects/:projectId/mcp-api-keys/:keyId` |
+| `getMcpOAuthAuthorizationContext(input)` | `GET /oauth/authorize/context` |
+| `authorizeMcpOAuth(input)` | `POST /oauth/authorize` |
 | `listProjectAiSkills(projectId)` | `GET /projects/:projectId/ai/skills` |
 | `createProjectAiSkill(projectId, input)` | `POST /projects/:projectId/ai/skills` |
 | `updateProjectAiSkill(projectId, skillId, input)` | `PATCH /projects/:projectId/ai/skills/:skillId` |
