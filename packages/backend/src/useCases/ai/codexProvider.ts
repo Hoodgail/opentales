@@ -337,6 +337,10 @@ function shapeCodexRequestBody(
     const parsed = JSON.parse(body) as unknown;
     if (!isRecord(parsed)) return body;
     delete parsed.max_output_tokens;
+    // The ChatGPT Codex subscription endpoint rejects the Responses API
+    // default (`store: true`). Codex CLI-compatible clients must opt out of
+    // response storage on every request, including tool-driven generations.
+    parsed.store = false;
     return JSON.stringify(parsed);
   } catch {
     return body;

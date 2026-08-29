@@ -99,7 +99,7 @@ describe('Codex OAuth provider', () => {
     expect(extractResidency(access)).toBe('eu');
   });
 
-  it('rewrites Responses requests, replaces SDK auth, and removes max_output_tokens', async () => {
+  it('rewrites Responses requests, replaces SDK auth, and enforces Codex request parameters', async () => {
     const credentials = futureCredentials({
       access: jwt({
         chatgpt_account_id: 'account-2',
@@ -114,7 +114,7 @@ describe('Codex OAuth provider', () => {
     await codexFetch('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: { Authorization: 'Bearer sdk-key', 'x-api-key': 'sdk-key' },
-      body: JSON.stringify({ model: 'gpt-5.4', input: [], max_output_tokens: 123 })
+      body: JSON.stringify({ model: 'gpt-5.4', input: [], max_output_tokens: 123, store: true, stream: true })
     });
 
     const [url, init] = vi.mocked(transport).mock.calls[0]!;
@@ -126,7 +126,7 @@ describe('Codex OAuth provider', () => {
     expect(headers.get('x-api-key')).toBeNull();
     expect(headers.get('originator')).toBe('opentales');
     expect(headers.get('session-id')).toMatch(/^[0-9a-f-]{36}$/);
-    expect(JSON.parse(String(init?.body))).toEqual({ model: 'gpt-5.4', input: [] });
+    expect(JSON.parse(String(init?.body))).toEqual({ model: 'gpt-5.4', input: [], store: false, stream: true });
   });
 
   it('runs a normal AI SDK text task through the Codex Responses transport', async () => {
@@ -165,6 +165,7 @@ describe('Codex OAuth provider', () => {
     const [url, init] = vi.mocked(transport).mock.calls[0]!;
     expect(String(url)).toBe(CODEX_API_ENDPOINT);
     expect(JSON.parse(String(init?.body))).not.toHaveProperty('max_output_tokens');
+    expect(JSON.parse(String(init?.body))).toHaveProperty('store', false);
   });
 
   it('deduplicates concurrent refreshes and persists rotated credentials atomically', async () => {

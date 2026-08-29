@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { BuildRun, BuildTask, Prisma, PrismaClient } from '@prisma/client';
-import { generateText, hasToolCall, Output, stepCountIs, type ToolSet } from 'ai';
+import { hasToolCall, Output, stepCountIs, streamText, type ToolSet } from 'ai';
 import { z } from 'zod';
 import type { JsonValue } from '@opentales/sdk';
 import type { BuildTaskLease } from '@opentales/sdk';
@@ -76,7 +76,7 @@ export interface NovelBuildWorkerOptions {
 }
 
 export interface BuildModelExecutorInput {
-  resolveModel: (modelOverride?: string | null) => Promise<Parameters<typeof generateText>[0]['model']>;
+  resolveModel: (modelOverride?: string | null) => Promise<Parameters<typeof streamText>[0]['model']>;
   system: string;
   prompt: string;
   tools: ToolSet;
@@ -105,7 +105,7 @@ export interface MeasuredModelUsage {
 export type BuildModelExecutor = (input: BuildModelExecutorInput) => Promise<BuildModelExecutorOutput>;
 
 export interface BuildJudgeExecutorInput {
-  resolveModel: (modelOverride?: string | null) => Promise<Parameters<typeof generateText>[0]['model']>;
+  resolveModel: (modelOverride?: string | null) => Promise<Parameters<typeof streamText>[0]['model']>;
   contract: TaskContract;
   observableResult: WorkerResult;
   deterministicChecks: Record<string, boolean>;
@@ -1197,7 +1197,8 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
   }
 
   private async failOrRetry(claimed: ClaimedTask, error: unknown): Promise<void> {
-    const message = error instanceof Error ? error.message : 'Novel Build task failed';
+    const failure = executionFailureDisposition(error);
+    const message = failure.message;
     await this.failPendingTrace(claimed, message, error).catch(() => undefined);
     const current = await this.prisma.buildTask.findUnique({ where: { id: claimed.task.id } });
     if (!current || current.status !== 'RUNNING') return;
@@ -1209,7 +1210,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       runGeneration: claimed.lease.runGeneration,
       expectedRevision: current.revision,
       error: message,
-      retryable: current.attempts < current.maxAttempts
+      retryable: failure.retryable && current.attempts < current.maxAttempts
     }).catch((failure) => {
       if (!isBuildGoneOrTerminal(failure)) throw failure;
     });
@@ -1574,7 +1575,10 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     let inputTokens = measured.reduce((sum, item) => sum + item.inputTokens, 0);
     const outputTokens = measured.reduce((sum, item) => sum + item.outputTokens, 0);
     const measuredTokens = inputTokens + outputTokens;
-    const pessimisticTokenDelta = trace.model && trace.price ? Math.max(0, claimed.task.reservedTokens - measuredTokens) : 0;
+    const failure = executionFailureDisposition(error);
+    const pessimisticTokenDelta = failure.mayHaveUnreportedUsage && trace.model && trace.price
+      ? Math.max(0, claimed.task.reservedTokens - measuredTokens)
+      : 0;
     inputTokens += pessimisticTokenDelta;
     let costMicros: number;
     try {
@@ -1585,7 +1589,9 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       // trace error remains explicit and the task is failed/fenced.
       costMicros = claimed.task.reservedCostMicros;
     }
-    if (trace.model && trace.price) costMicros = Math.max(costMicros, claimed.task.reservedCostMicros);
+    if (failure.mayHaveUnreportedUsage && trace.model && trace.price) {
+      costMicros = Math.max(costMicros, claimed.task.reservedCostMicros);
+    }
     await this.storyState.finishTrace(requiredUserId(claimed.run), claimed.run.projectId, claimed.run.id, trace.id, {
       lease: {
         taskId: claimed.task.id,
@@ -1597,7 +1603,12 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       requestHash: stableHash({ status: 'failed', message, inputTokens, outputTokens, costMicros }),
       status: 'failed',
       model: trace.model,
-      modelParameters: traceModelParameters(claimed.task, trace.price, trace.model, !trace.price || pessimisticTokenDelta > 0 || costMicros === claimed.task.reservedCostMicros),
+      modelParameters: traceModelParameters(
+        claimed.task,
+        trace.price,
+        trace.model,
+        !trace.price || pessimisticTokenDelta > 0 || (failure.mayHaveUnreportedUsage && costMicros === claimed.task.reservedCostMicros)
+      ),
       toolCalls: [],
       toolResults: [],
       outputs: {},
@@ -1927,7 +1938,7 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
     const actualModelId = modelId ?? input.defaultModelId ?? input.contract.modelPolicy.preferred ?? null;
     try {
       const model = await input.resolveModel(modelId);
-      const generation = await generateText({
+      const generation = streamText({
         model,
         system: input.system,
         prompt: input.prompt,
@@ -1936,15 +1947,18 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
         abortSignal: input.abortSignal,
         maxOutputTokens: input.contract.budget.maxOutputTokens
       });
-      const usage = generation.totalUsage ?? generation.usage;
+      const [usage, text, steps] = await Promise.all([
+        generation.totalUsage,
+        generation.text,
+        generation.steps
+      ]);
       cumulativeInputTokens += usage?.inputTokens ?? 0;
       cumulativeOutputTokens += usage?.outputTokens ?? 0;
       if (actualModelId) usageByModel.push(...normalizeMeasuredUsage(undefined, actualModelId, usage?.inputTokens ?? 0, usage?.outputTokens ?? 0));
-      const steps = generation.steps ?? [];
       return {
         result: extractWorkerResult(
           steps.flatMap((step) => step.toolResults ?? []),
-          generation.text
+          text
         ),
         inputTokens: cumulativeInputTokens,
         outputTokens: cumulativeOutputTokens,
@@ -1972,7 +1986,7 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
 async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Promise<BuildJudgeExecutorOutput> {
   const modelId = process.env.AI_JUDGE_MODEL?.trim() || input.contract.modelPolicy.preferred || null;
   const model = await input.resolveModel(modelId);
-  const generation = await generateText({
+  const generation = streamText({
     model,
     system: [
       'You are an independent fiction-quality evaluator. You have diagnostics-only authority and cannot mutate or self-certify the candidate.',
@@ -1983,9 +1997,9 @@ async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Promise<Bui
     abortSignal: input.abortSignal,
     maxOutputTokens: Math.min(4_000, input.contract.budget.maxOutputTokens)
   });
-  const usage = generation.totalUsage ?? generation.usage;
+  const [usage, output] = await Promise.all([generation.totalUsage, generation.output]);
   return {
-    result: judgeResultSchema.parse(generation.output),
+    result: judgeResultSchema.parse(output),
     inputTokens: usage?.inputTokens ?? 0,
     outputTokens: usage?.outputTokens ?? 0,
     modelId
@@ -2009,10 +2023,54 @@ export function renderJudgePrompt(input: Pick<BuildJudgeExecutorInput, 'rubric' 
 }
 
 function classifyRetry(error: unknown): 'transient' | 'timeout' | 'validation' | 'quality' {
-  const message = error instanceof Error ? error.message : String(error);
+  const failure = executionFailureDisposition(error);
+  const message = failure.message;
   if (/timeout|timed out|deadline/i.test(message)) return 'timeout';
+  if (!failure.retryable) return 'validation';
   if (error instanceof z.ZodError || /schema|validation|invalid output/i.test(message)) return 'validation';
   return 'transient';
+}
+
+export function executionFailureDisposition(error: unknown): {
+  message: string;
+  retryable: boolean;
+  mayHaveUnreportedUsage: boolean;
+} {
+  const value = jsonRecord(error);
+  const cause = jsonRecord(value.cause);
+  const statusCode = numericStatus(value.statusCode) ?? numericStatus(cause.statusCode);
+  const rejectedBeforeExecution = statusCode !== null
+    && statusCode >= 400
+    && statusCode < 500
+    && ![408, 409, 425, 429].includes(statusCode);
+  const explicitlyNonRetryable = value.isRetryable === false || cause.isRetryable === false;
+  const baseMessage = error instanceof Error && error.message.trim()
+    ? error.message.trim()
+    : 'Novel Build task failed';
+  const detail = providerErrorDetail(value.responseBody) ?? providerErrorDetail(cause.responseBody);
+  return {
+    message: detail && !baseMessage.toLowerCase().includes(detail.toLowerCase())
+      ? `${baseMessage}: ${detail}`
+      : baseMessage,
+    retryable: !rejectedBeforeExecution && !explicitlyNonRetryable,
+    mayHaveUnreportedUsage: !rejectedBeforeExecution
+  };
+}
+
+function numericStatus(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) ? value : null;
+}
+
+function providerErrorDetail(value: unknown): string | null {
+  let parsed = value;
+  if (typeof parsed === 'string') {
+    try { parsed = JSON.parse(parsed); } catch { return null; }
+  }
+  const response = jsonRecord(parsed);
+  const nested = jsonRecord(response.error);
+  const detail = [response.detail, nested.message, response.message]
+    .find((candidate): candidate is string => typeof candidate === 'string' && candidate.trim().length > 0);
+  return detail ? boundedText(detail.trim(), 1_000) : null;
 }
 
 export function extractWorkerResult(toolResults: unknown[], text: string): WorkerResult {

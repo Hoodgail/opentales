@@ -13,6 +13,7 @@ process.env.DATABASE_URL ??= 'postgresql://opentales:opentales@127.0.0.1:5432/op
 process.env.JWT_SECRET ??= 'unit-test-secret-not-for-production';
 const {
   NovelBuildWorker,
+  executionFailureDisposition,
   extractWorkerResult,
   lookupExecutionModelPrice,
   resolveUntouchedBuiltInSkillUpgrades,
@@ -20,6 +21,26 @@ const {
 } = await import('./NovelBuildWorker.js');
 
 describe('durable Novel Build execution contract', () => {
+  it('surfaces provider validation details without retrying or charging an unreported reservation', () => {
+    const error = Object.assign(new Error('Bad Request'), {
+      name: 'AI_APICallError',
+      statusCode: 400,
+      isRetryable: false,
+      responseBody: JSON.stringify({ detail: 'Store must be set to false' })
+    });
+
+    expect(executionFailureDisposition(error)).toEqual({
+      message: 'Bad Request: Store must be set to false',
+      retryable: false,
+      mayHaveUnreportedUsage: false
+    });
+    expect(executionFailureDisposition(new Error('Provider disconnected'))).toEqual({
+      message: 'Provider disconnected',
+      retryable: true,
+      mayHaveUnreportedUsage: true
+    });
+  });
+
   it('accounts Codex subscription models at zero without making other providers free', () => {
     expect(lookupExecutionModelPrice({}, 'CODEX', 'codex/gpt-5.6-terra')).toMatchObject({
       inputMicrosPerMillion: 0,
