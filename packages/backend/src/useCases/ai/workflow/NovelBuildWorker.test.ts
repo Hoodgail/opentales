@@ -17,6 +17,7 @@ const {
   deterministicExecutionTask,
   executionFailureDisposition,
   extractWorkerResult,
+  hasRuntimeCriticEvidence,
   lookupExecutionModelPrice,
   measuredInvocationUsage,
   normalizeJudgeResultCandidate,
@@ -47,6 +48,14 @@ describe('durable Novel Build execution contract', () => {
   it('uses deterministic quality-gate candidates and parses locally validated judge JSON', () => {
     expect(deterministicExecutionTask({ type: 'quality-gate', executionPolicy: {} } as any)).toBe(true);
     expect(deterministicExecutionTask({ type: 'create-world-bible', executionPolicy: {} } as any)).toBe(false);
+    expect(hasRuntimeCriticEvidence(
+      [{ toolCallId: 'lint-1', toolName: 'runStoryLint', input: {} }],
+      [{ toolCallId: 'lint-1', toolName: 'runStoryLint', output: { counts: { error: 0 } } }]
+    )).toBe(true);
+    expect(hasRuntimeCriticEvidence(
+      [{ toolCallId: 'lint-1', toolName: 'runStoryLint', input: {} }],
+      [{ toolCallId: 'other', toolName: 'runStoryLint', output: { counts: { error: 0 } } }]
+    )).toBe(false);
     expect(parseJudgeResult(`Judge result:\n\`\`\`json\n${JSON.stringify({
       scores: { coherence: 0.9, causality: 0.8 },
       feedback: 'Observable planning evidence passes.',

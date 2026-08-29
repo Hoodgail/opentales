@@ -637,6 +637,8 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const started = Date.now();
     const trace = await this.startTrace(claimed, null, null, [], 0);
     let result: WorkerResult;
+    let toolCalls: unknown[] = [];
+    let toolResults: unknown[] = [];
     if (claimed.task.type === 'assemble-chapter-context' || claimed.task.type === 'assemble-scene-context') {
       const contract = await this.contractFor(claimed);
       const pack = await new ContextAssembler(this.prisma).assemble({ projectId: claimed.run.projectId, task: contract });
@@ -653,7 +655,38 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       trace.contextTokenCount = pack.estimatedTokens;
       return { result, traceId: trace.id, trace, contextArtifactIds: pack.identifiers, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - started, toolCalls: [], toolResults: [] };
     }
-    if (claimed.task.type === 'run-chapter-diagnostics' || claimed.task.type === 'run-scene-diagnostics') {
+    if (claimed.task.type === 'quality-gate') {
+      const policy = jsonRecord(claimed.task.executionPolicy);
+      const chapterIds = stringArray(policy.chapterIds);
+      const lint = await runStoryLint(this.prisma, claimed.run.projectId, {
+        buildRunId: claimed.run.id,
+        chapterIds,
+        userId: requiredUserId(claimed.run)
+      });
+      const toolCallId = `deterministic:${claimed.task.id}:runStoryLint`;
+      toolCalls = [{ toolCallId, toolName: 'runStoryLint', input: { buildRunId: claimed.run.id, chapterIds } }];
+      toolResults = [{
+        toolCallId,
+        toolName: 'runStoryLint',
+        output: { counts: lint.counts, issues: lint.issues.slice(0, 100) }
+      }];
+      result = {
+        status: lint.counts.error > 0 ? 'blocked' : 'complete',
+        decisions: [],
+        artifactIds: [],
+        evidence: [
+          { type: 'diagnostic-summary', summary: `runStoryLint completed with ${lint.counts.error} error(s) and ${lint.counts.warning} warning(s).` },
+          ...lint.issues.slice(0, 100).map((issue: { code: string; message: string; evidence: Array<{ id: string }> }) => ({
+            type: 'diagnostic',
+            id: issue.evidence[0]?.id,
+            summary: `${issue.code}: ${issue.message}`
+          }))
+        ],
+        checks: { deterministicValidationRequired: lint.counts.error === 0 },
+        quality: { deterministic: lint.counts.error === 0 ? 1 : 0 },
+        unresolvedQuestions: lint.counts.error ? [`${lint.counts.error} error diagnostic(s) require correction`] : []
+      };
+    } else if (claimed.task.type === 'run-chapter-diagnostics' || claimed.task.type === 'run-scene-diagnostics') {
       const policy = jsonRecord(claimed.task.executionPolicy);
       const lint = await runStoryLint(this.prisma, claimed.run.projectId, { buildRunId: claimed.run.id, chapterIds: stringArray(policy.chapterIds), userId: requiredUserId(claimed.run) });
       result = {
@@ -704,7 +737,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     } else {
       result = basicResult(true, 'deterministic', `${claimed.task.type} completed deterministically.`);
     }
-    return { result, traceId: trace.id, trace, contextArtifactIds: [], inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - started, toolCalls: [], toolResults: [] };
+    return { result, traceId: trace.id, trace, contextArtifactIds: [], inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - started, toolCalls, toolResults };
   }
 
   private async executeModelTask(claimed: ClaimedTask, abortSignal: AbortSignal): Promise<TaskExecution> {
@@ -1383,8 +1416,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const runtimeCriticEvidenceRequired = roleForTask(claimed.task.assignedAgent) === 'critic' && !deterministicTask(claimed.task);
     if (runtimeCriticEvidenceRequired) {
       const evidenceTools = new Set(['searchStory', 'findReferences', 'getSceneContext', 'queryCanon', 'queryTimeline', 'queryEntityState', 'queryOpenLoops', 'getArcState', 'compareVersions', 'getBuildState', 'listBuildUnits', 'readBuildUnit', 'runStoryLint']);
-      checks.runtimeCriticEvidenceRequired = execution.toolCalls.some((call) => evidenceTools.has(String(jsonRecord(call).toolName ?? '')))
-        && execution.toolResults.length > 0;
+      checks.runtimeCriticEvidenceRequired = hasRuntimeCriticEvidence(execution.toolCalls, execution.toolResults, evidenceTools);
     }
     if (requiredTypes.length) {
       for (const type of requiredTypes) {
@@ -1733,6 +1765,25 @@ function deterministicTask(task: BuildTask): boolean {
 
 export function deterministicExecutionTask(task: BuildTask): boolean {
   return deterministicTask(task) || task.type === 'quality-gate';
+}
+
+export function hasRuntimeCriticEvidence(
+  toolCalls: unknown[],
+  toolResults: unknown[],
+  evidenceTools = new Set(['searchStory', 'findReferences', 'getSceneContext', 'queryCanon', 'queryTimeline', 'queryEntityState', 'queryOpenLoops', 'getArcState', 'compareVersions', 'getBuildState', 'listBuildUnits', 'readBuildUnit', 'runStoryLint'])
+): boolean {
+  const evidenceCallIds = new Set(toolCalls.flatMap((call) => {
+    const value = jsonRecord(call);
+    if (!evidenceTools.has(String(value.toolName ?? ''))) return [];
+    return typeof value.toolCallId === 'string' ? [value.toolCallId] : [''];
+  }));
+  return toolResults.some((result) => {
+    const value = jsonRecord(result);
+    if (!evidenceTools.has(String(value.toolName ?? ''))) return false;
+    return typeof value.toolCallId === 'string'
+      ? evidenceCallIds.has(value.toolCallId)
+      : evidenceCallIds.has('');
+  });
 }
 
 export function defaultTaskBudget(task: BuildTask): {
