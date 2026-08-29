@@ -26,13 +26,13 @@ describe('durable Novel Build execution contract', () => {
   it('forces the single story-brief mutation before its terminal report', () => {
     expect(prepareStoryBriefStep([])).toEqual({
       activeTools: ['applyArtifactBatch'],
-      toolChoice: { type: 'tool', toolName: 'applyArtifactBatch' }
+      toolChoice: 'auto'
     });
     expect(prepareStoryBriefStep([{
       toolResults: [{ toolName: 'applyArtifactBatch', output: { ok: false } }]
     }])).toEqual({
       activeTools: ['applyArtifactBatch'],
-      toolChoice: { type: 'tool', toolName: 'applyArtifactBatch' }
+      toolChoice: 'auto'
     });
     expect(prepareStoryBriefStep([{
       toolResults: [{ toolName: 'applyArtifactBatch', output: { ok: true } }]

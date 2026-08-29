@@ -2048,7 +2048,9 @@ export function prepareStoryBriefStep(steps: Array<{ toolResults?: unknown[] }>)
   const toolName = artifactPersisted ? 'reportTaskResult' : 'applyArtifactBatch';
   return {
     activeTools: [toolName],
-    toolChoice: { type: 'tool' as const, toolName }
+    toolChoice: artifactPersisted
+      ? { type: 'tool' as const, toolName }
+      : 'auto' as const
   };
 }
 
