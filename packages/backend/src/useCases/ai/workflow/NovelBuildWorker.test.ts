@@ -16,11 +16,31 @@ const {
   executionFailureDisposition,
   extractWorkerResult,
   lookupExecutionModelPrice,
+  prepareStoryBriefStep,
   resolveUntouchedBuiltInSkillUpgrades,
   startNovelBuildWorker
 } = await import('./NovelBuildWorker.js');
 
 describe('durable Novel Build execution contract', () => {
+  it('forces the single story-brief mutation before its terminal report', () => {
+    expect(prepareStoryBriefStep([])).toEqual({
+      activeTools: ['applyArtifactBatch'],
+      toolChoice: { type: 'tool', toolName: 'applyArtifactBatch' }
+    });
+    expect(prepareStoryBriefStep([{
+      toolResults: [{ toolName: 'applyArtifactBatch', output: { ok: false } }]
+    }])).toEqual({
+      activeTools: ['applyArtifactBatch'],
+      toolChoice: { type: 'tool', toolName: 'applyArtifactBatch' }
+    });
+    expect(prepareStoryBriefStep([{
+      toolResults: [{ toolName: 'applyArtifactBatch', output: { ok: true } }]
+    }])).toEqual({
+      activeTools: ['reportTaskResult'],
+      toolChoice: { type: 'tool', toolName: 'reportTaskResult' }
+    });
+  });
+
   it('surfaces provider validation details without retrying or charging an unreported reservation', () => {
     const error = Object.assign(new Error('Bad Request'), {
       name: 'AI_APICallError',

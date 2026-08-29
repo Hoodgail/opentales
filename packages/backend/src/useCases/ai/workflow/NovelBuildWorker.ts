@@ -1949,6 +1949,9 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
         abortSignal: input.abortSignal,
         maxOutputTokens: input.contract.budget.maxOutputTokens,
         providerOptions: providerOptionsForAiModel(model),
+        prepareStep: input.contract.metadata.taskType === 'create-story-brief'
+          ? ({ steps }) => prepareStoryBriefStep(steps)
+          : undefined,
         onError: ({ error }) => { streamError ??= error; }
       });
       const [usage, text, steps] = await Promise.all([
@@ -2004,6 +2007,18 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
     }
   }
   throw attachExecutionUsage(lastError, cumulativeInputTokens, cumulativeOutputTokens, null, usageByModel);
+}
+
+export function prepareStoryBriefStep(steps: Array<{ toolResults?: unknown[] }>) {
+  const artifactPersisted = steps.some((step) => (step.toolResults ?? []).some((value) => {
+    const result = jsonRecord(value);
+    return result.toolName === 'applyArtifactBatch' && jsonRecord(result.output).ok === true;
+  }));
+  const toolName = artifactPersisted ? 'reportTaskResult' : 'applyArtifactBatch';
+  return {
+    activeTools: [toolName],
+    toolChoice: { type: 'tool' as const, toolName }
+  };
 }
 
 async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Promise<BuildJudgeExecutorOutput> {
