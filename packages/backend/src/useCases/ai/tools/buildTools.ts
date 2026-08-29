@@ -158,6 +158,18 @@ const taskResultSchema = z.object({
   quality: z.record(z.string(), reportedQualityValueSchema).default({}),
   unresolvedQuestions: z.array(z.string()).max(30).default([])
 });
+const rawTaskResultSchema = z.object({
+  buildRunId: z.string().optional(),
+  taskId: z.string().optional(),
+  idempotencyKey: z.string().optional(),
+  status: z.enum(['complete', 'blocked', 'failed']).optional(),
+  decisions: z.array(z.unknown()).optional(),
+  artifactIds: z.array(z.string()).optional(),
+  evidence: z.array(z.unknown()).optional(),
+  checks: z.record(z.string(), z.unknown()).optional(),
+  quality: z.record(z.string(), z.unknown()).optional(),
+  unresolvedQuestions: z.array(z.string()).optional()
+}).passthrough();
 const buildStateInputSchema = z.object({
   buildRunId: z.string().trim().min(1),
   detail: z.enum(['summary', 'context', 'tasks']).default('summary')
@@ -187,6 +199,67 @@ const buildUnitPatchSchema = z.object({
 }).refine((input) => input.body !== undefined || input.title !== undefined || input.status !== undefined || input.tension !== undefined || input.metadata !== undefined, 'At least one unit change is required');
 
 export type ReportedTaskResult = z.infer<typeof taskResultSchema>;
+
+export function coerceReportedTaskResult(
+  raw: unknown,
+  contract: TaskContract,
+  lease: BuildTaskLeaseInput
+): ReportedTaskResult {
+  const value = rawTaskResultSchema.parse(raw ?? {});
+  const unresolvedQuestions = (value.unresolvedQuestions ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 30);
+  const decisions = (value.decisions ?? []).flatMap((item) => {
+    const record = jsonRecord(item);
+    const decision = [record.decision, record.summary, record.choice]
+      .find((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
+    if (!decision) return [];
+    const reason = [record.reason, record.rationale, record.evidence]
+      .find((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+      ?? 'Reported by the assigned build worker.';
+    return [{ decision: decision.trim(), reason: reason.trim() }];
+  }).slice(0, 100);
+  const evidence = (value.evidence ?? []).flatMap((item) => {
+    if (typeof item === 'string' && item.trim()) return [{ type: 'worker', summary: item.trim() }];
+    const record = jsonRecord(item);
+    const summary = [record.summary, record.message, record.reason, record.evidence]
+      .find((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
+    if (!summary) return [];
+    return [{
+      type: typeof record.type === 'string' && record.type.trim() ? record.type.trim() : 'worker',
+      ...(typeof record.id === 'string' && record.id.trim() ? { id: record.id.trim() } : {}),
+      summary: summary.trim()
+    }];
+  }).slice(0, 5_000);
+  const checks: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value.checks ?? {})) {
+    if (typeof item === 'boolean') { checks[key] = item; continue; }
+    const record = jsonRecord(item);
+    if (typeof record.passed === 'boolean') checks[key] = record;
+  }
+  const quality: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value.quality ?? {})) {
+    if (typeof item === 'number' && item >= 0 && item <= 1) { quality[key] = item; continue; }
+    if (typeof item === 'string' && item.trim()) { quality[key] = item.trim(); continue; }
+    const record = jsonRecord(item);
+    const score = [record.score, record.value, record.rating]
+      .find((entry) => typeof entry === 'number' && entry >= 0 && entry <= 1);
+    if (typeof score === 'number') quality[key] = { ...record, score };
+  }
+  const buildRunId = contract.scope.buildRunId;
+  const taskId = contract.scope.buildTaskId ?? lease.taskId;
+  if (!buildRunId || !taskId) throw new HttpError(403, 'Task results require a build-bound task contract');
+  return taskResultSchema.parse({
+    buildRunId,
+    taskId,
+    idempotencyKey: value.idempotencyKey?.trim() || `worker-report:${taskId}:${lease.leaseGeneration}`,
+    status: value.status ?? (unresolvedQuestions.length ? 'blocked' : 'complete'),
+    decisions,
+    artifactIds: value.artifactIds ?? [],
+    evidence,
+    checks,
+    quality,
+    unresolvedQuestions
+  });
+}
 
 export function normalizeReportedTaskResult(input: ReportedTaskResult) {
   const checks = Object.fromEntries(Object.entries(input.checks).map(([key, value]) => [
@@ -444,10 +517,11 @@ export function buildWorkflowTools(
     }),
     reportTaskResult: tool({
       description: 'Report the assigned task result as decisions, persisted artifact IDs, validator evidence, checks, and quality scores. Checks may be booleans or detailed objects containing passed; quality may include numeric scores or detailed objects containing score. This never records hidden reasoning and cannot self-approve quality.',
-      inputSchema: taskResultSchema,
-      execute: async (input) => {
+      inputSchema: rawTaskResultSchema,
+      execute: async (rawInput) => {
         if (!taskContract?.scope.buildTaskId) throw new HttpError(403, 'Task results require an assigned typed build task contract');
         if (!executionLease) throw new HttpError(403, 'Task results require an active fenced worker lease');
+        const input = coerceReportedTaskResult(rawInput, taskContract, executionLease);
         return reportTaskResult(prisma, context.projectId, input, taskContract, executionLease);
       }
     })

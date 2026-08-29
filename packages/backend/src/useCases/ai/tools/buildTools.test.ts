@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  coerceReportedTaskResult,
   getBuildState,
   normalizeArtifactBatchForContract,
   normalizeArtifactContentForManifest,
@@ -63,6 +64,36 @@ function fixture() {
 }
 
 describe('bounded build tool projections', () => {
+  it('binds provider-shaped task reports to the active fenced contract', () => {
+    const contract = {
+      scope: { buildRunId: 'build-1', buildTaskId: 'task-1' }
+    } as unknown as Parameters<typeof coerceReportedTaskResult>[1];
+    const lease = {
+      taskId: 'task-1', workerId: 'worker-1', leaseToken: 'lease-1',
+      leaseGeneration: 4, runGeneration: 2
+    } as Parameters<typeof coerceReportedTaskResult>[2];
+    const coerced = coerceReportedTaskResult({
+      status: 'complete',
+      decisions: [{ summary: 'Planning passed', rationale: 'All required artifacts exist.' }],
+      evidence: ['Deterministic checks passed.'],
+      checks: { complete: { passed: true, details: '15 artifacts' } },
+      quality: { rubric: 'complete-book-plan-v1', completeness: { value: 0.94 } }
+    }, contract, lease);
+
+    expect(coerced).toMatchObject({
+      buildRunId: 'build-1',
+      taskId: 'task-1',
+      idempotencyKey: 'worker-report:task-1:4',
+      status: 'complete',
+      decisions: [{ decision: 'Planning passed', reason: 'All required artifacts exist.' }],
+      evidence: [{ type: 'worker', summary: 'Deterministic checks passed.' }]
+    });
+    expect(normalizeReportedTaskResult(coerced)).toMatchObject({
+      checks: { complete: true },
+      quality: { completeness: 0.94 }
+    });
+  });
+
   it('normalizes detailed model self-reports into flat observable checks and scores', () => {
     expect(normalizeReportedTaskResult({
       buildRunId: 'build-1',
