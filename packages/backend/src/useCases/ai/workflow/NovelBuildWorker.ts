@@ -1891,6 +1891,9 @@ export function objectiveForTask(task: BuildTask, buildObjective: string, manife
     requiredTypes.length
       ? 'Persist every required structured artifact with status VALIDATED using scoped tools before reporting its ID.'
       : 'This task requires no artifact output. Report observable checks and evaluation evidence directly.',
+    task.type === 'create-finale-plan'
+      ? 'Set mainThreadKey to the main plot-thread content.threadKey; the build validator also accepts that plot-thread artifact\'s exact stable key.'
+      : '',
     'Report only observable decisions, artifact IDs, validator evidence, checks, and quality scores.'
   ].filter(Boolean).join(' ');
 }

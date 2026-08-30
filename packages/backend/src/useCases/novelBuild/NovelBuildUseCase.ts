@@ -1232,7 +1232,10 @@ export class NovelBuildUseCase {
     if (!finale) throw new HttpError(409, 'Build is missing a validated finale plan');
     const finaleContent = finale.content as JsonObject;
     if (finaleContent.resolvesMainThread !== true || typeof finaleContent.mainThreadKey !== 'string') throw new HttpError(409, 'Finale plan does not resolve the main plot thread');
-    const mainThread = latest.find((artifact) => artifact.type === 'PLOT_THREAD' && isJsonObjectValue(artifact.content) && artifact.content.threadKey === finaleContent.mainThreadKey && artifact.content.kind === 'main');
+    const mainThread = latest.find((artifact) => artifact.type === 'PLOT_THREAD'
+      && isJsonObjectValue(artifact.content)
+      && [artifact.key, artifact.content.threadKey].includes(finaleContent.mainThreadKey)
+      && artifact.content.kind === 'main');
     if (!mainThread) throw new HttpError(409, 'Finale mainThreadKey does not reference the validated main plot thread');
     if (options.planningOnly) {
       const chapterArtifacts = latest.filter((artifact) => artifact.type === 'CHAPTER_BRIEF');
