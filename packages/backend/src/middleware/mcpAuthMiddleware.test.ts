@@ -6,11 +6,19 @@ import {
   mcpProtectedResourceMetadataUrl,
   validateMcpOrigin
 } from './mcpAuthMiddleware.js';
+import { HOSTED_MCP_CLIENT_ORIGINS, resolveMcpAllowedOrigins } from '../config/env.js';
 import { hashMcpApiKey } from '../useCases/ai/ProjectMcpApiKeysUseCase.js';
 
 const secret = `otmcp_${'a'.repeat(43)}`;
 
 describe('MCP API-key authentication', () => {
+  it('keeps hosted clients when an operator configures additional origins', () => {
+    expect(resolveMcpAllowedOrigins('https://custom.example', 'http://localhost:5173')).toEqual([
+      'https://custom.example',
+      ...HOSTED_MCP_CLIENT_ORIGINS
+    ]);
+  });
+
   it('derives protected-resource discovery from the canonical MCP resource URL', () => {
     expect(mcpProtectedResourceMetadataUrl()).toBe(
       'http://localhost:5173/.well-known/oauth-protected-resource/mcp'

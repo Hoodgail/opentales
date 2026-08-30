@@ -23,16 +23,21 @@ function requireEnv(name: string): string {
 
 const port = Number(process.env.PORT ?? 4000);
 const corsOrigin = process.env.CORS_ORIGIN ?? 'http://localhost:5173';
-const mcpAllowedOrigins = (process.env.MCP_ALLOWED_ORIGINS ?? [
-  corsOrigin,
-  'https://opentales.hoodgail.me',
+export const HOSTED_MCP_CLIENT_ORIGINS = [
   'https://claude.ai',
   'https://chatgpt.com',
   'https://gemini.google.com'
-].join(','))
-  .split(',')
-  .map((value) => value.trim().replace(/\/$/, ''))
-  .filter(Boolean);
+] as const;
+const mcpAllowedOrigins = resolveMcpAllowedOrigins(process.env.MCP_ALLOWED_ORIGINS, corsOrigin);
+
+export function resolveMcpAllowedOrigins(configured: string | undefined, frontendOrigin: string): string[] {
+  const configuredOrigins = (configured ?? [frontendOrigin, 'https://opentales.hoodgail.me'].join(','))
+    .split(',')
+    .map((value) => value.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+  return [...new Set([...configuredOrigins, ...HOSTED_MCP_CLIENT_ORIGINS])];
+}
+
 const mcpPublicUrl = absoluteUrl(
   process.env.MCP_PUBLIC_URL ?? `${mcpAllowedOrigins[0] ?? corsOrigin}/mcp`,
   'MCP_PUBLIC_URL'
