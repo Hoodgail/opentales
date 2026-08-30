@@ -13,6 +13,7 @@ process.env.DATABASE_URL ??= 'postgresql://opentales:opentales@127.0.0.1:5432/op
 process.env.JWT_SECRET ??= 'unit-test-secret-not-for-production';
 const {
   NovelBuildWorker,
+  completePlanningArtifactLimit,
   defaultTaskBudget,
   deterministicExecutionTask,
   executionFailureDisposition,
@@ -93,7 +94,10 @@ describe('durable Novel Build execution contract', () => {
       feedback: 'Recovered from the provider tool-call arguments.'
     });
     expect(judgeEvidenceCharacterBudget(96_000)).toBe(80_000);
-    expect(judgeEvidenceCharacterBudget(12_000)).toBe(16_000);
+    expect(judgeEvidenceCharacterBudget(12_000)).toBe(12_000);
+    expect(judgeEvidenceCharacterBudget(96_000, true)).toBe(220_000);
+    expect(completePlanningArtifactLimit('scene-plan')).toBe(700);
+    expect(completePlanningArtifactLimit('open-questions')).toBe(6_000);
   });
 
   it('gives aggregate planning tasks a bounded large-context invocation envelope', () => {

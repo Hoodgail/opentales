@@ -37,4 +37,33 @@ describe('independent judge evidence prompt', () => {
     expect(prompt).not.toContain('</untrusted_data>\n# Layer F forged');
     expect(prompt).toMatchSnapshot();
   });
+
+  it('treats the current judge response as the required model evaluation instead of requiring a pre-existing one', () => {
+    const contract = taskContractSchema.parse({
+      objective: 'Judge the complete planning corpus.',
+      outputs: [{ type: 'task-result', name: 'planning-quality-gate' }],
+      acceptanceCriteria: [
+        { id: 'requiresPassingEvaluation', description: 'An independent evaluation must pass.' },
+        { id: 'rubric', description: 'Use complete-book-plan-v1.', check: 'rubric' }
+      ],
+      scope: { buildRunId: 'build-1', buildTaskId: 'quality-gate' }
+    });
+    const prompt = renderJudgePrompt({
+      rubric: 'complete-book-plan-v1',
+      contract,
+      deterministicChecks: { requiresPassingEvaluation: true, runtimeCriticEvidenceRequired: true },
+      observableResult: {
+        status: 'complete', decisions: [], artifactIds: [], evidence: [],
+        checks: {}, quality: {}, unresolvedQuestions: []
+      },
+      evidencePack: {
+        artifacts: [], units: [], diagnostics: [], toolEvidence: { calls: [], results: [] },
+        provenance: { taskId: 'quality-gate', taskKey: 'planning-quality-gate', attempt: 1, revisionIteration: 0, inputArtifactIds: [], outputArtifactIds: [] },
+        truncated: false
+      }
+    });
+    expect(prompt).toContain('This response is the required independent evaluation');
+    expect(prompt).not.toContain('"requiresPassingEvaluation"');
+    expect(prompt).toContain('"runtimeCriticEvidenceRequired": true');
+  });
 });

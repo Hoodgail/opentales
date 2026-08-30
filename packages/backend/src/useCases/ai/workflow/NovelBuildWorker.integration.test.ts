@@ -1164,6 +1164,18 @@ function deterministicJudgeExecutor(): BuildJudgeExecutor {
     expect(input.evidencePack.artifacts.length + input.evidencePack.units.length).toBeGreaterThan(0);
     expect(input.evidencePack.artifacts.every((artifact) => artifact.content.length > 0)).toBe(true);
     expect(input.evidencePack.units.every((unit) => typeof unit.body === 'string' && unit.headVersionId !== null)).toBe(true);
+    if (input.contract.metadata.taskKey === 'planning-quality-gate') {
+      expect(input.evidencePack.artifactCoverage).toMatchObject({
+        scope: 'complete-planning-corpus',
+        omittedCount: 0
+      });
+      expect(input.evidencePack.artifactCoverage?.countsByType).toMatchObject({
+        'story-brief': 1,
+        'chapter-brief': expect.any(Number),
+        'scene-plan': expect.any(Number),
+        beat: expect.any(Number)
+      });
+    }
     const sceneCritic = input.contract.metadata.taskType === 'critique-scene';
     const firstSceneGate = input.contract.metadata.taskType === 'quality-gate'
       && String(input.contract.metadata.taskKey ?? '').startsWith('scene:')

@@ -115,7 +115,15 @@ export interface BuildJudgeExecutorInput {
 }
 
 export interface JudgeEvidencePack {
-  artifacts: Array<{ id: string; type: string; key: string; version: number; status: string; contentHash: string; content: string }>;
+  artifacts: Array<{ id: string; type: string; key: string; title?: string; version: number; status: string; contentHash: string; content: string }>;
+  artifactCoverage?: {
+    scope: 'task-artifacts' | 'complete-planning-corpus';
+    requestedCount: number;
+    includedCount: number;
+    omittedCount: number;
+    countsByType: Record<string, number>;
+    contentTruncatedCount: number;
+  };
   units: Array<{ id: string; key: string; kind: string; headVersionId: string | null; baselineHeadVersionId: string | null; wordCount: number; body: string }>;
   diagnostics: Array<{ code: string; severity: string; message: string; evidence: unknown; relatedRefs: unknown }>;
   toolEvidence: { calls: unknown[]; results: unknown[] };
@@ -659,7 +667,11 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         userId: requiredUserId(claimed.run)
       });
       const toolCallId = `deterministic:${claimed.task.id}:runStoryLint`;
-      toolCalls = [{ toolCallId, toolName: 'runStoryLint', input: { buildRunId: claimed.run.id, chapterIds } }];
+      toolCalls = [{
+        toolCallId,
+        toolName: 'runStoryLint',
+        input: { buildRunId: claimed.run.id, ...(chapterIds.length ? { chapterIds } : {}) }
+      }];
       toolResults = [{
         toolCallId,
         toolName: 'runStoryLint',
@@ -1153,6 +1165,15 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     execution.trace.price = actualJudgePrice;
     const judgeUsage = normalizeMeasuredUsage(undefined, actualJudgeModelId, judged.inputTokens, judged.outputTokens)[0];
     execution.trace.usageByModel.push(judgeUsage);
+    if (judgeUsage.inputTokens > contract.budget.maxInputTokens || judgeUsage.outputTokens > contract.budget.maxOutputTokens) {
+      const error = new Error(
+        `Independent judge usage exceeded the task invocation limit `
+        + `(inputTokens=${judgeUsage.inputTokens}/${contract.budget.maxInputTokens}, `
+        + `outputTokens=${judgeUsage.outputTokens}/${contract.budget.maxOutputTokens})`
+      );
+      Object.assign(error, { providerUsageComplete: true });
+      throw error;
+    }
     const parsed = judgeResultSchema.parse(judged.result);
     const requiredDimensions = rubricDimensions(rubric);
     const missingDimensions = requiredDimensions.filter((dimension) => parsed.scores[dimension] === undefined);
@@ -1182,9 +1203,20 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
   }
 
   private async buildJudgeEvidencePack(claimed: ClaimedTask, execution: TaskExecution, maxInputTokens: number): Promise<JudgeEvidencePack> {
+    const completePlanningCorpus = claimed.task.key === 'planning-quality-gate';
     const artifactIds = uniqueStrings([...claimed.task.inputArtifactIds, ...execution.result.artifactIds]);
     const [artifacts, units, diagnostics] = await Promise.all([
-      artifactIds.length
+      completePlanningCorpus
+        ? this.prisma.storyArtifact.findMany({
+          where: {
+            buildRunId: claimed.run.id,
+            invalidatedAt: null,
+            status: { in: ['VALIDATED', 'ACCEPTED'] },
+            task: { phase: 'planning', status: 'DONE' }
+          },
+          orderBy: [{ type: 'asc' }, { key: 'asc' }]
+        })
+        : artifactIds.length
         ? this.prisma.storyArtifact.findMany({ where: { id: { in: artifactIds }, buildRunId: claimed.run.id, invalidatedAt: null }, orderBy: [{ type: 'asc' }, { key: 'asc' }] })
         : Promise.resolve([]),
       claimed.task.scopeUnitIds.length
@@ -1192,25 +1224,43 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         : Promise.resolve([]),
       this.storyState.diagnostics(requiredUserId(claimed.run), claimed.run.projectId, claimed.run.id)
     ]);
-    const maximumCharacters = judgeEvidenceCharacterBudget(maxInputTokens);
-    const artifactCharacters = Math.floor(maximumCharacters * 0.3);
-    const unitCharacters = Math.floor(maximumCharacters * 0.45);
+    const maximumCharacters = judgeEvidenceCharacterBudget(maxInputTokens, completePlanningCorpus);
+    const artifactCharacters = Math.floor(maximumCharacters * (completePlanningCorpus ? 0.78 : 0.3));
+    const unitCharacters = Math.floor(maximumCharacters * (completePlanningCorpus ? 0 : 0.45));
     const diagnosticCharacters = Math.floor(maximumCharacters * 0.15);
     const toolCharacters = maximumCharacters - artifactCharacters - unitCharacters - diagnosticCharacters;
     const artifactLimit = perItemLimit(artifactCharacters, artifacts.length, 300, 8_000);
     const unitLimit = perItemLimit(unitCharacters, units.length, 300, 12_000);
     const diagnosticLimit = perItemLimit(diagnosticCharacters, diagnostics.diagnostics.length * 3, 200, 2_000);
     const toolLimit = perItemLimit(toolCharacters, execution.toolCalls.length + execution.toolResults.length, 200, 2_000);
+    const artifactContent = artifacts.map((artifact) => ({
+      artifact,
+      serialized: JSON.stringify(artifact.content),
+      limit: completePlanningCorpus ? completePlanningArtifactLimit(prismaArtifactType(artifact.type)) : artifactLimit
+    }));
+    const countsByType = Object.fromEntries([...new Set(artifacts.map((artifact) => prismaArtifactType(artifact.type)))].sort().map((type) => [
+      type,
+      artifacts.filter((artifact) => prismaArtifactType(artifact.type) === type).length
+    ]));
     const pack: JudgeEvidencePack = {
-      artifacts: artifacts.map((artifact) => ({
+      artifacts: artifactContent.map(({ artifact, serialized, limit }) => ({
         id: artifact.id,
         type: prismaArtifactType(artifact.type),
         key: artifact.key,
+        title: artifact.title,
         version: artifact.version,
         status: artifact.status.toLowerCase(),
         contentHash: artifact.contentHash,
-        content: boundedText(JSON.stringify(artifact.content), artifactLimit)
+        content: boundedText(serialized, limit)
       })),
+      artifactCoverage: {
+        scope: completePlanningCorpus ? 'complete-planning-corpus' : 'task-artifacts',
+        requestedCount: completePlanningCorpus ? artifacts.length : artifactIds.length,
+        includedCount: artifacts.length,
+        omittedCount: Math.max(0, (completePlanningCorpus ? artifacts.length : artifactIds.length) - artifacts.length),
+        countsByType,
+        contentTruncatedCount: artifactContent.filter(({ serialized, limit }) => serialized.length > limit).length
+      },
       units: units.map((unit) => ({
         id: unit.id,
         key: unit.key,
@@ -1239,7 +1289,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         inputArtifactIds: claimed.task.inputArtifactIds,
         outputArtifactIds: execution.result.artifactIds
       },
-      truncated: artifacts.some((artifact) => JSON.stringify(artifact.content).length > artifactLimit)
+      truncated: artifactContent.some(({ serialized, limit }) => serialized.length > limit)
         || units.some((unit) => (unit.branch.headVersion?.body?.length ?? 0) > unitLimit)
         || diagnostics.diagnostics.some((diagnostic) => diagnostic.message.length > diagnosticLimit)
         || execution.toolCalls.length > 1_000
@@ -1923,8 +1973,19 @@ function perItemLimit(totalCharacters: number, itemCount: number, minimum: numbe
   return Math.max(minimum, Math.min(maximum, Math.floor(totalCharacters / itemCount)));
 }
 
-export function judgeEvidenceCharacterBudget(maxInputTokens: number): number {
-  return Math.max(12_000, Math.min(80_000, Math.max(0, maxInputTokens - 4_000) * 2));
+export function judgeEvidenceCharacterBudget(maxInputTokens: number, completePlanningCorpus = false): number {
+  return Math.max(
+    12_000,
+    Math.min(completePlanningCorpus ? 220_000 : 80_000, Math.max(0, maxInputTokens - 8_000) * (completePlanningCorpus ? 3 : 2))
+  );
+}
+
+export function completePlanningArtifactLimit(type: string): number {
+  if (type === 'scene-plan') return 700;
+  if (type === 'beat') return 450;
+  if (type === 'chapter-brief') return 900;
+  if (type === 'character-bible' || type === 'plot-thread') return 1_400;
+  return 6_000;
 }
 
 function boundedText(value: string, maximumCharacters: number): string {
@@ -2171,6 +2232,10 @@ async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Promise<Bui
     system: [
       'You are an independent fiction-quality evaluator. You have diagnostics-only authority and cannot mutate or self-certify the candidate.',
       'Score only the supplied rubric and observable evidence. Do not expose hidden reasoning.',
+      'A bounded artifact body may be truncated for transport; use artifactCoverage to determine whether the required corpus is complete and do not fail solely because individual bodies are bounded.',
+      'For planning review, declared open questions are review surfaces, not automatic defects; lower scores only when an unresolved item prevents causal execution or violates the owner contract.',
+      'A runStoryLint call with buildRunId and omitted or empty chapterIds is build-wide.',
+      'You are producing the required independent evaluation now; never require a pre-existing MODEL evaluation.',
       'Call reportJudgeResult exactly once with every required score dimension, concise feedback, and observable evidence.'
     ].join('\n'),
     prompt: renderJudgePrompt(input),
@@ -2314,13 +2379,17 @@ export function normalizeJudgeResultCandidate(value: unknown): z.infer<typeof ju
 }
 
 export function renderJudgePrompt(input: Pick<BuildJudgeExecutorInput, 'rubric' | 'contract' | 'deterministicChecks' | 'observableResult' | 'evidencePack'>): string {
+  const requiresCurrentEvaluation = input.contract.acceptanceCriteria.some((criterion) => criterion.id === 'requiresPassingEvaluation');
   return [
     JSON.stringify({
       rubric: input.rubric,
       requiredScoreDimensions: rubricDimensions(input.rubric),
       objective: input.contract.objective,
-      acceptanceCriteria: input.contract.acceptanceCriteria,
-      deterministicChecks: input.deterministicChecks
+      acceptanceCriteria: input.contract.acceptanceCriteria.filter((criterion) => criterion.id !== 'requiresPassingEvaluation'),
+      deterministicChecks: Object.fromEntries(Object.entries(input.deterministicChecks).filter(([name]) => name !== 'requiresPassingEvaluation')),
+      ...(requiresCurrentEvaluation ? {
+        evaluationBoundary: 'This response is the required independent evaluation; do not look for a pre-existing evaluation artifact or row.'
+      } : {})
     }, null, 2),
     serializeUntrustedData('judge-candidate-evidence', {
       observableCandidateResult: input.observableResult,
