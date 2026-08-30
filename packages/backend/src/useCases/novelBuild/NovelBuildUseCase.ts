@@ -1319,11 +1319,19 @@ export class NovelBuildUseCase {
         for (const linked of [...stringArray(content.causeKeys), ...stringArray(content.consequenceKeys)]) if (!beatKeySet.has(linked)) throw new HttpError(409, `Beat '${key}' references missing beat '${linked}'`);
       }
 
+      const chapterKeyAliases = new Map(chapterArtifacts.flatMap((artifact) => {
+        const contentKey = isJsonObjectValue(artifact.content) && typeof artifact.content.chapterKey === 'string' ? artifact.content.chapterKey : artifact.key;
+        return [artifact.id, artifact.key, contentKey].map((alias) => [alias, contentKey] as const);
+      }));
+      const beatKeyAliases = new Map(beatArtifacts.flatMap((artifact) => {
+        const contentKey = isJsonObjectValue(artifact.content) && typeof artifact.content.beatKey === 'string' ? artifact.content.beatKey : artifact.key;
+        return [artifact.id, artifact.key, contentKey].map((alias) => [alias, contentKey] as const);
+      }));
       const actContent = actArtifact.content as JsonObject;
       const acts = Array.isArray(actContent.acts) ? actContent.acts.filter(isJsonObjectValue).map((act) => ({
         actKey: requiredText(act.actKey, 'actKey', 500),
-        chapterKeys: stringArray(act.chapterKeys),
-        beatKeys: stringArray(act.beatKeys)
+        chapterKeys: stringArray(act.chapterKeys).map((key) => chapterKeyAliases.get(key) ?? key),
+        beatKeys: stringArray(act.beatKeys).map((key) => beatKeyAliases.get(key) ?? key)
       })) : [];
       if (!acts.length) throw new HttpError(409, 'Act architecture must contain at least one act');
       assertUniqueValues(acts.map((act) => act.actKey), 'act keys');
@@ -1338,56 +1346,89 @@ export class NovelBuildUseCase {
         if (!chapter.actKey || !actByKey.get(chapter.actKey)?.chapterKeys.includes(chapter.chapterKey)) throw new HttpError(409, `Chapter '${chapter.chapterKey}' is not assigned to its declared act`);
       }
 
-      const characterKeys = new Set(characterArtifacts.flatMap((artifact) => [artifact.key, typeof (artifact.content as JsonObject).characterKey === 'string' ? String((artifact.content as JsonObject).characterKey) : artifact.key]));
-      const threadKeys = new Set(latest.filter((artifact) => artifact.type === 'PLOT_THREAD').flatMap((artifact) => [artifact.id, artifact.key, typeof (artifact.content as JsonObject).threadKey === 'string' ? String((artifact.content as JsonObject).threadKey) : artifact.key]));
+      const characterKeys = new Set(characterArtifacts.flatMap((artifact) => {
+        const content = artifact.content as JsonObject;
+        const nameParts = typeof content.name === 'string' ? content.name.split(/\s+/) : [];
+        return [artifact.id, artifact.key, content.characterKey, content.name, ...nameParts, ...stringArray(content.aliases)]
+          .flatMap((value) => referenceVariants(value));
+      }));
+      const threadKeys = new Set(latest.filter((artifact) => artifact.type === 'PLOT_THREAD').flatMap((artifact) => {
+        const content = artifact.content as JsonObject;
+        return [artifact.id, artifact.key, content.threadKey].flatMap((value) => referenceVariants(value));
+      }));
       const world = latest.find((artifact) => artifact.type === 'WORLD_BIBLE');
       const worldContent = world ? world.content as JsonObject : {};
-      const locationKeys = new Set((Array.isArray(worldContent.geography) ? worldContent.geography.filter(isJsonObjectValue) : []).flatMap((entry) => [entry.key, entry.name].filter((value): value is string => typeof value === 'string')));
-      const worldRuleKeys = new Set((Array.isArray(worldContent.rules) ? worldContent.rules.filter(isJsonObjectValue) : []).flatMap((entry) => typeof entry.key === 'string' ? [entry.key] : []));
+      const locationKeys = new Set((Array.isArray(worldContent.geography) ? worldContent.geography.filter(isJsonObjectValue) : []).flatMap((entry) => [entry.key, entry.name].flatMap((value) => referenceVariants(value))));
+      const worldRuleKeys = new Set((Array.isArray(worldContent.rules) ? worldContent.rules.filter(isJsonObjectValue) : []).flatMap((entry) => referenceVariants(entry.key)));
       const setupMap = latest.find((artifact) => artifact.type === 'SETUP_PAYOFF_MAP');
       const setupKeys = new Set(setupMap && isJsonObjectValue(setupMap.content) && Array.isArray(setupMap.content.links)
-        ? setupMap.content.links.filter(isJsonObjectValue).flatMap((link) => typeof link.key === 'string' ? [link.key] : []) : []);
+        ? setupMap.content.links.filter(isJsonObjectValue).flatMap((link) => referenceVariants(link.key)) : []);
       const [canonicalCharacters, canonicalLocations] = await Promise.all([
         tx.character.findMany({ where: { projectId: run.projectId }, select: { id: true, name: true, aliases: true } }),
         tx.location.findMany({ where: { projectId: run.projectId }, select: { id: true, name: true } })
       ]);
-      canonicalCharacters.forEach((character) => [character.id, character.name, ...character.aliases].forEach((value) => characterKeys.add(value)));
-      canonicalLocations.forEach((location) => [location.id, location.name].forEach((value) => locationKeys.add(value)));
+      canonicalCharacters.forEach((character) => [character.id, character.name, ...character.aliases].flatMap((value) => referenceVariants(value)).forEach((value) => characterKeys.add(value)));
+      canonicalLocations.forEach((location) => [location.id, location.name].flatMap((value) => referenceVariants(value)).forEach((value) => locationKeys.add(value)));
       const artifactsByType = new Map<string, Set<string>>();
       const allArtifactRefs = new Set<string>();
       for (const artifact of latest) {
         const type = artifact.type.toLowerCase().replaceAll('_', '-');
         const values = artifactsByType.get(type) ?? new Set<string>();
-        values.add(artifact.id); values.add(artifact.key); allArtifactRefs.add(artifact.id); allArtifactRefs.add(artifact.key);
+        referenceVariants(artifact.id).forEach((value) => { values.add(value); allArtifactRefs.add(value); });
+        referenceVariants(artifact.key).forEach((value) => { values.add(value); allArtifactRefs.add(value); });
         artifactsByType.set(type, values);
       }
+      const planningProducerIds = unique(latest.flatMap((artifact) => artifact.taskId ? [artifact.taskId] : []));
+      const planningProducers = planningProducerIds.length ? await tx.buildTask.findMany({
+        where: { id: { in: planningProducerIds }, buildRunId },
+        select: { executionPolicy: true }
+      }) : [];
+      const exactPlanningReferencesRequired = planningProducers.some((producer) =>
+        isJsonObjectValue(producer.executionPolicy) && producer.executionPolicy.exactPlanningReferencesRequired === true
+      );
+      const chapterReferenceKeys = new Set([...chapterByKey.keys()].flatMap((key) => referenceVariants(key)));
+      const sceneReferenceKeys = new Set([...sceneByKey.keys()].flatMap((key) => referenceVariants(key)));
+      const invalidPlanningReferences: string[] = [];
       const assertPlanningReference = (ref: { type: string; id: string; key?: string }) => {
-        const candidates = [ref.id, ref.key].filter((value): value is string => Boolean(value));
+        const candidates = [ref.id, ref.key].flatMap((value) => referenceVariants(value));
         const valid = ref.type === 'character' ? candidates.some((value) => characterKeys.has(value))
           : ref.type === 'location' ? candidates.some((value) => locationKeys.has(value))
-          : ['chapter', 'chapter-brief'].includes(ref.type) ? candidates.some((value) => chapterByKey.has(value) || artifactsByType.get('chapter-brief')?.has(value))
-          : ['scene', 'scene-plan'].includes(ref.type) ? candidates.some((value) => sceneByKey.has(value) || artifactsByType.get('scene-plan')?.has(value))
+          : ['chapter', 'chapter-brief'].includes(ref.type) ? candidates.some((value) => chapterReferenceKeys.has(value) || artifactsByType.get('chapter-brief')?.has(value))
+          : ['scene', 'scene-plan'].includes(ref.type) ? candidates.some((value) => sceneReferenceKeys.has(value) || artifactsByType.get('scene-plan')?.has(value))
           : ref.type === 'plot-thread' ? candidates.some((value) => threadKeys.has(value))
           : ref.type === 'setup-payoff' ? candidates.some((value) => setupKeys.has(value))
           : ref.type === 'world-rule' ? candidates.some((value) => worldRuleKeys.has(value))
           : ref.type === 'artifact' ? candidates.some((value) => allArtifactRefs.has(value))
           : candidates.some((value) => artifactsByType.get(ref.type)?.has(value));
-        if (!valid) throw new HttpError(409, `Planning artifact reference '${ref.type}:${ref.id}' does not resolve inside this project/build`);
+        if (!valid && !(exactPlanningReferencesRequired === false && isLegacyLogicalReference(ref))) {
+          invalidPlanningReferences.push(`${ref.type}:${ref.id}`);
+        }
       };
       for (const artifact of latest) for (const ref of collectJsonReferences(artifact.content as JsonValue)) assertPlanningReference(ref);
+      if (invalidPlanningReferences.length) {
+        const uniqueInvalid = unique(invalidPlanningReferences);
+        throw new HttpError(409, `Planning reference audit found ${uniqueInvalid.length} unresolved identifier(s): ${uniqueInvalid.slice(0, 25).join(', ')}${uniqueInvalid.length > 25 ? ', …' : ''}`);
+      }
       for (const scene of scenes) {
         for (const ref of scene.characterRefs) {
           const id = typeof ref.id === 'string' ? ref.id : '';
           const key = typeof ref.key === 'string' ? ref.key : '';
-          if (!characterKeys.has(id) && !characterKeys.has(key)) {
+          const candidates = [id, key].flatMap((value) => referenceVariants(value));
+          if (!candidates.some((value) => characterKeys.has(value))) {
             const canonical = id ? await tx.character.findFirst({ where: { id, projectId: run.projectId }, select: { id: true } }) : null;
-            if (!canonical) throw new HttpError(409, `Scene '${scene.sceneKey}' references missing character '${id || key}'`);
+            if (!canonical && !(exactPlanningReferencesRequired === false && isLegacyLogicalReference({ type: 'character', id: id || key }))) {
+              throw new HttpError(409, `Scene '${scene.sceneKey}' references missing character '${id || key}'`);
+            }
           }
         }
         for (const ref of scene.plotThreadRefs) {
           const id = typeof ref.id === 'string' ? ref.id : '';
           const key = typeof ref.key === 'string' ? ref.key : '';
-          if (!threadKeys.has(id) && !threadKeys.has(key)) throw new HttpError(409, `Scene '${scene.sceneKey}' references missing plot thread '${id || key}'`);
+          const candidates = [id, key].flatMap((value) => referenceVariants(value));
+          if (!candidates.some((value) => threadKeys.has(value))
+            && !(exactPlanningReferencesRequired === false && isLegacyLogicalReference({ type: 'plot-thread', id: id || key }))) {
+            throw new HttpError(409, `Scene '${scene.sceneKey}' references missing plot thread '${id || key}'`);
+          }
         }
       }
       return { artifactSpecsSatisfied: true, chapterCount: chapters.length, scenePlanCount: scenes.length, beatCount: beatArtifacts.length, finaleResolved: true };
@@ -1937,6 +1978,42 @@ function assertUniqueValues(values: string[], label: string) {
 
 function sameStringSet(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value) => right.includes(value));
+}
+
+export function referenceVariants(value: unknown): string[] {
+  if (typeof value !== 'string' || !value.trim()) return [];
+  const raw = value.trim();
+  const values = new Set([raw, normalizeReferenceAlias(raw)]);
+  const separator = raw.indexOf(':');
+  if (separator > 0 && separator + 1 < raw.length) {
+    const suffix = raw.slice(separator + 1);
+    values.add(suffix);
+    values.add(normalizeReferenceAlias(suffix));
+  }
+  return [...values].filter(Boolean);
+}
+
+function normalizeReferenceAlias(value: string): string {
+  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+export function isLegacyLogicalReference(ref: { type: string; id: string }): boolean {
+  const prefixes: Record<string, string[]> = {
+    character: ['character'],
+    location: ['location'],
+    'plot-thread': ['thread', 'plot-thread'],
+    'setup-payoff': ['setup', 'setup-payoff'],
+    'world-rule': ['rule', 'world-rule'],
+    chapter: ['chapter'],
+    'chapter-brief': ['chapter', 'chapter-brief'],
+    scene: ['scene'],
+    'scene-plan': ['scene', 'scene-plan']
+  };
+  const separator = ref.id.indexOf(':');
+  if (separator <= 0 || separator + 1 >= ref.id.length) return false;
+  const prefix = ref.id.slice(0, separator);
+  const suffix = ref.id.slice(separator + 1);
+  return Boolean(prefixes[ref.type]?.includes(prefix) && /^[a-z0-9][a-z0-9._:-]*$/i.test(suffix));
 }
 
 function chunks<T>(values: T[], size: number): T[][] {

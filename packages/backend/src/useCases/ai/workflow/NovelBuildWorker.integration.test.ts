@@ -965,9 +965,29 @@ function deterministicExecutor(prisma: PrismaClient, buildRunId: string, scale?:
       return output as Record<string, unknown>;
     };
 
-    const planningOperations = scale
+    let planningOperations = scale
       ? productionPlanningArtifactsFor(input.contract.outputs.map((output) => output.type), input.contract.scope.buildTaskId ?? taskKey, input.contract.metadata, scale)
       : planningArtifactsFor(input.contract.outputs.map((output) => output.type), input.contract.scope.buildTaskId ?? taskKey);
+    if (scale && taskType === 'create-act-architecture') {
+      const beatArtifacts = await prisma.storyArtifact.findMany({
+        where: { buildRunId, type: 'BEAT', invalidatedAt: null, status: { in: ['VALIDATED', 'ACCEPTED'] } }
+      });
+      const beatIds = new Map(beatArtifacts.map((artifact) => [String((artifact.content as Record<string, unknown>).beatKey ?? ''), artifact.id]));
+      planningOperations = planningOperations.map((operation) => {
+        const content = operation.content as Record<string, unknown>;
+        const acts = Array.isArray(content.acts) ? content.acts as Array<Record<string, unknown>> : [];
+        return {
+          ...operation,
+          content: {
+            ...content,
+            acts: acts.map((act) => ({
+              ...act,
+              beatKeys: (Array.isArray(act.beatKeys) ? act.beatKeys : []).map((key) => beatIds.get(String(key)) ?? key)
+            }))
+          }
+        };
+      });
+    }
     if (planningOperations.length) {
       const operationBatches = taskType === 'create-character-bibles'
         ? chunkValues(planningOperations, 3)

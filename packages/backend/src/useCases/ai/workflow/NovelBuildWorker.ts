@@ -1988,6 +1988,9 @@ export function objectiveForTask(task: BuildTask, buildObjective: string, manife
     ['create-scene-plans', 'create-scene-plan-shard'].includes(task.type)
       ? 'Use exactly the chapter briefs\' declared sceneKeys. Preserve each declared chapterKey and set ordinal to its 1-based position within that chapter; never redistribute scenes or use a book-global ordinal.'
       : '',
+    requiredTypes.length
+      ? 'Every typed reference must use an exact stable id or key from a persisted input artifact or a sibling output; do not invent namespaced aliases such as character:name, thread:name, setup:name, or location:name.'
+      : '',
     'Report only observable decisions, artifact IDs, validator evidence, checks, and quality scores.'
   ].filter(Boolean).join(' ');
 }

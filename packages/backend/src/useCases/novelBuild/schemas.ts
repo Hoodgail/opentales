@@ -469,7 +469,7 @@ export function createPlanningTaskTemplates(targetChapterCount: number, targetSc
     const count = Math.min(beatShardSize, targetSceneCount - index * beatShardSize);
     return { ...planningTask(`beats:${String(index + 1).padStart(3, '0')}`, 'create-beat-shard', ['plot-threads'], 'creator', ['beat'], 68 - index),
       acceptanceCriteria: { requiredArtifactTypes: ['beat'], minOutputCount: count, maxOutputCount: count },
-      executionPolicy: { shardIndex: index, startOrdinal: index * beatShardSize + 1, count, total: targetSceneCount }
+      executionPolicy: { shardIndex: index, startOrdinal: index * beatShardSize + 1, count, total: targetSceneCount, exactPlanningReferencesRequired: true }
     };
   });
   const sceneBase = Math.floor(targetSceneCount / targetChapterCount);
@@ -479,7 +479,7 @@ export function createPlanningTaskTemplates(targetChapterCount: number, targetSc
     const count = sceneBase + (index < sceneRemainder ? 1 : 0);
     const task = { ...planningTask(`scene-plans:chapter-${String(index + 1).padStart(3, '0')}`, 'create-scene-plan-shard', ['chapter-briefs'], 'creator', ['scene-plan'], 55 - index),
       acceptanceCriteria: { requiredArtifactTypes: ['scene-plan'], minOutputCount: count, maxOutputCount: count, exactChapterSceneKeysRequired: true },
-      executionPolicy: { shardIndex: index, chapterNumber: index + 1, startOrdinal, count, total: targetSceneCount }
+      executionPolicy: { shardIndex: index, chapterNumber: index + 1, startOrdinal, count, total: targetSceneCount, exactPlanningReferencesRequired: true }
     };
     startOrdinal += count;
     return task;
@@ -814,7 +814,7 @@ function planningTask(
     assignedAgent: agent,
     skillVersions: planningSkillVersions(requiredArtifactTypes),
     acceptanceCriteria: { requiredArtifactTypes },
-    executionPolicy: { maxIterations: 1, schemaValidationRequired: true },
+    executionPolicy: { maxIterations: 1, schemaValidationRequired: true, exactPlanningReferencesRequired: true },
     maxAttempts: 3,
     maxRevisionIterations: 1,
     priority

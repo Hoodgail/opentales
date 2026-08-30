@@ -33,8 +33,15 @@ const {
   resolveUntouchedBuiltInSkillUpgrades,
   startNovelBuildWorker
 } = await import('./NovelBuildWorker.js');
+const { isLegacyLogicalReference, referenceVariants } = await import('../../novelBuild/NovelBuildUseCase.js');
 
 describe('durable Novel Build execution contract', () => {
+  it('normalizes stable planning aliases while fencing legacy logical references by type', () => {
+    expect(referenceVariants('character:decimus-rhal')).toEqual(expect.arrayContaining(['character:decimus-rhal', 'decimus-rhal']));
+    expect(isLegacyLogicalReference({ type: 'plot-thread', id: 'thread:ancient-breach' })).toBe(true);
+    expect(isLegacyLogicalReference({ type: 'plot-thread', id: 'location:ancient-breach' })).toBe(false);
+  });
+
   it('treats quality gates as report-only contracts without fake artifact requirements', () => {
     const task = {
       key: 'planning-quality-gate',
@@ -105,9 +112,10 @@ describe('durable Novel Build execution contract', () => {
     expect(PLANNING_TASK_TEMPLATES.find((task) => task.key === 'scene-plans')?.acceptanceCriteria).toMatchObject({
       exactChapterSceneKeysRequired: true
     });
+    expect(PLANNING_TASK_TEMPLATES.every((task) => task.type === 'quality-gate' || task.type === 'checkpoint' || task.executionPolicy.exactPlanningReferencesRequired === true)).toBe(true);
     expect(createPlanningTaskTemplates(32, 104)
       .filter((task) => task.type === 'create-scene-plan-shard')
-      .every((task) => task.acceptanceCriteria.exactChapterSceneKeysRequired === true)).toBe(true);
+      .every((task) => task.acceptanceCriteria.exactChapterSceneKeysRequired === true && task.executionPolicy.exactPlanningReferencesRequired === true)).toBe(true);
     expect(defaultTaskBudget({ type: 'create-beats' } as any)).toMatchObject({
       maxInputTokens: 256_000,
       maxOutputTokens: 48_000,
