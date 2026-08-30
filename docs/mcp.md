@@ -146,7 +146,7 @@ Authorization: Bearer <otmcp_... or otoauth_...>
 Accept: application/json, text/event-stream
 ```
 
-Native Codex and Claude Code clients normally omit `Origin`. Hosted web clients send an Origin header, so the production allowlist includes Claude.ai, ChatGPT, and Gemini. The backend rejects any other supplied origin with `403`, as required by the Streamable HTTP transport's DNS-rebinding protection. Add the exact HTTPS origin of any additional browser-based MCP host before connecting it:
+Native Codex and Claude Code clients normally omit `Origin`. Hosted web clients send an Origin header, so the backend always includes Claude.ai, ChatGPT, and Gemini in its allowlist, even when `MCP_ALLOWED_ORIGINS` is explicitly configured. The backend rejects any other supplied origin with `403`, as required by the Streamable HTTP transport's DNS-rebinding protection. Add the exact HTTPS origin of any additional browser-based MCP host before connecting it:
 
 ```env
 MCP_ALLOWED_ORIGINS="https://opentales.hoodgail.me,https://claude.ai,https://chatgpt.com,https://gemini.google.com"
