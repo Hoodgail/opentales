@@ -12,7 +12,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       CORS_ORIGIN: ${CORS_ORIGIN:-https://opentales.hoodgail.me}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://opentales-api.hoodgail.me}
-      MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-https://opentales.hoodgail.me,https://tale.yasui.io}
+      MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-https://opentales.hoodgail.me,https://claude.ai,https://chatgpt.com,https://gemini.google.com}
       MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-https://opentales.hoodgail.me/mcp}
       MCP_OAUTH_ISSUER: ${MCP_OAUTH_ISSUER:-https://opentales.hoodgail.me}
     expose:

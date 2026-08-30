@@ -63,7 +63,7 @@ export async function requireMcpAuth(req: Request, res: Response, next: NextFunc
     if (status === 401) {
       res.setHeader(
         'WWW-Authenticate',
-        `Bearer resource_metadata="${env.mcpOAuthIssuer}/.well-known/oauth-protected-resource/mcp", scope="opentales:project:read opentales:project:write"`
+        `Bearer resource_metadata="${mcpProtectedResourceMetadataUrl()}", scope="opentales:project:read opentales:project:write"`
       );
     }
     res.status(status).json({
@@ -73,6 +73,12 @@ export async function requireMcpAuth(req: Request, res: Response, next: NextFunc
 }
 
 export const requireMcpApiKey = requireMcpAuth;
+
+export function mcpProtectedResourceMetadataUrl(): string {
+  const resource = new URL(env.mcpPublicUrl);
+  const resourcePath = resource.pathname === '/' ? '' : resource.pathname.replace(/\/$/, '');
+  return new URL(`/.well-known/oauth-protected-resource${resourcePath}`, resource.origin).toString();
+}
 
 export async function authenticateMcpCredential(client: PrismaClient, secret: string): Promise<AuthInfo> {
   if (secret.startsWith(OAUTH_ACCESS_TOKEN_PREFIX)) return authenticateMcpOAuthToken(client, secret);

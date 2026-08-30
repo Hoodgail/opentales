@@ -20,7 +20,7 @@ export class McpOAuthController {
       authorization_servers: [env.mcpOAuthIssuer],
       scopes_supported: MCP_OAUTH_SCOPES,
       bearer_methods_supported: ['header'],
-      resource_documentation: `${env.mcpOAuthIssuer}/guide`
+      resource_documentation: `${env.mcpOAuthIssuer}/guide/`
     });
   };
 
@@ -28,6 +28,7 @@ export class McpOAuthController {
     res.setHeader('Cache-Control', 'public, max-age=300');
     res.json({
       issuer: env.mcpOAuthIssuer,
+      authorization_response_iss_parameter_supported: true,
       authorization_endpoint: `${env.mcpOAuthIssuer}/authorize`,
       token_endpoint: `${env.mcpOAuthIssuer}/token`,
       registration_endpoint: `${env.mcpOAuthIssuer}/register`,

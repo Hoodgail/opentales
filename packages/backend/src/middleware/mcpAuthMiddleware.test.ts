@@ -1,12 +1,22 @@
 import type { PrismaClient } from '@prisma/client';
 import type { NextFunction, Request, Response } from 'express';
 import { describe, expect, it, vi } from 'vitest';
-import { authenticateMcpApiKey, validateMcpOrigin } from './mcpAuthMiddleware.js';
+import {
+  authenticateMcpApiKey,
+  mcpProtectedResourceMetadataUrl,
+  validateMcpOrigin
+} from './mcpAuthMiddleware.js';
 import { hashMcpApiKey } from '../useCases/ai/ProjectMcpApiKeysUseCase.js';
 
 const secret = `otmcp_${'a'.repeat(43)}`;
 
 describe('MCP API-key authentication', () => {
+  it('derives protected-resource discovery from the canonical MCP resource URL', () => {
+    expect(mcpProtectedResourceMetadataUrl()).toBe(
+      'http://localhost:5173/.well-known/oauth-protected-resource/mcp'
+    );
+  });
+
   it('binds the key to its project and creator membership', async () => {
     const findUnique = vi.fn(async () => authenticatedRow());
     const updateMany = vi.fn(async () => ({ count: 1 }));
@@ -67,6 +77,20 @@ describe('MCP API-key authentication', () => {
 
     expect(response.status).toHaveBeenCalledWith(403);
     expect(next).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'https://claude.ai',
+    'https://chatgpt.com',
+    'https://gemini.google.com'
+  ])('allows the hosted MCP client origin %s', (origin) => {
+    const request = { header: vi.fn(() => origin) } as unknown as Request;
+    const response = {} as Response;
+    const next = vi.fn() as NextFunction;
+
+    validateMcpOrigin(request, response, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -25,8 +25,10 @@ const port = Number(process.env.PORT ?? 4000);
 const corsOrigin = process.env.CORS_ORIGIN ?? 'http://localhost:5173';
 const mcpAllowedOrigins = (process.env.MCP_ALLOWED_ORIGINS ?? [
   corsOrigin,
-  'https://tale.yasui.io',
-  'https://opentales.hoodgail.me'
+  'https://opentales.hoodgail.me',
+  'https://claude.ai',
+  'https://chatgpt.com',
+  'https://gemini.google.com'
 ].join(','))
   .split(',')
   .map((value) => value.trim().replace(/\/$/, ''))

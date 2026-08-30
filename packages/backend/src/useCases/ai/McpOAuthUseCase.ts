@@ -400,6 +400,7 @@ function authorizationRedirect(redirectUri: string, values: { code?: string; err
   if (values.code) url.searchParams.set('code', values.code);
   if (values.error) url.searchParams.set('error', values.error);
   if (values.state) url.searchParams.set('state', values.state);
+  url.searchParams.set('iss', env.mcpOAuthIssuer);
   return url.toString();
 }
 
