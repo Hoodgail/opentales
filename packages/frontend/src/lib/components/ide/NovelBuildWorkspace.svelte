@@ -16,6 +16,7 @@
   } from 'lucide-svelte';
   import { tick } from 'svelte';
   import type {
+    AuthorizeBuildRunInput,
     BuildCheckpoint,
     BuildDirective,
     BuildComparison,
@@ -60,7 +61,7 @@
     onNew: () => void;
     onRefresh: () => void;
     onPause: (run: BuildRun) => void | Promise<void>;
-    onAuthorize: (run: BuildRun) => void | Promise<void>;
+    onAuthorize: (run: BuildRun, authorization?: Pick<AuthorizeBuildRunInput, 'authorizationScope' | 'maxTokens' | 'maxCostMicros'>) => void | Promise<void>;
     onResume: (run: BuildRun) => void | Promise<void>;
     onCancel: (run: BuildRun) => void | Promise<void>;
     onRetry: (task: BuildTask) => void | Promise<void>;
@@ -119,6 +120,14 @@
   let runSeen = $state<string | null>(null);
   let confirmAction = $state<{ kind: 'rerun' | 'cancel'; task?: BuildTask } | null>(null);
   let replanAction = $state<{ task: BuildTask; directive: string; checkpointId: string; pinnedArtifactIds: Set<string> } | null>(null);
+  let checkpointAuthorizationOpen = $state(false);
+  let checkpointAllowPlanning = $state(true);
+  let checkpointAllowCanon = $state(true);
+  let checkpointAllowChapters = $state(false);
+  let checkpointAllowScenes = $state(false);
+  let checkpointAllowDiagnostics = $state(true);
+  let checkpointMaxTokens = $state('');
+  let checkpointMaxCost = $state('');
   let workspace = $state<'execution' | 'manuscript'>('execution');
   let mobilePane = $state<'graph' | 'task'>('graph');
   let manifestOpen = $state(false);
@@ -127,6 +136,14 @@
   let actionReturnFocus: HTMLElement | null = null;
   const selectedTask = $derived(run?.tasks.find((task) => task.id === selectedTaskId) ?? run?.tasks.find((task) => task.status === 'running') ?? null);
   const exhaustedFailedTask = $derived(run?.tasks.find((task) => task.status === 'failed' && task.attempts >= task.maxAttempts) ?? null);
+  const checkpointReview = $derived(Boolean(run?.currentPhase.startsWith('checkpoint-review:')));
+  const checkpointBudgetValid = $derived(
+    (!checkpointMaxTokens.trim() || (Number.isFinite(Number(checkpointMaxTokens)) && Number(checkpointMaxTokens) > 0))
+    && (!checkpointMaxCost.trim() || (Number.isFinite(Number(checkpointMaxCost)) && Number(checkpointMaxCost) > 0))
+  );
+  const checkpointAuthorizationReady = $derived(
+    checkpointAllowChapters && checkpointAllowScenes && checkpointAllowCanon && checkpointAllowDiagnostics && checkpointBudgetValid
+  );
 
   $effect(() => {
     if (!run || run.id === runSeen) return;
@@ -138,6 +155,7 @@
       ?? null;
     confirmAction = null;
     replanAction = null;
+    checkpointAuthorizationOpen = false;
   });
 
   $effect(() => {
@@ -190,6 +208,37 @@
     closeActionDialog();
   }
 
+  function openCheckpointAuthorization(event?: MouseEvent) {
+    if (!run) return;
+    actionReturnFocus = event?.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+    checkpointAllowPlanning = run.authorizationScope.allowPlanningArtifacts;
+    checkpointAllowCanon = run.authorizationScope.allowCanonWrites;
+    checkpointAllowChapters = run.authorizationScope.allowChapterWrites;
+    checkpointAllowScenes = run.authorizationScope.allowSceneWrites;
+    checkpointAllowDiagnostics = run.authorizationScope.allowDiagnostics;
+    checkpointMaxTokens = run.maxTokens === null ? '' : String(run.maxTokens);
+    checkpointMaxCost = run.maxCostMicros === null ? '' : String(run.maxCostMicros / 1_000_000);
+    checkpointAuthorizationOpen = true;
+    void tick().then(() => actionDialog?.focus());
+  }
+
+  async function commitCheckpointAuthorization() {
+    if (!run || !checkpointAuthorizationReady) return;
+    await onAuthorize(run, {
+      authorizationScope: {
+        ...run.authorizationScope,
+        allowPlanningArtifacts: checkpointAllowPlanning,
+        allowCanonWrites: checkpointAllowCanon,
+        allowChapterWrites: checkpointAllowChapters,
+        allowSceneWrites: checkpointAllowScenes,
+        allowDiagnostics: checkpointAllowDiagnostics
+      },
+      maxTokens: checkpointMaxTokens.trim() ? Math.trunc(Number(checkpointMaxTokens)) : null,
+      maxCostMicros: checkpointMaxCost.trim() ? Math.round(Number(checkpointMaxCost) * 1_000_000) : null
+    });
+    closeActionDialog();
+  }
+
   function openConfirm(action: { kind: 'rerun' | 'cancel'; task?: BuildTask }, event?: MouseEvent) {
     actionReturnFocus = event?.currentTarget instanceof HTMLElement ? event.currentTarget : null;
     confirmAction = action;
@@ -205,6 +254,7 @@
   function closeActionDialog() {
     confirmAction = null;
     replanAction = null;
+    checkpointAuthorizationOpen = false;
     const target = actionReturnFocus;
     actionReturnFocus = null;
     void tick().then(() => target?.isConnected && target.focus());
@@ -252,6 +302,8 @@
               {#if run.status === 'paused' || run.status === 'failed'}
                 {#if exhaustedFailedTask}
                   <button type="button" onclick={(event) => openConfirm({ kind: 'rerun', task: exhaustedFailedTask }, event)} disabled={mutating} title={`Reset ${exhaustedFailedTask.key} and invalidate its downstream output`} class="inline-flex h-8 items-center gap-1 rounded bg-amber-400 px-2 text-[10px] font-medium text-black outline-none disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-amber-300"><Wrench class="size-3" />Rerun {exhaustedFailedTask.key}</button>
+                {:else if checkpointReview}
+                  <button type="button" onclick={openCheckpointAuthorization} disabled={mutating} class="inline-flex h-8 items-center gap-1 rounded bg-accent px-2 text-[10px] font-medium text-accent-foreground outline-none disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-accent"><GitBranch class="size-3" />Review &amp; authorize</button>
                 {:else}
                   <button type="button" onclick={() => void onResume(run)} disabled={mutating} class="inline-flex h-8 items-center gap-1 rounded bg-accent px-2 text-[10px] font-medium text-accent-foreground outline-none disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-accent"><Play class="size-3" />Resume</button>
                 {/if}
@@ -273,6 +325,13 @@
 
     {#if error}<div class="flex shrink-0 items-center gap-2 border-b border-destructive/30 bg-destructive/8 px-3 py-2 text-[11px] text-destructive-foreground" role="alert"><AlertTriangle class="size-3.5" />{error}</div>{/if}
     {#if run.lastError}<div class="flex shrink-0 items-center gap-2 border-b border-destructive/30 bg-destructive/8 px-3 py-2 text-[11px] text-destructive-foreground"><AlertTriangle class="size-3.5" />{run.lastError}</div>{/if}
+    {#if checkpointReview}
+      <div class="flex shrink-0 flex-wrap items-center gap-2 border-b border-accent/30 bg-accent/6 px-3 py-2 text-[11px]">
+        <Milestone class="size-3.5 shrink-0 text-accent" />
+        <span class="min-w-0 flex-1 text-foreground">This build is waiting at an explicit review checkpoint. Continuing accepts the validated plan and materializes the isolated manuscript branch under a newly confirmed scope.</span>
+        <button type="button" onclick={openCheckpointAuthorization} disabled={mutating} class="rounded bg-accent px-2 py-1 text-[10px] font-medium text-accent-foreground outline-none disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-accent">Review &amp; authorize</button>
+      </div>
+    {/if}
     {#if !run.authorizedAt}
       <div class="shrink-0 border-b border-accent/30 bg-accent/6 px-3 py-2">
         <div class="flex flex-wrap items-center gap-2 text-[11px]"><GitBranch class="size-3.5 shrink-0 text-accent" /><span class="min-w-0 flex-1 text-foreground">The manifest is planned but not authorized. Review its phases, scope, and budget before workers begin.</span><button type="button" onclick={() => (manifestOpen = !manifestOpen)} class="rounded border border-border px-2 py-1 text-[10px] text-foreground outline-none hover:border-accent/50 focus-visible:ring-2 focus-visible:ring-accent">{manifestOpen ? 'Hide manifest' : 'Review manifest'}</button><button type="button" onclick={() => void onAuthorize(run)} disabled={mutating} class="rounded bg-accent px-2 py-1 text-[10px] font-medium text-accent-foreground outline-none disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-accent">Authorize scope</button></div>
@@ -282,6 +341,27 @@
             <section><h2 class="text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Authorized capability</h2><dl class="mt-2 grid grid-cols-[8rem_1fr] gap-y-1 text-[10px]"><dt class="text-muted-foreground">Autonomy</dt><dd class="text-foreground">{run.autonomyMode}</dd><dt class="text-muted-foreground">Planning</dt><dd>{run.authorizationScope.allowPlanningArtifacts ? 'allowed' : 'blocked'}</dd><dt class="text-muted-foreground">Chapter writes</dt><dd>{run.authorizationScope.allowChapterWrites ? 'allowed on branch' : 'blocked'}</dd><dt class="text-muted-foreground">Scene writes</dt><dd>{run.authorizationScope.allowSceneWrites ? 'allowed on branch' : 'blocked'}</dd><dt class="text-muted-foreground">Canon writes</dt><dd>{run.authorizationScope.allowCanonWrites ? 'allowed on branch' : 'blocked'}</dd><dt class="text-muted-foreground">Diagnostics</dt><dd>{run.authorizationScope.allowDiagnostics ? 'allowed' : 'blocked'}</dd><dt class="text-muted-foreground">Artifact types</dt><dd class="break-words">{run.authorizationScope.artifactTypes.length ? run.authorizationScope.artifactTypes.join(', ') : 'none'}</dd><dt class="text-muted-foreground">Entity scope</dt><dd>{run.authorizationScope.chapterIds.length || run.authorizationScope.sceneIds.length ? `${run.authorizationScope.chapterIds.length} chapters · ${run.authorizationScope.sceneIds.length} scenes` : 'all planned branch entities'}</dd></dl></section>
           </div>
         {/if}
+      </div>
+    {/if}
+
+    {#if checkpointAuthorizationOpen}
+      <div class="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="presentation" onclick={(event) => event.target === event.currentTarget && closeActionDialog()}>
+        <div bind:this={actionDialog} role="dialog" aria-modal="true" aria-label="Authorize build checkpoint" tabindex="-1" onkeydown={handleActionDialogKeydown} class="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded border border-accent/45 bg-card p-4 shadow-2xl outline-none focus-visible:ring-2 focus-visible:ring-accent">
+          <div class="flex items-start gap-3"><Milestone class="mt-0.5 size-4 shrink-0 text-accent" /><div><h2 class="text-sm font-medium text-foreground">Authorize planning checkpoint</h2><p class="mt-1 text-[11px] leading-relaxed text-muted-foreground">Accept the validated plan, materialize its chapter and scene units, and continue only within the capabilities and budgets confirmed below.</p></div></div>
+          <fieldset class="mt-4"><legend class="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Authorized capabilities</legend><div class="mt-2 grid gap-2 rounded border border-border bg-input/30 p-3 sm:grid-cols-2">
+            <label class="flex items-center gap-2 text-[11px] text-foreground"><input type="checkbox" bind:checked={checkpointAllowPlanning} class="accent-accent" />Planning artifacts</label>
+            <label class="flex items-center gap-2 text-[11px] text-foreground"><input type="checkbox" bind:checked={checkpointAllowCanon} class="accent-accent" />Canon writes</label>
+            <label class="flex items-center gap-2 text-[11px] text-foreground"><input type="checkbox" bind:checked={checkpointAllowChapters} class="accent-accent" />Chapter prose</label>
+            <label class="flex items-center gap-2 text-[11px] text-foreground"><input type="checkbox" bind:checked={checkpointAllowScenes} class="accent-accent" />Scene prose</label>
+            <label class="flex items-center gap-2 text-[11px] text-foreground"><input type="checkbox" bind:checked={checkpointAllowDiagnostics} class="accent-accent" />Diagnostics</label>
+          </div></fieldset>
+          <div class="mt-4 grid gap-3 sm:grid-cols-2">
+            <label><span class="mb-1 block text-[10px] uppercase tracking-wide text-muted-foreground">Maximum tokens</span><input bind:value={checkpointMaxTokens} type="number" min="1" step="10000" class="h-9 w-full rounded border border-border bg-input/50 px-2 font-mono text-xs text-foreground outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30" /></label>
+            <label><span class="mb-1 block text-[10px] uppercase tracking-wide text-muted-foreground">Maximum cost (USD)</span><input bind:value={checkpointMaxCost} type="number" min="0.000001" step="1" class="h-9 w-full rounded border border-border bg-input/50 px-2 font-mono text-xs text-foreground outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30" /></label>
+          </div>
+          {#if !checkpointAuthorizationReady}<p class="mt-3 text-[10px] leading-relaxed text-amber-300">Chapter prose, scene prose, canon writes, and diagnostics must be explicitly enabled to continue the drafting workflow. Any entered budget must be positive.</p>{/if}
+          <div class="mt-5 flex justify-end gap-2"><button type="button" onclick={closeActionDialog} class="rounded border border-border px-3 py-1.5 text-[11px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent">Keep paused</button><button type="button" onclick={() => void commitCheckpointAuthorization()} disabled={mutating || !checkpointAuthorizationReady} class="rounded bg-accent px-3 py-1.5 text-[11px] font-medium text-accent-foreground outline-none disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent">Authorize checkpoint</button></div>
+        </div>
       </div>
     {/if}
 

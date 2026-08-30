@@ -1,6 +1,7 @@
 import {
   ApiError,
   OpenTalesClient,
+  type AuthorizeBuildRunInput,
   type ApplyStoryStateBatchResult,
   type BuildComparison,
   type BuildCompilation,
@@ -418,16 +419,22 @@ export function createStoryIdeStore() {
     }
   }
 
-  async function authorizeRun(run: BuildRun) {
+  async function authorizeRun(
+    run: BuildRun,
+    authorization?: Pick<AuthorizeBuildRunInput, 'authorizationScope' | 'maxTokens' | 'maxCostMicros'>
+  ) {
+    const requested = {
+      authorizationScope: authorization?.authorizationScope ?? run.authorizationScope,
+      maxTokens: authorization?.maxTokens === undefined ? run.maxTokens : authorization.maxTokens,
+      maxCostMicros: authorization?.maxCostMicros === undefined ? run.maxCostMicros : authorization.maxCostMicros
+    };
     await mutateRun(
       'authorize-run',
-      (current) => ({ runId: current.id, revision: current.revision, scope: current.authorizationScope, maxTokens: current.maxTokens, maxCostMicros: current.maxCostMicros }),
+      (current) => ({ runId: current.id, revision: current.revision, ...requested }),
       (current, idempotencyKey) => api.authorizeBuildRun(current.projectId, current.id, {
         idempotencyKey,
         expectedRevision: current.revision,
-        authorizationScope: current.authorizationScope,
-        maxTokens: current.maxTokens,
-        maxCostMicros: current.maxCostMicros
+        ...requested
       }),
       'Failed to authorize Novel Build'
     );

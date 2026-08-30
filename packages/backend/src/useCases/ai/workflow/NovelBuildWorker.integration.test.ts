@@ -122,13 +122,16 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
     expect(await prisma.scene.count({ where: { chapter: { projectId } } })).toBe(0);
     expect(await prisma.buildManuscriptUnit.count({ where: { buildRunId } })).toBe(0);
 
-    await builds.authorize(userId, projectId, buildRunId, {
+    const draftingAuthorization = await builds.authorize(userId, projectId, buildRunId, {
       idempotencyKey: `authorize-manifest:${suffix}`,
       expectedRevision: run.revision,
       authorizationScope: authorizedScope,
       maxTokens: 10_000_000,
       maxCostMicros: 10_000_000
     });
+    expect(draftingAuthorization.status).toBe('drafting');
+    expect(draftingAuthorization.currentPhase).toBe('drafting');
+    expect(await prisma.buildManuscriptUnit.count({ where: { buildRunId } })).toBeGreaterThan(0);
     for (let approval = 0; approval < 10; approval += 1) {
       await resumeRunnableBuilds(prisma, { workerId: `integration-draft:${suffix}:${approval}`, maxTasksPerSweep: 300, modelExecutor: executor, judgeExecutor, buildRunIds: [buildRunId], modelPricing: fixturePricing });
       run = await prisma.buildRun.findUniqueOrThrow({ where: { id: buildRunId } });

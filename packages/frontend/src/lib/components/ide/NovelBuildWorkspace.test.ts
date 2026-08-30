@@ -28,6 +28,27 @@ const failedRun = {
   tasks: [exhaustedTask], latestCheckpoint: null, activeDirective: null
 } satisfies BuildRun;
 
+const checkpointTask = {
+  ...exhaustedTask,
+  id: 'task-planning-checkpoint', key: 'planning-checkpoint', type: 'checkpoint', phase: 'planning-review', status: 'done',
+  attempts: 1, maxAttempts: 3, progress: 100, lastError: null, failedAt: null, completedAt: '2026-08-30T00:55:42.900Z'
+} satisfies BuildTask;
+
+const checkpointRun = {
+  ...failedRun,
+  status: 'paused', currentPhase: 'checkpoint-review:planning-checkpoint', revision: 17, lastError: null,
+  authorizationScope: {
+    ...failedRun.authorizationScope,
+    allowChapterWrites: false,
+    allowSceneWrites: false,
+    allowCanonWrites: true,
+    allowDiagnostics: true
+  },
+  pausedAt: '2026-08-30T00:55:43.197Z', failedAt: null,
+  progress: { percent: 59, total: 29, blocked: 12, ready: 0, running: 0, review: 0, done: 17, failed: 0, cancelled: 0 },
+  tasks: [checkpointTask]
+} satisfies BuildRun;
+
 function callbacks() {
   return {
     onStart: vi.fn(), onNew: vi.fn(), onRefresh: vi.fn(), onPause: vi.fn(), onAuthorize: vi.fn(), onResume: vi.fn(), onCancel: vi.fn(),
@@ -49,5 +70,31 @@ describe('NovelBuildWorkspace exhausted failure recovery', () => {
 
     expect(actions.onResume).not.toHaveBeenCalled();
     expect(actions.onRerun).toHaveBeenCalledWith(exhaustedTask, 'Human requested a clean rerun of this task.');
+  });
+
+  it('requires explicit checkpoint authorization instead of offering plain resume', async () => {
+    const actions = callbacks();
+    render(NovelBuildWorkspace, { run: checkpointRun, brainstorms: [], ...actions });
+
+    expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull();
+    await fireEvent.click(screen.getAllByRole('button', { name: 'Review & authorize' })[0]!);
+    expect(screen.getByRole('dialog', { name: 'Authorize build checkpoint' })).toBeTruthy();
+    const authorize = screen.getByRole('button', { name: 'Authorize checkpoint' }) as HTMLButtonElement;
+    expect(authorize.disabled).toBe(true);
+
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Chapter prose' }));
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Scene prose' }));
+    expect(authorize.disabled).toBe(false);
+    await fireEvent.click(authorize);
+
+    expect(actions.onResume).not.toHaveBeenCalled();
+    expect(actions.onAuthorize).toHaveBeenCalledWith(checkpointRun, expect.objectContaining({
+      authorizationScope: expect.objectContaining({
+        allowChapterWrites: true,
+        allowSceneWrites: true,
+        allowCanonWrites: true,
+        allowDiagnostics: true
+      })
+    }));
   });
 });

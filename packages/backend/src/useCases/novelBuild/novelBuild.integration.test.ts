@@ -404,6 +404,17 @@ describeDatabase('durable Novel Build integration', () => {
     expect(checkpointResult.buildRun.status).toBe('paused');
     expect(checkpointResult.buildRun.currentPhase).toBe('checkpoint-review:planning-checkpoint');
     expect(checkpointResult.checkpoint?.label).toBe('planning-checkpoint');
+    await expect(builds.resume(ownerId, projectId, review.id, {
+      idempotencyKey: 'integration:invalid-checkpoint-resume',
+      expectedRevision: checkpointResult.buildRun.revision,
+      reason: 'A plain resume must not bypass checkpoint authorization.'
+    })).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringMatching(/Checkpoint review requires explicit authorization/)
+    });
+    const stillPaused = await builds.get(ownerId, projectId, review.id);
+    expect(stillPaused.status).toBe('paused');
+    expect(stillPaused.currentPhase).toBe('checkpoint-review:planning-checkpoint');
   });
 });
 

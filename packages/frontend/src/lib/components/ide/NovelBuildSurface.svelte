@@ -84,7 +84,7 @@
   onStart={async (input) => manuscript.projectId ? storyIde.createRun(manuscript.projectId, input) : null}
   onNew={() => storyIde.beginNew()}
   onRefresh={() => void storyIde.refreshSelected()}
-  onAuthorize={(run) => void storyIde.authorizeRun(run)}
+  onAuthorize={(run, authorization) => void storyIde.authorizeRun(run, authorization)}
   onPause={() => void storyIde.pauseRun()}
   onResume={() => void storyIde.resumeRun()}
   onCancel={() => void storyIde.cancelRun()}

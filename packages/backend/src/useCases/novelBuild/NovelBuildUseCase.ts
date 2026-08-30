@@ -115,6 +115,10 @@ export class NovelBuildUseCase {
     await this.runMutation(projectId, buildRunId, 'authorize', input, async (tx, run) => {
       assertExpectedRevision(run.revision, input.expectedRevision);
       if (TERMINAL_RUN_STATUSES.has(run.status)) throw new HttpError(409, `Cannot authorize a ${run.status.toLowerCase()} build`);
+      if (run.currentPhase === 'checkpoint-review:planning-checkpoint') {
+        await this.acceptValidatedPlanArtifactsInTransaction(tx, buildRunId);
+        await this.repository.refreshReadyTasks(tx, buildRunId);
+      }
       const nextTask = await tx.buildTask.findFirst({
         where: { buildRunId, status: { in: ['READY', 'RUNNING', 'REVIEW'] } },
         orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }],
@@ -148,9 +152,6 @@ export class NovelBuildUseCase {
           revision: { increment: 1 }
         }
       });
-      if (run.currentPhase === 'checkpoint-review:planning-checkpoint') {
-        await this.acceptValidatedPlanArtifactsInTransaction(tx, buildRunId);
-      }
     });
     return toBuildRun(await this.repository.get(projectId, buildRunId));
   }
@@ -206,6 +207,9 @@ export class NovelBuildUseCase {
     await this.runMutation(projectId, buildRunId, 'resume', input, async (tx, run) => {
       assertExpectedRevision(run.revision, input.expectedRevision);
       if (run.status !== 'PAUSED' && run.status !== 'FAILED') throw new HttpError(409, 'Only paused or failed builds can be resumed');
+      if (run.currentPhase.startsWith('checkpoint-review:')) {
+        throw new HttpError(409, 'Checkpoint review requires explicit authorization; approve the checkpoint with the authorization endpoint');
+      }
       await this.repository.recoverStaleTasks(tx, buildRunId);
       const failed = await tx.buildTask.findMany({ where: { buildRunId, status: 'FAILED' } });
       if (failed.some((task) => task.attempts >= task.maxAttempts)) {
@@ -221,6 +225,13 @@ export class NovelBuildUseCase {
         });
       }
       await this.repository.refreshReadyTasks(tx, buildRunId);
+      const [runnableTasks, blockedTasks] = await Promise.all([
+        tx.buildTask.count({ where: { buildRunId, status: { in: ['READY', 'RUNNING', 'REVIEW'] } } }),
+        tx.buildTask.count({ where: { buildRunId, status: 'BLOCKED' } })
+      ]);
+      if (runnableTasks === 0 && blockedTasks > 0) {
+        throw new HttpError(409, 'Build has no runnable tasks; satisfy its authorization, checkpoint, or dependency boundary before resuming');
+      }
       const phaseStatus = run.currentPhase === 'revising' ? 'REVISING' : run.currentPhase === 'drafting' ? 'DRAFTING' : 'PLANNING';
       assertLegalBuildRunTransition(run.status, phaseStatus);
       await tx.buildRun.update({
