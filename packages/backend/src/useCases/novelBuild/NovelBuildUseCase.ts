@@ -1283,12 +1283,22 @@ export class NovelBuildUseCase {
       const sceneByKey = new Map(scenes.map((scene) => [scene.sceneKey, scene]));
       const orderedScenes = scenes.slice().sort((left, right) => (chapterByKey.get(left.chapterKey)?.number ?? Number.MAX_SAFE_INTEGER) - (chapterByKey.get(right.chapterKey)?.number ?? Number.MAX_SAFE_INTEGER) || left.ordinal - right.ordinal || left.sceneKey.localeCompare(right.sceneKey));
       const storyOrder = new Map(orderedScenes.map((scene, index) => [scene.sceneKey, index]));
+      const scenePlanProducerIds = unique(sceneArtifacts.flatMap((artifact) => artifact.taskId ? [artifact.taskId] : []));
+      const scenePlanProducers = scenePlanProducerIds.length
+        ? await tx.buildTask.findMany({ where: { id: { in: scenePlanProducerIds }, buildRunId }, select: { acceptanceCriteria: true } })
+        : [];
+      const exactChapterSceneKeysRequired = scenePlanProducers.some((producer) =>
+        isJsonObjectValue(producer.acceptanceCriteria) && producer.acceptanceCriteria.exactChapterSceneKeysRequired === true
+      );
       for (const chapter of chapters) {
         assertUniqueValues(chapter.sceneKeys, `scene keys in chapter '${chapter.chapterKey}'`);
         const actual = scenes.filter((scene) => scene.chapterKey === chapter.chapterKey).sort((a, b) => a.ordinal - b.ordinal);
         if (!actual.length) throw new HttpError(409, `Chapter '${chapter.chapterKey}' has no scene plans`);
-        if (actual.some((scene, index) => scene.ordinal !== index + 1)) throw new HttpError(409, `Scene ordinals in chapter '${chapter.chapterKey}' must be contiguous beginning at 1`);
-        if (!sameStringSet(chapter.sceneKeys, actual.map((scene) => scene.sceneKey))) throw new HttpError(409, `Chapter '${chapter.chapterKey}' sceneKeys do not exactly match its scene plans`);
+        const firstOrdinal = actual[0]!.ordinal;
+        if (actual.some((scene, index) => scene.ordinal !== firstOrdinal + index)) throw new HttpError(409, `Scene ordinals in chapter '${chapter.chapterKey}' must be contiguous`);
+        if (exactChapterSceneKeysRequired && !sameStringSet(chapter.sceneKeys, actual.map((scene) => scene.sceneKey))) {
+          throw new HttpError(409, `Chapter '${chapter.chapterKey}' sceneKeys do not exactly match its scene plans`);
+        }
       }
       for (const scene of scenes) {
         if (!chapterByKey.has(scene.chapterKey)) throw new HttpError(409, `Scene '${scene.sceneKey}' references missing chapter '${scene.chapterKey}'`);
@@ -1484,9 +1494,13 @@ export class NovelBuildUseCase {
       };
     }).filter((scene) => acceptedChapterKeys.has(scene.chapterKey));
     if (new Set(sceneRecords.map((item) => item.sceneKey)).size !== sceneRecords.length) throw new HttpError(409, 'Accepted scene plans contain duplicate keys');
+    const localSceneOrder = new Map<string, number>();
     for (const chapter of ordered) {
-      const chapterScenes = sceneRecords.filter((scene) => scene.chapterKey === chapter.chapterKey);
+      const chapterScenes = sceneRecords.filter((scene) => scene.chapterKey === chapter.chapterKey).sort((left, right) => left.ordinal - right.ordinal || left.sceneKey.localeCompare(right.sceneKey));
       if (new Set(chapterScenes.map((scene) => scene.ordinal)).size !== chapterScenes.length) throw new HttpError(409, `Chapter '${chapter.chapterKey}' has duplicate scene ordinals`);
+      const firstOrdinal = chapterScenes[0]?.ordinal;
+      if (firstOrdinal !== undefined && chapterScenes.some((scene, index) => scene.ordinal !== firstOrdinal + index)) throw new HttpError(409, `Chapter '${chapter.chapterKey}' has non-contiguous scene ordinals`);
+      chapterScenes.forEach((scene, index) => localSceneOrder.set(scene.sceneKey, index));
     }
     const sceneKeys = new Set(sceneRecords.map((scene) => scene.sceneKey));
     for (const scene of sceneRecords) for (const dependency of scene.dependencies) if (!sceneKeys.has(dependency)) throw new HttpError(409, `Scene '${scene.sceneKey}' depends on missing accepted scene '${dependency}'`);
@@ -1546,16 +1560,18 @@ export class NovelBuildUseCase {
       const explicit = entityBindings.find((binding) => binding.artifactId === scene.artifact.id && binding.entityType === 'scene')?.entityId ?? null;
       const sourceChapterId = sourceChapterIds.get(scene.chapterKey) ?? null;
       const canonicalParent = sourceChapterId ? canonicalChapterById.get(sourceChapterId) : null;
+      const localOrder = localSceneOrder.get(scene.sceneKey);
+      if (localOrder === undefined) throw new HttpError(409, `Scene '${scene.sceneKey}' has no chapter-local order`);
       const candidates = explicit
         ? canonicalChapters.flatMap((chapter) => chapter.scenes).filter((candidate) => candidate.id === explicit)
-        : canonicalParent?.scenes.filter((candidate) => candidate.order === scene.ordinal - 1) ?? [];
+        : canonicalParent?.scenes.filter((candidate) => candidate.order === localOrder) ?? [];
       if (candidates.length > 1) throw new HttpError(409, `Scene plan '${scene.sceneKey}' ambiguously matches multiple canonical scenes`);
       const sourceSceneId = candidates[0]?.id ?? null;
       if (explicit && !sourceSceneId) throw new HttpError(409, `Scene plan '${scene.sceneKey}' has a stale canonical entity binding`);
       if (sourceSceneId && usedSceneIds.has(sourceSceneId)) throw new HttpError(409, `Multiple scene plans map to canonical scene '${sourceSceneId}'`);
       if (sourceSceneId) usedSceneIds.add(sourceSceneId);
       const unit = await this.ensureBuildUnit(tx, run, {
-        kind: 'SCENE', key: scene.sceneKey, parentUnitId: parent.id, containerKey: scene.chapterKey, order: scene.ordinal - 1,
+        kind: 'SCENE', key: scene.sceneKey, parentUnitId: parent.id, containerKey: scene.chapterKey, order: localOrder,
         chapterNumber: null, title: typeof scene.content.title === 'string' ? scene.content.title : scene.artifact.title,
         planArtifactId: scene.artifact.id, tension: typeof scene.content.tension === 'number' ? scene.content.tension : null,
         sourceSceneId,

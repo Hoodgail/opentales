@@ -424,7 +424,10 @@ export const PLANNING_TASK_TEMPLATES: readonly TaskTemplate[] = Object.freeze([
   planningTask('beats', 'create-beats', ['plot-threads'], 'creator', ['beat'], 68),
   planningTask('act-architecture', 'create-act-architecture', ['plot-threads', 'beats'], 'creator', ['act-architecture'], 65),
   planningTask('chapter-briefs', 'create-chapter-briefs', ['act-architecture', 'plot-threads'], 'creator', ['chapter-brief'], 60),
-  planningTask('scene-plans', 'create-scene-plans', ['chapter-briefs'], 'creator', ['scene-plan'], 55),
+  {
+    ...planningTask('scene-plans', 'create-scene-plans', ['chapter-briefs'], 'creator', ['scene-plan'], 55),
+    acceptanceCriteria: { requiredArtifactTypes: ['scene-plan'], exactChapterSceneKeysRequired: true }
+  },
   planningTask('timeline', 'create-timeline', ['scene-plans'], 'librarian', ['timeline'], 50),
   planningTask('setup-payoff-map', 'create-setup-payoff-map', ['plot-threads', 'scene-plans'], 'creator', ['setup-payoff-map'], 50),
   planningTask('finale-plan', 'create-finale-plan', ['plot-threads', 'scene-plans', 'setup-payoff-map'], 'creator', ['finale-plan'], 48),
@@ -475,7 +478,7 @@ export function createPlanningTaskTemplates(targetChapterCount: number, targetSc
   const sceneShards = Array.from({ length: targetChapterCount }, (_, index) => {
     const count = sceneBase + (index < sceneRemainder ? 1 : 0);
     const task = { ...planningTask(`scene-plans:chapter-${String(index + 1).padStart(3, '0')}`, 'create-scene-plan-shard', ['chapter-briefs'], 'creator', ['scene-plan'], 55 - index),
-      acceptanceCriteria: { requiredArtifactTypes: ['scene-plan'], minOutputCount: count, maxOutputCount: count },
+      acceptanceCriteria: { requiredArtifactTypes: ['scene-plan'], minOutputCount: count, maxOutputCount: count, exactChapterSceneKeysRequired: true },
       executionPolicy: { shardIndex: index, chapterNumber: index + 1, startOrdinal, count, total: targetSceneCount }
     };
     startOrdinal += count;

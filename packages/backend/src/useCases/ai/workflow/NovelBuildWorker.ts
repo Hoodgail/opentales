@@ -907,10 +907,63 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     toolName: AgentMutatingToolName,
     input: unknown
   ): Promise<void> {
-    if (claimed.task.type !== 'create-character-bibles' || toolName !== 'applyArtifactBatch') return;
+    if (toolName !== 'applyArtifactBatch') return;
     const operations = Array.isArray(jsonRecord(input).operations)
       ? jsonRecord(input).operations as unknown[]
       : [];
+    if (['create-scene-plans', 'create-scene-plan-shard'].includes(claimed.task.type)
+      && jsonRecord(claimed.task.acceptanceCriteria).exactChapterSceneKeysRequired === true) {
+      const policy = jsonRecord(claimed.task.executionPolicy);
+      const chapterNumber = typeof policy.chapterNumber === 'number' ? Math.trunc(policy.chapterNumber) : null;
+      const chapterBriefs = await this.prisma.storyArtifact.findMany({
+        where: {
+          id: { in: claimed.task.inputArtifactIds },
+          buildRunId: claimed.run.id,
+          type: 'CHAPTER_BRIEF',
+          invalidatedAt: null,
+          status: { in: ['VALIDATED', 'ACCEPTED'] }
+        }
+      });
+      const expected = new Map(chapterBriefs.flatMap((artifact) => {
+        const content = jsonRecord(artifact.content);
+        const number = typeof content.number === 'number' ? Math.trunc(content.number) : null;
+        if (chapterNumber !== null && number !== chapterNumber) return [];
+        const chapterKey = typeof content.chapterKey === 'string' ? content.chapterKey : '';
+        return stringArray(content.sceneKeys).map((sceneKey, index) => [sceneKey, { chapterKey, ordinal: index + 1 }] as const);
+      }));
+      const proposed = operations
+        .map(jsonRecord)
+        .filter((operation) => operation.action === 'upsert' && operation.type === 'scene-plan');
+      for (const operation of proposed) {
+        const content = jsonRecord(operation.content);
+        const sceneKey = typeof content.sceneKey === 'string' ? content.sceneKey : '';
+        const required = expected.get(sceneKey);
+        if (!required || content.chapterKey !== required.chapterKey || content.ordinal !== required.ordinal) {
+          throw new Error(
+            `Scene-plan '${sceneKey || '(missing sceneKey)'}' must use an exact chapter-brief sceneKey, chapterKey, and chapter-local ordinal`
+          );
+        }
+      }
+      const existing = await this.prisma.storyArtifact.findMany({
+        where: {
+          buildRunId: claimed.run.id,
+          taskId: claimed.task.id,
+          type: 'SCENE_PLAN',
+          invalidatedAt: null,
+          status: { in: ['DRAFT', 'VALIDATED', 'ACCEPTED'] }
+        },
+        select: { content: true }
+      });
+      const combinedKeys = new Set([
+        ...existing.map((artifact) => String(jsonRecord(artifact.content).sceneKey ?? '')),
+        ...proposed.map((operation) => String(jsonRecord(operation.content).sceneKey ?? ''))
+      ].filter(Boolean));
+      if ([...combinedKeys].some((sceneKey) => !expected.has(sceneKey)) || combinedKeys.size > expected.size) {
+        throw new Error(`Scene-plan task may persist only its ${expected.size} chapter-brief sceneKeys`);
+      }
+      return;
+    }
+    if (claimed.task.type !== 'create-character-bibles') return;
     if (operations.length > 3) {
       throw new Error('Character-bible batches may contain at most 3 artifact operations');
     }
@@ -1511,6 +1564,44 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       checks[`artifact-count:${type}`] = count >= minimum && count <= maximum;
     }
     for (const key of requiredKeys) checks[`artifact-key:${key}`] = artifacts.some((artifact) => artifact.key === key && artifact.taskId === claimed.task.id && ['VALIDATED', 'ACCEPTED'].includes(artifact.status));
+    if (acceptance.exactChapterSceneKeysRequired === true) {
+      const policy = jsonRecord(claimed.task.executionPolicy);
+      const chapterNumber = typeof policy.chapterNumber === 'number' ? Math.trunc(policy.chapterNumber) : null;
+      const chapterBriefs = await this.prisma.storyArtifact.findMany({
+        where: {
+          id: { in: claimed.task.inputArtifactIds },
+          buildRunId: claimed.run.id,
+          type: 'CHAPTER_BRIEF',
+          invalidatedAt: null,
+          status: { in: ['VALIDATED', 'ACCEPTED'] }
+        }
+      });
+      const expectedScenes = chapterBriefs.flatMap((artifact) => {
+        const content = jsonRecord(artifact.content);
+        const number = typeof content.number === 'number' ? Math.trunc(content.number) : null;
+        if (chapterNumber !== null && number !== chapterNumber) return [];
+        const chapterKey = typeof content.chapterKey === 'string' ? content.chapterKey : '';
+        return stringArray(content.sceneKeys).map((sceneKey, index) => ({ sceneKey, chapterKey, ordinal: index + 1 }));
+      });
+      const actualScenes = artifacts
+        .filter((artifact) => artifact.type === 'SCENE_PLAN')
+        .map((artifact) => {
+          const content = jsonRecord(artifact.content);
+          return {
+            sceneKey: typeof content.sceneKey === 'string' ? content.sceneKey : '',
+            chapterKey: typeof content.chapterKey === 'string' ? content.chapterKey : '',
+            ordinal: typeof content.ordinal === 'number' ? Math.trunc(content.ordinal) : null
+          };
+        });
+      const actualByKey = new Map(actualScenes.map((scene) => [scene.sceneKey, scene]));
+      checks.exactChapterSceneKeysRequired = expectedScenes.length > 0
+        && expectedScenes.length === actualScenes.length
+        && new Set(actualScenes.map((scene) => scene.sceneKey)).size === actualScenes.length
+        && expectedScenes.every((expected) => {
+          const actual = actualByKey.get(expected.sceneKey);
+          return actual?.chapterKey === expected.chapterKey && actual.ordinal === expected.ordinal;
+        });
+    }
     if (acceptance.requiresPassingEvaluation === true) {
       // The current task is independently judged after deterministic validation.
       // Completion additionally requires the persisted passing MODEL evaluation.
@@ -1893,6 +1984,9 @@ export function objectiveForTask(task: BuildTask, buildObjective: string, manife
       : 'This task requires no artifact output. Report observable checks and evaluation evidence directly.',
     task.type === 'create-finale-plan'
       ? 'Set mainThreadKey to the main plot-thread content.threadKey; the build validator also accepts that plot-thread artifact\'s exact stable key.'
+      : '',
+    ['create-scene-plans', 'create-scene-plan-shard'].includes(task.type)
+      ? 'Use exactly the chapter briefs\' declared sceneKeys. Preserve each declared chapterKey and set ordinal to its 1-based position within that chapter; never redistribute scenes or use a book-global ordinal.'
       : '',
     'Report only observable decisions, artifact IDs, validator evidence, checks, and quality scores.'
   ].filter(Boolean).join(' ');

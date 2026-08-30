@@ -4,6 +4,7 @@ import {
   PLANNING_TASK_TEMPLATES,
   REVISION_TASK_TEMPLATES,
   createChapterCompilationTaskTemplates,
+  createPlanningTaskTemplates,
   createSceneTaskTemplates,
   type TaskTemplate
 } from '../../novelBuild/schemas.js';
@@ -101,6 +102,12 @@ describe('durable Novel Build execution contract', () => {
   });
 
   it('gives aggregate planning tasks a bounded large-context invocation envelope', () => {
+    expect(PLANNING_TASK_TEMPLATES.find((task) => task.key === 'scene-plans')?.acceptanceCriteria).toMatchObject({
+      exactChapterSceneKeysRequired: true
+    });
+    expect(createPlanningTaskTemplates(32, 104)
+      .filter((task) => task.type === 'create-scene-plan-shard')
+      .every((task) => task.acceptanceCriteria.exactChapterSceneKeysRequired === true)).toBe(true);
     expect(defaultTaskBudget({ type: 'create-beats' } as any)).toMatchObject({
       maxInputTokens: 256_000,
       maxOutputTokens: 48_000,
