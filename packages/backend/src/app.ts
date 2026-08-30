@@ -21,7 +21,15 @@ export function createApp() {
   app.use(cors({
     origin: true,
     credentials: true,
-    exposedHeaders: ['Content-Disposition', 'Content-Length', 'X-Content-SHA256']
+    exposedHeaders: [
+      'Content-Disposition',
+      'Content-Length',
+      'Mcp-Protocol-Version',
+      'Mcp-Session-Id',
+      'Retry-After',
+      'WWW-Authenticate',
+      'X-Content-SHA256'
+    ]
   }));
   app.use(express.json({ limit: '2mb' }));
   app.use(express.urlencoded({ extended: false, limit: '64kb' }));

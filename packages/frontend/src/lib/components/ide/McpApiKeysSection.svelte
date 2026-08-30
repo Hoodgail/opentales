@@ -146,7 +146,7 @@
 <div class="space-y-3 text-xs">
   <div>
     <p class="text-[11px] leading-relaxed text-muted-foreground">
-      Connect Codex, Claude Code, hosted Claude, or another MCP client directly to this project.
+      Connect Codex, Claude Code, ChatGPT, Gemini, Claude.ai, or another MCP client directly to this project.
       The endpoint loads the project tools, Agent Skills, author instructions, and agent prompts.
     </p>
     <div class="mt-2 flex items-center gap-1.5 rounded-md border border-border bg-muted/40 p-1.5">
@@ -163,9 +163,10 @@
       </button>
     </div>
     <p class="mt-2 rounded-md border border-border bg-muted/30 p-2 text-[10px] leading-relaxed text-muted-foreground">
-      <strong class="text-foreground">Claude.ai:</strong> add only this server URL and leave custom
-      client credentials empty. Claude will open OpenTales sign-in and project consent. API keys are
-      for clients that support a Bearer-token environment variable or header.
+      <strong class="text-foreground">Hosted clients:</strong> add only this server URL in ChatGPT,
+      Gemini, or Claude.ai and leave custom client credentials empty. The client will register itself,
+      then open OpenTales sign-in and project consent. API keys are for clients that support a
+      Bearer-token environment variable or header.
     </p>
   </div>
 

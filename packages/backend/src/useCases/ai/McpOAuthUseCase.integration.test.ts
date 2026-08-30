@@ -82,6 +82,7 @@ integration('MCP OAuth PostgreSQL integration', () => {
     const code = redirect.searchParams.get('code');
     expect(code).toMatch(/^otcode_/);
     expect(redirect.searchParams.get('state')).toBe('state-1');
+    expect(redirect.searchParams.get('iss')).toBe(env.mcpOAuthIssuer);
 
     const tokens = await oauth.exchangeToken({
       grant_type: 'authorization_code',
