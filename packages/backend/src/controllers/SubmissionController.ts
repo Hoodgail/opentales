@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import type { CreateSubmissionInput, SubmissionStatus } from '@opentales/sdk';
+import type { CreateSubmissionInput, MergeSubmissionInput, SubmissionStatus, UpdateSubmissionInput } from '@opentales/sdk';
 import { prisma } from '../config/prisma.js';
 import { HttpError } from '../http/HttpError.js';
 import { CreateSubmissionUseCase } from '../useCases/submissions/CreateSubmissionUseCase.js';
@@ -8,6 +8,7 @@ import { GetSubmissionUseCase } from '../useCases/submissions/GetSubmissionUseCa
 import { MergeSubmissionUseCase } from '../useCases/submissions/MergeSubmissionUseCase.js';
 import { DeclineSubmissionUseCase } from '../useCases/submissions/DeclineSubmissionUseCase.js';
 import { AddCommentUseCase } from '../useCases/submissions/AddCommentUseCase.js';
+import { UpdateSubmissionUseCase } from '../useCases/submissions/UpdateSubmissionUseCase.js';
 
 const STATUSES: ReadonlySet<SubmissionStatus> = new Set(['open', 'merged', 'declined']);
 
@@ -18,6 +19,7 @@ export class SubmissionController {
   private readonly mergeUseCase = new MergeSubmissionUseCase(prisma);
   private readonly declineUseCase = new DeclineSubmissionUseCase(prisma);
   private readonly addCommentUseCase = new AddCommentUseCase(prisma);
+  private readonly updateUseCase = new UpdateSubmissionUseCase(prisma);
 
   create = async (req: Request, res: Response) => {
     const body = req.body as Partial<CreateSubmissionInput>;
@@ -53,12 +55,29 @@ export class SubmissionController {
     );
   };
 
+  update = async (req: Request, res: Response) => {
+    const body = req.body as Partial<UpdateSubmissionInput>;
+    if (!Object.prototype.hasOwnProperty.call(body, 'expectedHeadVersionId')) {
+      throw new HttpError(400, 'expectedHeadVersionId is required');
+    }
+    res.json(await this.updateUseCase.execute(
+      this.userId(req),
+      req.params.projectId,
+      req.params.submissionId,
+      body as UpdateSubmissionInput
+    ));
+  };
+
   get = async (req: Request, res: Response) => {
     res.json(await this.getUseCase.execute(this.userId(req), req.params.submissionId));
   };
 
   merge = async (req: Request, res: Response) => {
-    res.json(await this.mergeUseCase.execute(this.userId(req), req.params.submissionId));
+    res.json(await this.mergeUseCase.execute(
+      this.userId(req),
+      req.params.submissionId,
+      (req.body ?? {}) as MergeSubmissionInput
+    ));
   };
 
   decline = async (req: Request, res: Response) => {

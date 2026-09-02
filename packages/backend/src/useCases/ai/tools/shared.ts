@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
-import { HttpError } from '../../../http/HttpError.js';
+export { applyContentEdit, applyContentPatch } from '../../../utils/contentPatch.js';
 
 export const paginationInputSchema = z.object({
   page: z.number().int().min(1).optional().describe('Page number, starting at 1. Defaults to 1.'),
@@ -18,10 +18,23 @@ export const readRangeInputSchema = z.object({
 export const emptyInputSchema = z.object({});
 
 export const editContentInputSchema = z.object({
-  oldString: z.string().describe('Exact existing text to replace.'),
-  newString: z.string().describe('Replacement text.'),
-  replaceAll: z.boolean().optional().describe('Replace every exact occurrence. Defaults to false.')
+  oldString: z.string().min(1).describe('Exact existing text to replace. Read the current content first and include enough surrounding text to make a single match.'),
+  newString: z.string().describe('Replacement text. Use an empty string to delete the matched text.'),
+  replaceAll: z.boolean().optional().describe('Replace every exact occurrence. Defaults to false; leave false for a uniquely anchored edit.')
+}).strict().refine((input) => input.oldString !== input.newString, {
+  message: 'oldString and newString must differ'
 });
+
+export const contentPatchInputSchema = z.discriminatedUnion('mode', [
+  z.object({
+    mode: z.literal('replace'),
+    content: z.string().max(2_000_000).describe('Complete replacement body. May be empty, which is useful for initializing or clearing a writing.')
+  }).strict(),
+  z.object({
+    mode: z.literal('edit'),
+    edits: z.array(editContentInputSchema).min(1).max(100).describe('Exact replacements applied in order to the current body.')
+  }).strict()
+]);
 
 export interface ToolContext {
   projectId: string;
@@ -81,22 +94,6 @@ export function readTextRange(
     content: content.slice(offset, offset + length),
     range: { mode: 'offset', startLine: null, endLine: null, offset, length }
   };
-}
-
-export function applyContentEdit(
-  content: string,
-  input: { oldString: string; newString: string; replaceAll?: boolean }
-) {
-  if (!input.oldString) throw new HttpError(400, 'oldString is required');
-  if (input.oldString === input.newString) throw new HttpError(400, 'oldString and newString must differ');
-  const occurrences = content.split(input.oldString).length - 1;
-  if (occurrences === 0) throw new HttpError(400, 'oldString was not found in the current content');
-  if (occurrences > 1 && !input.replaceAll) {
-    throw new HttpError(400, 'oldString matched multiple places; set replaceAll to true or provide more context');
-  }
-  return input.replaceAll
-    ? content.split(input.oldString).join(input.newString)
-    : content.replace(input.oldString, input.newString);
 }
 
 export function bodyOf(writing: {

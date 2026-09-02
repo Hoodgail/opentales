@@ -23,6 +23,10 @@ export class DeclineSubmissionUseCase {
     await this.access.assertPermission(userId, submission.projectId, 'project:write');
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Submission" WHERE id = ${submissionId} FOR UPDATE`;
+      const current = await tx.submission.findUnique({ where: { id: submissionId }, select: { status: true } });
+      if (!current) throw new HttpError(404, 'Submission not found');
+      if (current.status !== 'OPEN') throw new HttpError(409, `Submission is already ${current.status.toLowerCase()}`);
       const next = await tx.submission.update({
         where: { id: submissionId },
         data: { status: 'DECLINED', decidedAt: new Date(), decidedById: userId },

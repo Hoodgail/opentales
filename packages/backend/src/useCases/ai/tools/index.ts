@@ -66,6 +66,13 @@ import {
   type BuildApprovalHandler,
   type BuildMutatingToolName
 } from './buildTools.js';
+import {
+  buildWorkspaceMutatingToolNames,
+  buildWorkspaceTools,
+  executeBuildWorkspaceMutation,
+  type BuildWorkspaceApprovalHandler,
+  type BuildWorkspaceMutatingToolName
+} from './buildWorkspaceTools.js';
 
 export interface AgentToolPolicy {
   role: RuntimeRole;
@@ -80,7 +87,7 @@ export interface AgentToolPolicy {
 export function buildAgentTools(
   prisma: PrismaClient,
   context: ToolContext & { userId: string },
-  approval: ApprovalHandler & SemanticApprovalHandler & BuildApprovalHandler,
+  approval: ApprovalHandler & SemanticApprovalHandler & BuildApprovalHandler & BuildWorkspaceApprovalHandler,
   question: QuestionHandler,
   task: TaskHandler,
   subagents: AiAgentInfo[] = [],
@@ -129,6 +136,7 @@ export function buildAgentTools(
     grepProject: grepProjectTool(prisma, context),
     ...storyIntelligenceTools(prisma, context, approval, policy.taskContract, policy.executionLease ?? null),
     ...buildWorkflowTools(prisma, context, approval, policy.taskContract, policy.executionLease ?? null),
+    ...buildWorkspaceTools(prisma, context, approval),
     ...mutationTools(prisma, context, approval, question)
   };
   const roleScoped = filterToolsForRole(tools, policy.role, policy.taskContract, { primary: policy.primary });
@@ -145,10 +153,11 @@ export function buildAgentTools(
 export const agentMutatingToolNames = [
   ...mutatingToolNames,
   ...semanticMutatingToolNames,
-  ...buildMutatingToolNames
+  ...buildMutatingToolNames,
+  ...buildWorkspaceMutatingToolNames
 ] as const;
 
-export type AgentMutatingToolName = MutatingToolName | SemanticMutatingToolName | BuildMutatingToolName;
+export type AgentMutatingToolName = MutatingToolName | SemanticMutatingToolName | BuildMutatingToolName | BuildWorkspaceMutatingToolName;
 
 export async function executeAgentMutationTool(
   prisma: PrismaClient,
@@ -158,6 +167,7 @@ export async function executeAgentMutationTool(
 ) {
   if ((semanticMutatingToolNames as readonly string[]).includes(toolName)) return executeSemanticMutation(prisma, context, toolName, input);
   if ((buildMutatingToolNames as readonly string[]).includes(toolName)) return executeBuildMutation(prisma, context, toolName, input);
+  if ((buildWorkspaceMutatingToolNames as readonly string[]).includes(toolName)) return executeBuildWorkspaceMutation(prisma, context, toolName, input);
   return executeMutationTool(prisma, context, toolName, input);
 }
 

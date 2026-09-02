@@ -47,7 +47,7 @@ A novel is a codebase of human meaning — characters, places, plot threads, and
 - **Durable Novel Builds.** Turn one brainstorm into a structured, restart-safe plan and sandboxed scene-by-scene manuscript workflow.
 - **Story compiler.** Versioned canon, entity state, timeline, setups/payoffs, semantic search, and evidence-backed diagnostics.
 - **Reviewable AI branches.** Inspect, edit, compare, approve, merge, or reject generated prose without changing main prematurely.
-- **External writing agents.** Connect hosted Claude through OAuth or create project-scoped MCP keys for Codex, Claude Code, and other agents using the same tools, skills, prompts, and permission checks.
+- **External writing-agent harness.** Connect hosted Claude through OAuth or create project-scoped MCP keys for Codex, Claude Code, and other agents. Agents can safely create, exact-edit, replace, reorder, invalidate, review, and merge story work through versioned, permission-checked tools with optimistic concurrency and idempotent batch patches.
 - **Publishing pipeline.** Validated DOCX, PDF, EPUB3, Markdown, text, HTML, and project archives with safe import previews.
 - **Drafts inbox.** Editors submit drafts; owners merge or decline with side-by-side diff. Like GitHub PRs, for prose.
 - **Public read view.** Publish chapters individually under a project's public URL.

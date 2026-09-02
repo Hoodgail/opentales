@@ -4,7 +4,7 @@ import { pagination, paginatedResult, paginationInputSchema, type ToolContext } 
 
 export function listChaptersTool(prisma: PrismaClient, context: ToolContext) {
   return tool({
-    description: 'List chapter metadata and summaries with pagination. Prefer this before reading full chapter bodies.',
+    description: 'List bounded chapter metadata, summaries, word counts, and branch/head tokens without body text. Prefer this before reading full chapters or applying a multi-chapter patch.',
     inputSchema: paginationInputSchema,
     execute: async (input) => {
       const page = pagination(input);
@@ -23,11 +23,23 @@ export function listChaptersTool(prisma: PrismaClient, context: ToolContext) {
             status: true,
             summary: true,
             povCharacterId: true,
-            locationId: true
+            locationId: true,
+            bodyWriting: {
+              select: {
+                defaultBranch: {
+                  select: { id: true, headVersionId: true, headVersion: { select: { wordCount: true } } }
+                }
+              }
+            }
           }
         })
       ]);
-      return paginatedResult(items, total, page.page, page.limit);
+      return paginatedResult(items.map(({ bodyWriting, ...chapter }) => ({
+        ...chapter,
+        branchId: bodyWriting.defaultBranch?.id ?? null,
+        headVersionId: bodyWriting.defaultBranch?.headVersionId ?? null,
+        wordCount: bodyWriting.defaultBranch?.headVersion?.wordCount ?? 0
+      })), total, page.page, page.limit);
     }
   });
 }

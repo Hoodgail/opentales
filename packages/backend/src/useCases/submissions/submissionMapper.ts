@@ -12,7 +12,8 @@ import type {
 export const submissionInclude = {
   author: { select: { id: true, username: true, name: true } },
   decidedBy: { select: { id: true, username: true, name: true } },
-  chapter: { select: { id: true, title: true } }
+  chapter: { select: { id: true, title: true } },
+  branch: { select: { headVersionId: true } }
 } satisfies Prisma.SubmissionInclude;
 
 export const submissionDetailInclude = {
@@ -66,6 +67,7 @@ const STATUS_MAP = {
 
 const ACTIVITY_TYPE_MAP = {
   SUBMISSION_OPENED: 'submission-opened',
+  SUBMISSION_UPDATED: 'submission-updated',
   SUBMISSION_MERGED: 'submission-merged',
   SUBMISSION_DECLINED: 'submission-declined',
   COMMENT_ADDED: 'comment-added',
@@ -86,6 +88,9 @@ export function toSubmissionSummary(submission: SubmissionWithSummary): Submissi
     message: submission.message,
     chapterId: submission.chapterId,
     chapterTitle: submission.chapter?.title ?? null,
+    branchId: submission.branchId,
+    baseVersionId: submission.baseVersionId,
+    headVersionId: submission.branch.headVersionId,
     proposedTitle: submission.proposedTitle,
     proposedNumber: submission.proposedNumber,
     proposedActId: submission.proposedActId,

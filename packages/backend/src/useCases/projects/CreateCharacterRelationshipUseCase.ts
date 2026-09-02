@@ -17,7 +17,7 @@ export class CreateCharacterRelationshipUseCase {
     fromCharacterId: string,
     input: CreateCharacterRelationshipInput
   ): Promise<ManuscriptProject> {
-    await this.access.assertProjectAccess(userId, projectId);
+    await this.access.assertPermission(userId, projectId, 'project:write');
 
     const type = input.type?.trim();
     if (!type) {

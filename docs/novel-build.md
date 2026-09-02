@@ -159,6 +159,8 @@ Important resource families:
 
 Worker-only claim, heartbeat, completion, trace, evaluation, branch patch, and task-bound artifact/state operations are not exposed as ordinary authenticated project routes.
 
+External MCP agents receive parallel user-facing operations rather than worker credentials: `createBuildUnit`, `updateBuildUnit`, `invalidateBuildUnit`, `reorderBuildUnits`, `compileBuild`, `compareBuildManuscript`, and the build-review tools. These call the same public use cases with project permissions, idempotency keys, and build/unit/head revisions. They are intended for explicit repair, review, and handoff; they cannot claim tasks, forge evaluator results, or write through a worker lease.
+
 ## Verification
 
 Run the release checks:

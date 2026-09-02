@@ -64,7 +64,7 @@ export function readActTool(prisma: PrismaClient, context: ToolContext) {
 
 export function listScenesTool(prisma: PrismaClient, context: ToolContext) {
   return tool({
-    description: 'List scenes for a chapter or for the project with metadata only.',
+    description: 'List bounded scene metadata with revision/head tokens but no body text. Use these tokens for reorderScenes or compileChapterFromScenes; call readScene only when prose is needed.',
     inputSchema: paginationInputSchema.extend({ chapterId: z.string().optional() }),
     execute: async (input) => {
       const page = pagination(input);
@@ -76,17 +76,40 @@ export function listScenesTool(prisma: PrismaClient, context: ToolContext) {
           orderBy: [{ chapter: { number: 'asc' } }, { order: 'asc' }],
           skip: page.offset,
           take: page.limit,
-          select: { id: true, chapterId: true, order: true, title: true, povCharacterId: true, locationId: true }
+          select: {
+            id: true,
+            chapterId: true,
+            order: true,
+            title: true,
+            status: true,
+            povCharacterId: true,
+            locationId: true,
+            revision: true,
+            actualWordCount: true,
+            bodyWriting: {
+              select: {
+                defaultBranch: {
+                  select: { id: true, headVersionId: true, headVersion: { select: { wordCount: true } } }
+                }
+              }
+            }
+          }
         })
       ]);
-      return paginatedResult(items, total, page.page, page.limit);
+      return paginatedResult(items.map(({ bodyWriting, status, actualWordCount, ...scene }) => ({
+        ...scene,
+        status: status.toLowerCase().replaceAll('_', '-'),
+        branchId: bodyWriting.defaultBranch?.id ?? null,
+        headVersionId: bodyWriting.defaultBranch?.headVersionId ?? null,
+        wordCount: bodyWriting.defaultBranch?.headVersion?.wordCount ?? actualWordCount
+      })), total, page.page, page.limit);
     }
   });
 }
 
 export function readSceneTool(prisma: PrismaClient, context: ToolContext) {
   return tool({
-    description: 'Read a bounded scene body range.',
+    description: 'Read a bounded scene body range plus revision and headVersionId. Both tokens are required for safe updateScene prose edits.',
     inputSchema: readRangeInputSchema.extend({ sceneId: z.string() }),
     execute: async (input) => {
       const scene = await prisma.scene.findFirst({
@@ -95,7 +118,23 @@ export function readSceneTool(prisma: PrismaClient, context: ToolContext) {
       });
       if (!scene) throw new HttpError(404, 'Scene not found');
       const range = readTextRange(bodyOf(scene.bodyWriting), input);
-      return { id: scene.id, chapterId: scene.chapterId, order: scene.order, title: scene.title, povCharacterId: scene.povCharacterId, locationId: scene.locationId, range: range.range, content: range.content };
+      return {
+        id: scene.id,
+        writingId: scene.bodyWritingId,
+        branchId: scene.bodyWriting.defaultBranch?.id ?? null,
+        headVersionId: scene.bodyWriting.defaultBranch?.headVersionId ?? null,
+        revision: scene.revision,
+        chapterId: scene.chapterId,
+        order: scene.order,
+        title: scene.title,
+        status: scene.status.toLowerCase().replaceAll('_', '-'),
+        povCharacterId: scene.povCharacterId,
+        locationId: scene.locationId,
+        range: range.range,
+        content: range.content,
+        wordCount: scene.bodyWriting.defaultBranch?.headVersion?.wordCount ?? 0,
+        totalCharacters: bodyOf(scene.bodyWriting).length
+      };
     }
   });
 }
@@ -167,22 +206,29 @@ export function listCharacterRelationshipsTool(prisma: PrismaClient, context: To
 
 export function listSubmissionsTool(prisma: PrismaClient, context: ToolContext) {
   return tool({
-    description: 'List project draft submissions and their status.',
-    inputSchema: z.object({ status: z.enum(['open', 'merged', 'declined']).optional() }),
+    description: 'List bounded project submission summaries and status. Follow nextPage until null when reviewing a complete draft set.',
+    inputSchema: paginationInputSchema.extend({ status: z.enum(['open', 'merged', 'declined']).optional() }),
     execute: async (input) => {
-      const submissions = await prisma.submission.findMany({
-        where: { projectId: context.projectId, status: input.status ? toStatus(input.status) : undefined },
-        orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
-        include: submissionInclude
-      });
-      return submissions.map(toSubmissionSummary);
+      const page = pagination(input);
+      const where = { projectId: context.projectId, status: input.status ? toStatus(input.status) : undefined };
+      const [total, submissions] = await prisma.$transaction([
+        prisma.submission.count({ where }),
+        prisma.submission.findMany({
+          where,
+          orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+          skip: page.offset,
+          take: page.limit,
+          include: submissionInclude
+        })
+      ]);
+      return paginatedResult(submissions.map(toSubmissionSummary), total, page.page, page.limit);
     }
   });
 }
 
 export function readSubmissionTool(prisma: PrismaClient, context: ToolContext) {
   return tool({
-    description: 'Read a submission, including base/head body snapshots and activity.',
+    description: 'Read a submission, including base/head body snapshots, branch/head concurrency tokens, and activity. Use headVersionId with updateSubmission to repair an open proposal in place.',
     inputSchema: z.object({ submissionId: z.string() }),
     execute: async ({ submissionId }) => {
       const submission = await prisma.submission.findFirst({ where: { id: submissionId, projectId: context.projectId }, include: submissionDetailInclude });

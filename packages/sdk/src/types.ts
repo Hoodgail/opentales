@@ -318,6 +318,8 @@ export interface UpdateProjectDocInput {
   kind?: ProjectDocKind;
   content?: string;
   order?: number;
+  /** Optional compare-and-swap guard for prose updates. */
+  expectedHeadVersionId?: string | null;
 }
 
 export interface CreateProjectFolderInput {
@@ -1060,9 +1062,13 @@ export interface UpdateProjectInput {
 }
 
 export type UpdateChapterInput = Partial<
-  Pick<Chapter, 'title' | 'status' | 'povCharacterId' | 'locationId' | 'summary' | 'content'>
+  Pick<Chapter, 'title' | 'status' | 'summary' | 'content'>
 > & {
+  povCharacterId?: string | null;
+  locationId?: string | null;
   publishedAt?: string | null;
+  /** Optional compare-and-swap guard for manuscript updates. */
+  expectedHeadVersionId?: string | null;
 };
 export type UpdateCharacterInput = Partial<Omit<Character, 'id' | 'relationships' | 'assets'>> & {
   avatarAssetId?: string | null;
@@ -1155,7 +1161,11 @@ export interface CreateSceneInput {
   content?: string;
 }
 
-export type UpdateSceneInput = Partial<CreateSceneInput> & { expectedRevision: number };
+export type UpdateSceneInput = Partial<CreateSceneInput> & {
+  expectedRevision: number;
+  /** Optional compare-and-swap guard for scene-body updates. */
+  expectedHeadVersionId?: string | null;
+};
 
 export interface DeleteSceneInput {
   expectedRevision?: number;
@@ -1188,10 +1198,17 @@ export interface CreateCharacterRelationshipInput {
   note?: string;
 }
 
+export interface UpdateCharacterRelationshipInput {
+  toCharacterId?: string;
+  type?: string;
+  note?: string | null;
+}
+
 export type SubmissionKind = 'chapter-edit' | 'new-chapter';
 export type SubmissionStatus = 'open' | 'merged' | 'declined';
 export type ActivityType =
   | 'submission-opened'
+  | 'submission-updated'
   | 'submission-merged'
   | 'submission-declined'
   | 'comment-added'
@@ -1212,6 +1229,9 @@ export interface SubmissionSummary {
   message: string | null;
   chapterId: string | null;
   chapterTitle: string | null;
+  branchId: string;
+  baseVersionId: string | null;
+  headVersionId: string | null;
   proposedTitle: string | null;
   proposedNumber: number | null;
   proposedActId: string | null;
@@ -1249,6 +1269,24 @@ export interface CreateSubmissionInput {
   proposedTitle?: string;
   proposedNumber?: number;
   proposedActId?: string | null;
+}
+
+export interface UpdateSubmissionInput {
+  /** Compare-and-swap guard returned by readSubmission. */
+  expectedHeadVersionId: string | null;
+  title?: string;
+  message?: string | null;
+  body?: string;
+  proposedTitle?: string;
+  proposedNumber?: number | null;
+  proposedActId?: string | null;
+}
+
+export interface MergeSubmissionInput {
+  /** Expected canonical chapter head. Null for a new-chapter submission. */
+  expectedMainHeadVersionId?: string | null;
+  /** Required when explicitly merging against a head newer than the submission base. */
+  confirm?: true;
 }
 
 export interface SubmissionCommentAnchor {
@@ -1929,6 +1967,9 @@ export interface PatchBuildManuscriptUnitInput {
   expectedHeadVersionId: string | null;
   lease?: BuildTaskLeaseInput;
   body?: string;
+  contentPatch?:
+    | { mode: 'replace'; content: string }
+    | { mode: 'edit'; edits: Array<{ oldString: string; newString: string; replaceAll?: boolean }> };
   title?: string;
   status?: BuildManuscriptUnitStatus;
   tension?: number | null;

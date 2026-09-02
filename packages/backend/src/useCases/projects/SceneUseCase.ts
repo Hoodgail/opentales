@@ -174,7 +174,8 @@ export class SceneUseCase {
           writingId: existing.bodyWritingId,
           body: normalized.content,
           authorId: userId,
-          message: 'Update scene body'
+          message: 'Update scene body',
+          expectedHeadVersionId: input.expectedHeadVersionId
         });
         data.actualWordCount = countWords(normalized.content);
       }

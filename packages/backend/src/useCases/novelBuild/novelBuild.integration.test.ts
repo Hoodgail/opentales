@@ -267,6 +267,22 @@ describeDatabase('durable Novel Build integration', () => {
       query: patchedUnit.body.includes('door') ? 'door' : 'conflicting', filters: { chapter: [sceneUnit.parentUnitId!] }, limit: 20
     });
     expect(chapterSearch.hits.some((hit) => hit.id === sceneUnit.id)).toBe(true);
+    const beforeExactEdit = await builds.get(ownerId, projectId, buildId);
+    const exactEditInput = {
+      idempotencyKey: 'integration:scene-exact-edit',
+      expectedBuildRevision: beforeExactEdit.revision,
+      expectedUnitRevision: patchedUnit.revision,
+      expectedHeadVersionId: patchedUnit.headVersionId,
+      contentPatch: {
+        mode: 'edit' as const,
+        edits: [{ oldString: patchedUnit.body, newString: 'The corrected scene keeps one stable apprentice.' }]
+      },
+      message: 'Exact continuity repair'
+    };
+    const exactEdit = await manuscript.patch(ownerId, projectId, buildId, sceneUnit.id, exactEditInput);
+    const exactReplay = await manuscript.patch(ownerId, projectId, buildId, sceneUnit.id, exactEditInput);
+    expect(exactEdit.body).toBe('The corrected scene keeps one stable apprentice.');
+    expect(exactReplay.headVersionId).toBe(exactEdit.headVersionId);
     const pagedArtifacts = await story.listArtifacts(ownerId, projectId, buildId, { limit: 500 });
     expect(pagedArtifacts.limit).toBe(500);
     await expect(story.search(ownerId, projectId, buildId, { query: '(a+)+', strategy: 'regex' })).rejects.toMatchObject({ status: 400 });

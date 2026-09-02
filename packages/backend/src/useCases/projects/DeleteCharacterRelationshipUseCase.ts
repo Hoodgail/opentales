@@ -17,7 +17,7 @@ export class DeleteCharacterRelationshipUseCase {
     fromCharacterId: string,
     relationshipId: string
   ): Promise<ManuscriptProject> {
-    await this.access.assertProjectAccess(userId, projectId);
+    await this.access.assertPermission(userId, projectId, 'project:write');
 
     await this.prisma.$transaction(async (tx) => {
       const relationship = await tx.characterRelationship.findFirst({

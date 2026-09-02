@@ -7,7 +7,7 @@ import { bodyOf, readRangeInputSchema, readTextRange, type ToolContext } from '.
 export function readChapterTool(prisma: PrismaClient, context: ToolContext) {
   return tool({
     description:
-      'Read a bounded chapter body range. Use startLine/endLine for line ranges or offset/length for character ranges. Pass full:true only when needed.',
+      'Read a bounded chapter body range plus its branch/head concurrency token. Before updateChapter prose edits, copy headVersionId into expectedHeadVersionId.',
     inputSchema: readRangeInputSchema.extend({ chapterId: z.string() }),
     execute: async (input) => readChapter(prisma, context, input)
   });
@@ -28,10 +28,15 @@ export async function readChapter(
   const range = readTextRange(bodyOf(chapter.bodyWriting), input);
   return {
     id: chapter.id,
+    writingId: chapter.bodyWritingId,
+    branchId: chapter.bodyWriting.defaultBranch?.id ?? null,
+    headVersionId: chapter.bodyWriting.defaultBranch?.headVersionId ?? null,
     number: chapter.number,
     title: chapter.title,
     summary: chapter.summary,
     range: range.range,
-    content: range.content
+    content: range.content,
+    wordCount: chapter.bodyWriting.defaultBranch?.headVersion?.wordCount ?? 0,
+    totalCharacters: bodyOf(chapter.bodyWriting).length
   };
 }
