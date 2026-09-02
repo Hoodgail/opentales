@@ -71,6 +71,7 @@ import type {
   CreateProjectMcpApiKeyResult,
   McpOAuthAuthorizationRequest,
   McpOAuthAuthorizationContext,
+  MergeSubmissionInput,
   AuthorizeMcpOAuthInput,
   AuthorizeMcpOAuthResult,
   ProjectDoc,
@@ -91,6 +92,7 @@ import type {
   SubmissionDetail,
   SubmissionStatus,
   SubmissionSummary,
+  UpdateSubmissionInput,
   UpdateActInput,
   UpdateBetaShareLinkInput,
   UpdateChapterInput,
@@ -645,13 +647,25 @@ export class OpenTalesClient {
     });
   }
 
+  updateSubmission(
+    projectId: string,
+    submissionId: string,
+    input: UpdateSubmissionInput
+  ): Promise<SubmissionDetail> {
+    return this.request<SubmissionDetail>(`/projects/${projectId}/submissions/${submissionId}`, {
+      method: 'PATCH',
+      body: input
+    });
+  }
+
   getSubmission(submissionId: string): Promise<SubmissionDetail> {
     return this.request<SubmissionDetail>(`/submissions/${submissionId}`);
   }
 
-  mergeSubmission(submissionId: string): Promise<SubmissionDetail> {
+  mergeSubmission(submissionId: string, input?: MergeSubmissionInput): Promise<SubmissionDetail> {
     return this.request<SubmissionDetail>(`/submissions/${submissionId}/merge`, {
-      method: 'PATCH'
+      method: 'PATCH',
+      body: input
     });
   }
 

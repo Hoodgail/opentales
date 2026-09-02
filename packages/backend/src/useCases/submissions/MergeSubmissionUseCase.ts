@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import type { SubmissionDetail } from '@opentales/sdk';
+import type { MergeSubmissionInput, SubmissionDetail } from '@opentales/sdk';
 import { HttpError } from '../../http/HttpError.js';
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
 import { countWords } from '../../utils/wordCount.js';
@@ -12,7 +12,7 @@ export class MergeSubmissionUseCase {
     this.access = new ProjectAccessRepository(prisma);
   }
 
-  async execute(userId: string, submissionId: string): Promise<SubmissionDetail> {
+  async execute(userId: string, submissionId: string, input: MergeSubmissionInput = {}): Promise<SubmissionDetail> {
     const submission = await this.prisma.submission.findUnique({
       where: { id: submissionId },
       select: { id: true, projectId: true, status: true, kind: true }
@@ -26,12 +26,14 @@ export class MergeSubmissionUseCase {
     await this.access.assertPermission(userId, submission.projectId, 'project:write');
 
     const merged = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Submission" WHERE id = ${submissionId} FOR UPDATE`;
       const full = await tx.submission.findUniqueOrThrow({
         where: { id: submissionId },
         include: {
           branch: { include: { headVersion: true } }
         }
       });
+      if (full.status !== 'OPEN') throw new HttpError(409, `Submission is already ${full.status.toLowerCase()}`);
 
       const proposedBody = full.branch.headVersion?.body ?? '';
 
@@ -44,11 +46,26 @@ export class MergeSubmissionUseCase {
         });
         const defaultBranch = chapter.bodyWriting.defaultBranch;
         if (!defaultBranch) throw new HttpError(500, 'Chapter has no default branch');
+        await tx.$queryRaw`SELECT id FROM "WritingBranch" WHERE id = ${defaultBranch.id} FOR UPDATE`;
+        const lockedBranch = await tx.writingBranch.findUniqueOrThrow({ where: { id: defaultBranch.id } });
+        const expectedHeadVersionId = input.expectedMainHeadVersionId !== undefined
+          ? input.expectedMainHeadVersionId
+          : full.baseVersionId;
+        if (lockedBranch.headVersionId !== expectedHeadVersionId) {
+          throw new HttpError(409, 'Canonical chapter changed after the submission snapshot; read the current chapter, reconcile the proposal, and retry with its headVersionId', {
+            expectedMainHeadVersionId: expectedHeadVersionId,
+            actualMainHeadVersionId: lockedBranch.headVersionId,
+            submissionBaseVersionId: full.baseVersionId
+          });
+        }
+        if (input.expectedMainHeadVersionId !== undefined && input.expectedMainHeadVersionId !== full.baseVersionId && input.confirm !== true) {
+          throw new HttpError(400, 'confirm=true is required to merge a reconciled proposal against a canonical head newer than its original base');
+        }
 
         const newVersion = await tx.writingVersion.create({
           data: {
             branchId: defaultBranch.id,
-            parentVersionId: defaultBranch.headVersionId,
+            parentVersionId: lockedBranch.headVersionId,
             body: proposedBody,
             wordCount: countWords(proposedBody),
             authorId: userId,
@@ -56,10 +73,11 @@ export class MergeSubmissionUseCase {
           }
         });
 
-        await tx.writingBranch.update({
-          where: { id: defaultBranch.id },
+        const updated = await tx.writingBranch.updateMany({
+          where: { id: defaultBranch.id, headVersionId: lockedBranch.headVersionId },
           data: { headVersionId: newVersion.id }
         });
+        if (updated.count !== 1) throw new HttpError(409, 'Canonical chapter changed concurrently; read it and retry');
       } else {
         // NEW_CHAPTER — materialize a real Chapter pointing at the submission's Writing.
         if (!full.proposedTitle) throw new HttpError(500, 'New chapter missing proposedTitle');

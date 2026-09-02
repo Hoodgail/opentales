@@ -12,16 +12,19 @@ import type {
   CreateObstacleInput,
   CreateSubmissionInput,
   CreateSceneInput,
+  ReorderScenesInput,
   UpdateActInput,
   UpdateBetaShareLinkInput,
   UpdateChapterInput,
   UpdateCharacterInput,
+  UpdateCharacterRelationshipInput,
   UpdateLocationInput,
   UpdateObstacleInput,
   UpdateProjectAiSettingsInput,
   UpdateProjectInput,
-  UpdateStructureInput
-  ,UpdateSceneInput
+  UpdateStructureInput,
+  UpdateSceneInput,
+  UpdateSubmissionInput
 } from '@opentales/sdk';
 import { tool, type Tool } from 'ai';
 import { z } from 'zod';
@@ -33,6 +36,7 @@ import { AddCommentUseCase } from '../../submissions/AddCommentUseCase.js';
 import { CreateActUseCase } from '../../projects/CreateActUseCase.js';
 import { CreateBetaShareLinkUseCase } from '../../shareLinks/CreateBetaShareLinkUseCase.js';
 import { CreateChapterUseCase } from '../../projects/CreateChapterUseCase.js';
+import { CompileChapterScenesUseCase } from '../../projects/CompileChapterScenesUseCase.js';
 import { CreateCharacterUseCase } from '../../projects/CreateCharacterUseCase.js';
 import { CreateCharacterRelationshipUseCase } from '../../projects/CreateCharacterRelationshipUseCase.js';
 import { CreateInviteUseCase } from '../../members/CreateInviteUseCase.js';
@@ -47,6 +51,7 @@ import { DeleteCharacterUseCase } from '../../projects/DeleteCharacterUseCase.js
 import { DeleteLocationUseCase } from '../../projects/DeleteLocationUseCase.js';
 import { DeleteObstacleUseCase } from '../../projects/DeleteObstacleUseCase.js';
 import { MergeSubmissionUseCase } from '../../submissions/MergeSubmissionUseCase.js';
+import { UpdateSubmissionUseCase } from '../../submissions/UpdateSubmissionUseCase.js';
 import { ProjectAiSettingsUseCase } from '../ProjectAiSettingsUseCase.js';
 import { ProjectDocUseCase } from '../../projectDocs/ProjectDocUseCase.js';
 import { PurgeChapterUseCase } from '../../trash/PurgeChapterUseCase.js';
@@ -58,6 +63,7 @@ import { UpdateActUseCase } from '../../projects/UpdateActUseCase.js';
 import { UpdateBetaShareLinkUseCase } from '../../shareLinks/UpdateBetaShareLinkUseCase.js';
 import { UpdateChapterUseCase } from '../../projects/UpdateChapterUseCase.js';
 import { UpdateCharacterUseCase } from '../../projects/UpdateCharacterUseCase.js';
+import { UpdateCharacterRelationshipUseCase } from '../../projects/UpdateCharacterRelationshipUseCase.js';
 import { UpdateLocationUseCase } from '../../projects/UpdateLocationUseCase.js';
 import { UpdateMemberRoleUseCase } from '../../members/UpdateMemberRoleUseCase.js';
 import { UpdateObstacleUseCase } from '../../projects/UpdateObstacleUseCase.js';
@@ -68,7 +74,8 @@ import { UploadAssetUseCase } from '../../assets/UploadAssetUseCase.js';
 import { ProjectAssetUseCase } from '../../assets/ProjectAssetUseCase.js';
 import { ProjectFolderUseCase } from '../../projectFiles/ProjectFolderUseCase.js';
 import { WritingUseCase } from '../../writings/WritingUseCase.js';
-import { applyContentEdit, bodyOf, countWords, editContentInputSchema, invocationToolCallId, toPrismaDocKind, type AgentToolInvocationContext, type ToolContext } from './shared.js';
+import { ApplyStoryPatchUseCase } from '../../writings/ApplyStoryPatchUseCase.js';
+import { applyContentPatch, bodyOf, contentPatchInputSchema, countWords, editContentInputSchema, invocationToolCallId, toPrismaDocKind, type AgentToolInvocationContext, type ToolContext } from './shared.js';
 
 type ApprovalToolConfig = Tool<any, any>;
 
@@ -94,10 +101,9 @@ const questionPromptSchema = z.object({
   multiple: z.boolean().optional().describe('Allow selecting multiple choices'),
   custom: z.boolean().optional().describe('Allow typing a custom answer; defaults to true in the UI')
 });
-const contentEditSchema = editContentInputSchema.extend({
-  oldString: z.string().min(1),
-  newString: z.string()
-});
+const contentEditSchema = editContentInputSchema;
+const manuscriptContentSchema = z.string().max(2_000_000);
+const expectedHeadVersionIdSchema = z.string().trim().min(1).nullable();
 const sceneStatusSchema = z.enum(['planned', 'draft', 'in-progress', 'review', 'revised', 'final']);
 const sceneJsonSchema = z.unknown().nullable().optional();
 const sceneMetadataShape = {
@@ -105,6 +111,7 @@ const sceneMetadataShape = {
   storyDate: nullableString,
   storyTime: nullableString,
   estimatedWordCount: z.number().int().min(0).max(1_000_000).nullable().optional(),
+  tension: z.number().min(0).max(1).nullable().optional(),
   sceneFunction: optionalString,
   goal: optionalString,
   obstacle: optionalString,
@@ -135,10 +142,33 @@ function withAtLeastOne<T extends z.ZodRawShape>(schema: z.ZodObject<T>, fields:
   });
 }
 
+function validateContentMutation(
+  input: Record<string, unknown>,
+  ctx: z.RefinementCtx
+): void {
+  const supplied = [input.content !== undefined, input.contentEdit !== undefined, input.contentEdits !== undefined]
+    .filter(Boolean).length;
+  if (supplied > 1) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'content, contentEdit, and contentEdits are mutually exclusive',
+      path: ['content']
+    });
+  }
+  if (supplied > 0 && !Object.prototype.hasOwnProperty.call(input, 'expectedHeadVersionId')) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'expectedHeadVersionId is required for content changes; read the target first and copy its current headVersionId',
+      path: ['expectedHeadVersionId']
+    });
+  }
+}
+
 export const mutatingToolNames = [
   'askUser',
   'updateProject',
   'updateProjectAiSettings',
+  'applyStoryPatch',
   'createAct',
   'updateAct',
   'deleteAct',
@@ -146,17 +176,20 @@ export const mutatingToolNames = [
   'createCharacter',
   'deleteCharacter',
   'createCharacterRelationship',
+  'updateCharacterRelationship',
   'deleteCharacterRelationship',
   'createLocation',
   'updateLocation',
   'deleteLocation',
   'updateChapter',
   'createChapter',
+  'compileChapterFromScenes',
   'deleteChapter',
   'restoreTrashChapter',
   'purgeTrashChapter',
   'createScene',
   'updateScene',
+  'reorderScenes',
   'deleteScene',
   'updateStoryStructure',
   'createObstacle',
@@ -169,11 +202,13 @@ export const mutatingToolNames = [
   'updateFolder',
   'deleteFolder',
   'createSubmission',
+  'updateSubmission',
   'mergeSubmission',
   'declineSubmission',
   'commentSubmission',
   'uploadAsset',
   'updateAsset',
+  'deleteAsset',
   'attachAsset',
   'detachAsset',
   'updateMemberRole',
@@ -189,7 +224,7 @@ export const mutatingToolNames = [
 
 export type MutatingToolName = (typeof mutatingToolNames)[number];
 
-const mutationToolSchemas = {
+export const mutationToolSchemas = {
   askUser: z.object({
     questions: z.array(questionPromptSchema).min(1).max(5).describe('Questions to ask the user before continuing')
   }),
@@ -214,6 +249,24 @@ const mutationToolSchemas = {
     baseUrl: nullableString,
     apiKey: nullableString
   }), ['enabled', 'providerKind', 'model', 'baseUrl', 'apiKey']),
+  applyStoryPatch: z.object({
+    idempotencyKey: nonEmptyString.describe('Unique key for this logical patch. Reusing it with identical input safely replays the receipt.'),
+    operations: z.array(z.object({
+      target: z.enum(['chapter', 'scene', 'project-doc', 'submission']),
+      id: nonEmptyString,
+      expectedHeadVersionId: expectedHeadVersionIdSchema,
+      expectedRevision: z.number().int().nonnegative().optional(),
+      patch: contentPatchInputSchema,
+      message: z.string().trim().min(1).max(1_000).optional()
+    }).strict().superRefine((operation, ctx) => {
+      if (operation.target === 'scene' && operation.expectedRevision === undefined) {
+        ctx.addIssue({ code: 'custom', message: 'expectedRevision is required for scene patches', path: ['expectedRevision'] });
+      }
+      if (operation.target !== 'scene' && operation.expectedRevision !== undefined) {
+        ctx.addIssue({ code: 'custom', message: 'expectedRevision applies only to scene patches', path: ['expectedRevision'] });
+      }
+    })).min(1).max(50)
+  }).strict(),
   createAct: z.object({ title: nonEmptyString }),
   updateAct: withAtLeastOne(z.object({ actId: nonEmptyString, title: optionalString, chapterIds: stringArray.optional() }), ['title', 'chapterIds']),
   deleteAct: z.object({ actId: nonEmptyString }),
@@ -249,34 +302,105 @@ const mutationToolSchemas = {
     type: nonEmptyString.describe('Relationship label, such as "creator / creation", "mentor", or "operator / asset"'),
     note: optionalString.describe('Short explanation of the relationship')
   }),
+  updateCharacterRelationship: withAtLeastOne(z.object({
+    fromCharacterId: nonEmptyString,
+    relationshipId: nonEmptyString,
+    toCharacterId: nonEmptyString.optional(),
+    type: nonEmptyString.optional(),
+    note: nullableString
+  }), ['toCharacterId', 'type', 'note']),
   deleteCharacterRelationship: z.object({ fromCharacterId: nonEmptyString, relationshipId: nonEmptyString }),
-  createLocation: z.object({ name: nonEmptyString, type: optionalString, description: optionalString, atmosphere: optionalString, significance: optionalString, sensoryDetails: optionalString }),
-  updateLocation: withAtLeastOne(z.object({ locationId: nonEmptyString, name: optionalString, type: optionalString, imageAssetId: nullableString, description: optionalString, atmosphere: optionalString, significance: optionalString, sensoryDetails: optionalString }), ['name', 'type', 'imageAssetId', 'description', 'atmosphere', 'significance', 'sensoryDetails']),
+  createLocation: z.object({ name: nonEmptyString, aliases: stringArray.optional(), type: optionalString, description: optionalString, atmosphere: optionalString, significance: optionalString, sensoryDetails: optionalString }),
+  updateLocation: withAtLeastOne(z.object({ locationId: nonEmptyString, name: optionalString, aliases: stringArray.optional(), type: optionalString, imageAssetId: nullableString, description: optionalString, atmosphere: optionalString, significance: optionalString, sensoryDetails: optionalString }), ['name', 'aliases', 'type', 'imageAssetId', 'description', 'atmosphere', 'significance', 'sensoryDetails']),
   deleteLocation: z.object({ locationId: nonEmptyString }),
-  updateChapter: withAtLeastOne(z.object({ chapterId: nonEmptyString, title: optionalString, summary: optionalString, status: chapterStatusSchema.optional(), povCharacterId: optionalString, locationId: optionalString, contentEdit: contentEditSchema.optional() }), ['title', 'summary', 'status', 'povCharacterId', 'locationId', 'contentEdit']),
-  createChapter: z.object({ title: nonEmptyString, actId: optionalString, summary: optionalString, content: optionalString, status: chapterStatusSchema.optional(), povCharacterId: optionalString, locationId: optionalString }),
+  updateChapter: withAtLeastOne(z.object({
+    chapterId: nonEmptyString,
+    title: optionalString,
+    summary: optionalString,
+    status: chapterStatusSchema.optional(),
+    povCharacterId: nullableString,
+    locationId: nullableString,
+    publishedAt: z.string().datetime().nullable().optional(),
+    expectedHeadVersionId: expectedHeadVersionIdSchema.optional(),
+    content: manuscriptContentSchema.optional(),
+    contentEdit: contentEditSchema.optional(),
+    contentEdits: z.array(contentEditSchema).min(1).max(100).optional()
+  }).strict(), ['title', 'summary', 'status', 'povCharacterId', 'locationId', 'publishedAt', 'content', 'contentEdit', 'contentEdits']).superRefine(validateContentMutation),
+  createChapter: z.object({ title: nonEmptyString, actId: optionalString, summary: optionalString, content: manuscriptContentSchema.optional(), status: chapterStatusSchema.optional(), povCharacterId: optionalString, locationId: optionalString }),
+  compileChapterFromScenes: z.object({
+    chapterId: nonEmptyString,
+    idempotencyKey: nonEmptyString,
+    expectedChapterHeadVersionId: expectedHeadVersionIdSchema,
+    expectedSceneRevisions: z.record(z.string(), z.number().int().nonnegative()),
+    separator: z.string().max(1_000).optional(),
+    message: z.string().trim().min(1).max(1_000).optional()
+  }).strict(),
   deleteChapter: z.object({ chapterId: nonEmptyString }),
   restoreTrashChapter: z.object({ chapterId: nonEmptyString }),
   purgeTrashChapter: z.object({ chapterId: nonEmptyString }),
-  createScene: z.object({ chapterId: nonEmptyString, title: optionalString, content: optionalString, order: z.number().int().min(0).optional(), povCharacterId: nullableString, locationId: nullableString, ...sceneMetadataShape }),
-  updateScene: withAtLeastOne(z.object({ sceneId: nonEmptyString, title: nullableString, content: optionalString, contentEdit: contentEditSchema.optional(), order: z.number().int().min(0).optional(), povCharacterId: nullableString, locationId: nullableString, ...sceneMetadataShape }), ['title', 'content', 'contentEdit', 'order', 'povCharacterId', 'locationId', ...Object.keys(sceneMetadataShape) as Array<keyof typeof sceneMetadataShape>]),
-  deleteScene: z.object({ sceneId: nonEmptyString }),
+  createScene: z.object({ chapterId: nonEmptyString, title: optionalString, content: manuscriptContentSchema.optional(), order: z.number().int().min(0).optional(), povCharacterId: nullableString, locationId: nullableString, ...sceneMetadataShape }),
+  updateScene: withAtLeastOne(z.object({
+    sceneId: nonEmptyString,
+    expectedRevision: z.number().int().nonnegative(),
+    expectedHeadVersionId: expectedHeadVersionIdSchema.optional(),
+    title: nullableString,
+    content: manuscriptContentSchema.optional(),
+    contentEdit: contentEditSchema.optional(),
+    contentEdits: z.array(contentEditSchema).min(1).max(100).optional(),
+    order: z.number().int().min(0).optional(),
+    povCharacterId: nullableString,
+    locationId: nullableString,
+    ...sceneMetadataShape
+  }).strict(), ['title', 'content', 'contentEdit', 'contentEdits', 'order', 'povCharacterId', 'locationId', ...Object.keys(sceneMetadataShape) as Array<keyof typeof sceneMetadataShape>]).superRefine(validateContentMutation),
+  reorderScenes: z.object({
+    chapterId: nonEmptyString,
+    sceneIds: z.array(nonEmptyString).min(1),
+    expectedRevisions: z.record(z.string(), z.number().int().nonnegative()),
+    buildRunId: nonEmptyString.optional()
+  }).strict(),
+  deleteScene: z.object({ sceneId: nonEmptyString, expectedRevision: z.number().int().nonnegative() }).strict(),
   updateStoryStructure: withAtLeastOne(z.object({ title: optionalString, genre: optionalString, perspective: optionalString, pov: optionalString, voice: optionalString, tone: optionalString, themes: stringArray.optional(), logline: optionalString, outline: optionalString, climax: optionalString }), ['title', 'genre', 'perspective', 'pov', 'voice', 'tone', 'themes', 'logline', 'outline', 'climax']),
   createObstacle: z.object({ title: nonEmptyString, type: obstacleTypeSchema, description: optionalString, resolution: optionalString }),
   updateObstacle: withAtLeastOne(z.object({ obstacleId: nonEmptyString, title: optionalString, type: obstacleTypeSchema.optional(), description: optionalString, resolution: optionalString, order: z.number().optional() }), ['title', 'type', 'description', 'resolution', 'order']),
   deleteObstacle: z.object({ obstacleId: nonEmptyString }),
-  createProjectDoc: z.object({ title: nonEmptyString, folderId: nullableString, kind: docKindSchema.optional(), content: optionalString }),
-  updateProjectDoc: withAtLeastOne(z.object({ docId: nonEmptyString, title: optionalString, folderId: nullableString, kind: docKindSchema.optional(), contentEdit: contentEditSchema.optional() }), ['title', 'folderId', 'kind', 'contentEdit']),
+  createProjectDoc: z.object({ title: nonEmptyString, folderId: nullableString, kind: docKindSchema.optional(), content: manuscriptContentSchema.optional() }),
+  updateProjectDoc: withAtLeastOne(z.object({
+    docId: nonEmptyString,
+    title: optionalString,
+    folderId: nullableString,
+    kind: docKindSchema.optional(),
+    expectedHeadVersionId: expectedHeadVersionIdSchema.optional(),
+    content: manuscriptContentSchema.optional(),
+    contentEdit: contentEditSchema.optional(),
+    contentEdits: z.array(contentEditSchema).min(1).max(100).optional()
+  }).strict(), ['title', 'folderId', 'kind', 'content', 'contentEdit', 'contentEdits']).superRefine(validateContentMutation),
   deleteProjectDoc: z.object({ docId: nonEmptyString }),
   createFolder: z.object({ name: nonEmptyString, parentFolderId: nullableString }),
   updateFolder: withAtLeastOne(z.object({ folderId: nonEmptyString, name: optionalString, parentFolderId: nullableString }), ['name', 'parentFolderId']),
   deleteFolder: z.object({ folderId: nonEmptyString }),
-  createSubmission: z.object({ kind: z.enum(['chapter-edit', 'new-chapter']).optional(), title: nonEmptyString, message: optionalString, chapterId: optionalString, body: nonEmptyString, proposedTitle: optionalString, proposedNumber: z.number().optional(), proposedActId: nullableString }),
-  mergeSubmission: z.object({ submissionId: nonEmptyString }),
+  createSubmission: z.object({ kind: z.enum(['chapter-edit', 'new-chapter']).optional(), title: nonEmptyString, message: optionalString, chapterId: optionalString, body: z.string().max(2_000_000), proposedTitle: optionalString, proposedNumber: z.number().optional(), proposedActId: nullableString }),
+  updateSubmission: withAtLeastOne(z.object({
+    submissionId: nonEmptyString,
+    expectedHeadVersionId: expectedHeadVersionIdSchema,
+    title: optionalString,
+    message: nullableString,
+    proposedTitle: optionalString,
+    proposedNumber: z.number().int().positive().nullable().optional(),
+    proposedActId: nullableString,
+    content: manuscriptContentSchema.optional(),
+    contentEdit: contentEditSchema.optional(),
+    contentEdits: z.array(contentEditSchema).min(1).max(100).optional()
+  }).strict(), ['title', 'message', 'proposedTitle', 'proposedNumber', 'proposedActId', 'content', 'contentEdit', 'contentEdits']).superRefine(validateContentMutation),
+  mergeSubmission: z.object({
+    submissionId: nonEmptyString,
+    expectedMainHeadVersionId: expectedHeadVersionIdSchema,
+    confirm: z.literal(true)
+  }).strict(),
   declineSubmission: z.object({ submissionId: nonEmptyString }),
   commentSubmission: z.object({ submissionId: nonEmptyString, body: nonEmptyString, anchor: z.object({ side: z.enum(['base', 'head']), lineStart: z.number(), lineEnd: z.number() }).optional() }),
   uploadAsset: z.object({ kind: assetKindSchema, filename: nonEmptyString, mimeType: nonEmptyString, base64: nonEmptyString, folderId: nullableString, name: optionalString }),
   updateAsset: withAtLeastOne(z.object({ assetId: nonEmptyString, name: optionalString, folderId: nullableString }), ['name', 'folderId']),
+  deleteAsset: z.object({ assetId: nonEmptyString }).strict(),
   attachAsset: z.object({ assetId: nonEmptyString, entityType: attachmentEntitySchema, entityId: nonEmptyString, role: nonEmptyString, order: z.number().optional() }),
   detachAsset: z.object({ attachmentId: nonEmptyString }),
   updateMemberRole: z.object({ userId: nonEmptyString, role: roleSchema }),
@@ -294,6 +418,7 @@ const mutationToolDescriptions = {
   askUser: 'Ask the user one or more multiple-choice questions and wait for their answers before continuing. Include concise options; mark recommended choices with recommended:true when appropriate. The UI also allows custom answers.',
   updateProject: 'Update project metadata. Include at least one metadata field to change.',
   updateProjectAiSettings: 'Update project AI settings. Include at least one setting to change.',
+  applyStoryPatch: 'Atomically patch up to 50 chapter, scene, project-doc, or open-submission bodies. Read every target first, pass its headVersionId (and scene revision), then use mode=replace for a complete body including empty text or mode=edit for ordered exact replacements. The idempotency key makes retries safe.',
   createAct: 'Create an act. Requires title.',
   updateAct: 'Update an act. Requires actId and at least title or chapterIds.',
   deleteAct: 'Delete an act. Requires actId.',
@@ -301,34 +426,39 @@ const mutationToolDescriptions = {
   createCharacter: 'Create a character. Requires name.',
   deleteCharacter: 'Delete a character. Requires characterId.',
   createCharacterRelationship: 'Create a relationship between two existing characters. Requires fromCharacterId, toCharacterId, and type; note is optional.',
+  updateCharacterRelationship: 'Update the target, type, or note of an existing character relationship.',
   deleteCharacterRelationship: 'Delete a character relationship. Requires fromCharacterId and relationshipId.',
   createLocation: 'Create a location. Requires name.',
   updateLocation: 'Update a location. Requires locationId and at least one location field to change.',
   deleteLocation: 'Delete a location. Requires locationId.',
-  updateChapter: 'Update a chapter. Requires chapterId and at least one field or contentEdit.',
+  updateChapter: 'Update chapter metadata or prose. For prose, readChapter first, pass its headVersionId as expectedHeadVersionId, then use content for a full replacement (including an empty draft) or contentEdit/contentEdits for exact replacements.',
   createChapter: 'Create a chapter. Requires title.',
+  compileChapterFromScenes: 'Deterministically replace one chapter body with all of its ordered scene bodies. Read the chapter and list/read every scene first, then provide the chapter head and complete scene revision map. Identical retries are idempotent.',
   deleteChapter: 'Delete a chapter. Requires chapterId.',
   restoreTrashChapter: 'Restore a trashed chapter. Requires chapterId.',
   purgeTrashChapter: 'Permanently delete a trashed chapter. Requires chapterId.',
   createScene: 'Create a scene in a chapter. Requires chapterId.',
-  updateScene: 'Update a scene. Requires sceneId and at least one scene field or contentEdit.',
-  deleteScene: 'Delete a scene. Requires sceneId.',
+  updateScene: 'Update scene metadata or prose with optimistic concurrency. Requires sceneId and the revision from readScene; prose also requires its headVersionId.',
+  reorderScenes: 'Atomically reorder every scene in a chapter. Requires the complete ordered sceneIds list and each revision returned by listScenes/readScene.',
+  deleteScene: 'Delete a scene using the revision returned by readScene.',
   updateStoryStructure: 'Update story structure fields. Include at least one field to change.',
   createObstacle: 'Create an obstacle. Requires title and type.',
   updateObstacle: 'Update an obstacle. Requires obstacleId and at least one obstacle field to change.',
   deleteObstacle: 'Delete an obstacle. Requires obstacleId.',
   createProjectDoc: 'Create a project document. Requires title.',
-  updateProjectDoc: 'Update a project document. Requires docId and at least title, folderId, kind, or contentEdit.',
+  updateProjectDoc: 'Update document metadata or prose. For prose, readProjectDoc first and use its headVersionId with a full content replacement or exact contentEdit/contentEdits.',
   deleteProjectDoc: 'Delete a project document. Requires docId.',
   createFolder: 'Create a folder. Requires name; parentFolderId is optional.',
   updateFolder: 'Rename or move a folder. Requires folderId and at least name or parentFolderId.',
   deleteFolder: 'Delete a folder and its child folders. Requires folderId.',
   createSubmission: 'Create a draft submission. Requires title and body.',
-  mergeSubmission: 'Merge a submission. Requires submissionId.',
+  updateSubmission: 'Edit an existing open submission in place instead of opening a duplicate. Read it first, pass headVersionId as expectedHeadVersionId, then update metadata and/or its proposed body.',
+  mergeSubmission: 'Merge an open submission into canonical main with confirm=true and the current chapter head from readChapter/listChapters. Use null for a new-chapter proposal. Stale canonical heads fail without writing.',
   declineSubmission: 'Decline a submission. Requires submissionId.',
   commentSubmission: 'Comment on a submission. Requires submissionId and body.',
   uploadAsset: 'Upload an asset from base64 data. Requires kind, filename, mimeType, and base64.',
   updateAsset: 'Rename or move an asset in the project file tree. Requires assetId and name or folderId.',
+  deleteAsset: 'Delete a project asset and its stored bytes. Requires assetId.',
   attachAsset: 'Attach an existing asset. Requires assetId, entityType, entityId, and role.',
   detachAsset: 'Detach an asset attachment. Requires attachmentId.',
   updateMemberRole: 'Update a project member role. Requires userId and role.',
@@ -387,7 +517,7 @@ export function mutationTools(
     }),
     updateChapter: approvalTool({
       description:
-        'Update chapter metadata and/or content by exact replacement. Use oldString/newString for manuscript edits instead of sending full content.',
+        'Update chapter metadata or prose. Read the chapter first. For prose, pass its headVersionId and either exact contentEdit/contentEdits or a full content replacement; full replacement works when the current body is empty.',
       inputSchema: mutationToolSchemas.updateChapter,
       execute: async (input, options?: AgentToolInvocationContext) => {
         const validated = validateMutationInput('updateChapter', input);
@@ -414,7 +544,7 @@ export function mutationTools(
     }),
     updateProjectDoc: approvalTool({
       description:
-        'Update document metadata and/or content by exact replacement. Use oldString/newString for body edits instead of sending full content.',
+        'Update document metadata or prose. Read the document first. For prose, pass its headVersionId and either exact contentEdit/contentEdits or a full content replacement; full replacement works when the body is empty.',
       inputSchema: mutationToolSchemas.updateProjectDoc,
       execute: async (input, options?: AgentToolInvocationContext) => {
         const validated = validateMutationInput('updateProjectDoc', input);
@@ -486,6 +616,11 @@ export async function executeMutationTool(
 ) {
   if (toolName === 'updateProject') return compactToolResult(toolName, input, await updateProject(prisma, context, input));
   if (toolName === 'updateProjectAiSettings') return compactToolResult(toolName, input, await updateProjectAiSettings(prisma, context, input));
+  if (toolName === 'applyStoryPatch') return new ApplyStoryPatchUseCase(prisma).execute(
+    context.userId,
+    context.projectId,
+    mutationToolSchemas.applyStoryPatch.parse(input)
+  );
   if (toolName === 'createAct') return compactToolResult(toolName, input, await createAct(prisma, context, input));
   if (toolName === 'updateAct') return compactToolResult(toolName, input, await updateAct(prisma, context, input));
   if (toolName === 'deleteAct') return compactToolResult(toolName, input, await deleteAct(prisma, context, input));
@@ -497,16 +632,30 @@ export async function executeMutationTool(
   if (toolName === 'deleteFolder') return compactToolResult(toolName, input, await deleteFolder(prisma, context, input));
   if (toolName === 'updateChapter') return compactToolResult(toolName, input, await updateChapter(prisma, context, input));
   if (toolName === 'createChapter') return compactToolResult(toolName, input, await createChapter(prisma, context, input));
+  if (toolName === 'compileChapterFromScenes') return new CompileChapterScenesUseCase(prisma).execute(
+    context.userId,
+    context.projectId,
+    requiredString(input.chapterId, 'chapterId'),
+    {
+      idempotencyKey: requiredString(input.idempotencyKey, 'idempotencyKey'),
+      expectedChapterHeadVersionId: expectedHeadVersionIdFrom(input, 'expectedChapterHeadVersionId'),
+      expectedSceneRevisions: numberRecord(input.expectedSceneRevisions),
+      separator: typeof input.separator === 'string' ? input.separator : undefined,
+      message: stringOrUndefined(input.message)
+    }
+  );
   if (toolName === 'deleteChapter') return compactToolResult(toolName, input, await deleteChapter(prisma, context, input));
   if (toolName === 'restoreTrashChapter') return compactToolResult(toolName, input, await restoreTrashChapter(prisma, context, input));
   if (toolName === 'purgeTrashChapter') return compactToolResult(toolName, input, await purgeTrashChapter(prisma, context, input));
   if (toolName === 'createScene') return compactToolResult(toolName, input, await createScene(prisma, context, input));
   if (toolName === 'updateScene') return compactToolResult(toolName, input, await updateScene(prisma, context, input));
+  if (toolName === 'reorderScenes') return compactToolResult(toolName, input, await reorderScenes(prisma, context, input));
   if (toolName === 'deleteScene') return compactToolResult(toolName, input, await deleteScene(prisma, context, input));
   if (toolName === 'createCharacter') return compactToolResult(toolName, input, await createCharacter(prisma, context, input));
   if (toolName === 'updateCharacter') return compactToolResult(toolName, input, await updateCharacter(prisma, context, input));
   if (toolName === 'deleteCharacter') return compactToolResult(toolName, input, await deleteCharacter(prisma, context, input));
   if (toolName === 'createCharacterRelationship') return compactToolResult(toolName, input, await createCharacterRelationship(prisma, context, input));
+  if (toolName === 'updateCharacterRelationship') return compactToolResult(toolName, input, await updateCharacterRelationship(prisma, context, input));
   if (toolName === 'deleteCharacterRelationship') return compactToolResult(toolName, input, await deleteCharacterRelationship(prisma, context, input));
   if (toolName === 'createLocation') return compactToolResult(toolName, input, await createLocation(prisma, context, input));
   if (toolName === 'updateLocation') return compactToolResult(toolName, input, await updateLocation(prisma, context, input));
@@ -516,11 +665,13 @@ export async function executeMutationTool(
   if (toolName === 'updateObstacle') return compactToolResult(toolName, input, await updateObstacle(prisma, context, input));
   if (toolName === 'deleteObstacle') return compactToolResult(toolName, input, await deleteObstacle(prisma, context, input));
   if (toolName === 'createSubmission') return compactToolResult(toolName, input, await createSubmission(prisma, context, input));
+  if (toolName === 'updateSubmission') return compactToolResult(toolName, input, await updateSubmission(prisma, context, input));
   if (toolName === 'mergeSubmission') return compactToolResult(toolName, input, await mergeSubmission(prisma, context, input));
   if (toolName === 'declineSubmission') return compactToolResult(toolName, input, await declineSubmission(prisma, context, input));
   if (toolName === 'commentSubmission') return compactToolResult(toolName, input, await commentSubmission(prisma, context, input));
   if (toolName === 'uploadAsset') return compactToolResult(toolName, input, await uploadAsset(prisma, context, input));
   if (toolName === 'updateAsset') return compactToolResult(toolName, input, await updateAsset(prisma, context, input));
+  if (toolName === 'deleteAsset') return compactToolResult(toolName, input, await deleteAsset(prisma, context, input));
   if (toolName === 'attachAsset') return compactToolResult(toolName, input, await attachAsset(prisma, context, input));
   if (toolName === 'detachAsset') return compactToolResult(toolName, input, await detachAsset(prisma, context, input));
   if (toolName === 'updateMemberRole') return compactToolResult(toolName, input, await updateMemberRole(prisma, context, input));
@@ -581,6 +732,7 @@ async function updateProjectDoc(
   context: ToolContext & { userId: string },
   input: Record<string, unknown>
 ) {
+  await new ProjectAccessRepository(prisma).assertPermission(context.userId, context.projectId, 'project:write');
   const docId = String(input.docId ?? '');
   if (!docId) throw new HttpError(400, 'docId is required');
   const doc = await prisma.projectDoc.findFirst({
@@ -588,7 +740,8 @@ async function updateProjectDoc(
     include: { bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } } }
   });
   if (!doc) throw new HttpError(404, 'Project document not found');
-  return prisma.$transaction(async (tx) => {
+  const content = contentMutationBody(bodyOf(doc.bodyWriting), input);
+  await prisma.$transaction(async (tx) => {
     await tx.projectDoc.update({
       where: { id: docId },
       data: {
@@ -597,27 +750,27 @@ async function updateProjectDoc(
         kind: typeof input.kind === 'string' ? toPrismaDocKind(input.kind) : undefined
       }
     });
-    if (isContentEdit(input.contentEdit)) {
-      const writing = await tx.writing.findUniqueOrThrow({
-        where: { id: doc.bodyWritingId },
-        include: { defaultBranch: true }
+    if (content !== undefined) {
+      await new WritingUseCase().updateDefaultBranch(tx, {
+        writingId: doc.bodyWritingId,
+        body: content,
+        authorId: context.userId,
+        message: 'Update project document from AI approval',
+        expectedHeadVersionId: expectedHeadVersionId(input)
       });
-      if (!writing.defaultBranch) throw new Error(`Writing ${doc.bodyWritingId} has no default branch`);
-      const body = applyContentEdit(bodyOf(doc.bodyWriting), input.contentEdit);
-      const version = await tx.writingVersion.create({
-        data: {
-          branchId: writing.defaultBranch.id,
-          parentVersionId: writing.defaultBranch.headVersionId,
-          body,
-          wordCount: countWords(body),
-          authorId: context.userId,
-          message: 'Update project document from AI approval'
-        }
-      });
-      await tx.writingBranch.update({ where: { id: writing.defaultBranch.id }, data: { headVersionId: version.id } });
     }
-    return tx.projectDoc.findUnique({ where: { id: docId }, select: { id: true, title: true, kind: true } });
   });
+  const updated = await prisma.projectDoc.findUniqueOrThrow({
+    where: { id: docId },
+    include: { bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } } }
+  });
+  return {
+    id: updated.id,
+    title: updated.title,
+    kind: updated.kind,
+    headVersionId: updated.bodyWriting.defaultBranch?.headVersionId ?? null,
+    wordCount: updated.bodyWriting.defaultBranch?.headVersion?.wordCount ?? 0
+  };
 }
 
 async function updateChapter(
@@ -628,21 +781,23 @@ async function updateChapter(
   const chapterId = String(input.chapterId ?? '');
   if (!chapterId) throw new HttpError(400, 'chapterId is required');
   let content: string | undefined;
-  if (isContentEdit(input.contentEdit)) {
+  if (hasContentMutation(input)) {
     const chapter = await prisma.chapter.findFirst({
       where: { id: chapterId, projectId: context.projectId, deletedAt: null },
       include: { bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } } }
     });
     if (!chapter) throw new HttpError(404, 'Chapter not found');
-    content = applyContentEdit(bodyOf(chapter.bodyWriting), input.contentEdit);
+    content = contentMutationBody(bodyOf(chapter.bodyWriting), input);
   }
   const data: UpdateChapterInput = {
     title: stringOrUndefined(input.title),
     summary: stringOrUndefined(input.summary),
     content,
     status: chapterStatusOrUndefined(input.status),
-    povCharacterId: stringOrUndefined(input.povCharacterId),
-    locationId: stringOrUndefined(input.locationId)
+    povCharacterId: nullableStringOrUndefined(input.povCharacterId),
+    locationId: nullableStringOrUndefined(input.locationId),
+    publishedAt: input.publishedAt === undefined ? undefined : nullableStringOrUndefined(input.publishedAt),
+    expectedHeadVersionId: expectedHeadVersionId(input)
   };
   return new UpdateChapterUseCase(prisma).execute(context.userId, context.projectId, chapterId, data);
 }
@@ -729,6 +884,20 @@ async function deleteFolder(prisma: PrismaClient, context: ToolContext & { userI
 }
 
 function compactToolResult(toolName: string, input: Record<string, unknown>, result: unknown) {
+  if (Array.isArray(result)) {
+    const ids = result.flatMap((item) => {
+      const id = stringField(resultRecord(item), 'id');
+      return id ? [id] : [];
+    });
+    return {
+      ok: true,
+      tool: toolName,
+      action: compactAction(toolName),
+      count: ids.length,
+      ids,
+      message: `${toolNoun(toolName)} reordered`
+    };
+  }
   const record = resultRecord(result);
   const id = stringField(record, 'id') ?? stringField(input, idInputKey(toolName));
   const label = labelForToolResult(toolName, input, record) ?? id;
@@ -738,6 +907,12 @@ function compactToolResult(toolName: string, input: Record<string, unknown>, res
     action: compactAction(toolName),
     id,
     label,
+    ...(record?.headVersionId !== undefined ? { headVersionId: record.headVersionId } : {}),
+    ...(typeof record?.revision === 'number' ? { revision: record.revision } : {}),
+    ...(typeof record?.wordCount === 'number'
+      ? { wordCount: record.wordCount }
+      : typeof record?.actualWordCount === 'number' ? { wordCount: record.actualWordCount } : {}),
+    ...(typeof record?.status === 'string' ? { status: record.status } : {}),
     message: compactMessage(toolName, label ?? id)
   };
 }
@@ -745,6 +920,7 @@ function compactToolResult(toolName: string, input: Record<string, unknown>, res
 function compactAction(toolName: string): string {
   if (toolName.startsWith('create')) return 'created';
   if (toolName.startsWith('update')) return 'updated';
+  if (toolName.startsWith('reorder')) return 'reordered';
   if (toolName.startsWith('delete') || toolName.startsWith('purge') || toolName.startsWith('remove')) return 'deleted';
   if (toolName.startsWith('restore')) return 'restored';
   if (toolName.startsWith('merge')) return 'merged';
@@ -778,17 +954,20 @@ function toolNoun(toolName: string): string {
     updateFolder: 'Folder',
     deleteFolder: 'Folder',
     createChapter: 'Chapter',
+    compileChapterFromScenes: 'Chapter',
     updateChapter: 'Chapter',
     deleteChapter: 'Chapter',
     restoreTrashChapter: 'Chapter',
     purgeTrashChapter: 'Chapter',
     createScene: 'Scene',
     updateScene: 'Scene',
+    reorderScenes: 'Scenes',
     deleteScene: 'Scene',
     createCharacter: 'Character',
     updateCharacter: 'Character',
     deleteCharacter: 'Character',
     createCharacterRelationship: 'Relationship',
+    updateCharacterRelationship: 'Relationship',
     deleteCharacterRelationship: 'Relationship',
     createLocation: 'Location',
     updateLocation: 'Location',
@@ -798,11 +977,13 @@ function toolNoun(toolName: string): string {
     updateObstacle: 'Obstacle',
     deleteObstacle: 'Obstacle',
     createSubmission: 'Submission',
+    updateSubmission: 'Submission',
     mergeSubmission: 'Submission',
     declineSubmission: 'Submission',
     commentSubmission: 'Submission comment',
     uploadAsset: 'Asset',
     updateAsset: 'Asset',
+    deleteAsset: 'Asset',
     attachAsset: 'Asset',
     detachAsset: 'Asset',
     updateMemberRole: 'Member role',
@@ -838,23 +1019,28 @@ function idInputKey(toolName: string): string {
     updateFolder: 'folderId',
     deleteFolder: 'folderId',
     updateChapter: 'chapterId',
+    compileChapterFromScenes: 'chapterId',
     deleteChapter: 'chapterId',
     restoreTrashChapter: 'chapterId',
     purgeTrashChapter: 'chapterId',
     updateScene: 'sceneId',
+    reorderScenes: 'chapterId',
     deleteScene: 'sceneId',
     updateCharacter: 'characterId',
     deleteCharacter: 'characterId',
     deleteCharacterRelationship: 'relationshipId',
+    updateCharacterRelationship: 'relationshipId',
     updateLocation: 'locationId',
     deleteLocation: 'locationId',
     updateObstacle: 'obstacleId',
     deleteObstacle: 'obstacleId',
     mergeSubmission: 'submissionId',
+    updateSubmission: 'submissionId',
     declineSubmission: 'submissionId',
     commentSubmission: 'submissionId',
     attachAsset: 'assetId',
     updateAsset: 'assetId',
+    deleteAsset: 'assetId',
     detachAsset: 'attachmentId',
     updateMemberRole: 'userId',
     removeMember: 'userId',
@@ -874,13 +1060,45 @@ function stringField(record: Record<string, unknown> | null | undefined, key: st
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
-function isContentEdit(value: unknown): value is { oldString: string; newString: string; replaceAll?: boolean } {
-  return (
-    Boolean(value) &&
-    typeof value === 'object' &&
-    typeof (value as { oldString?: unknown }).oldString === 'string' &&
-    typeof (value as { newString?: unknown }).newString === 'string'
-  );
+function hasContentMutation(input: Record<string, unknown>): boolean {
+  return input.content !== undefined || input.contentEdit !== undefined || input.contentEdits !== undefined;
+}
+
+function contentMutationBody(current: string, input: Record<string, unknown>): string | undefined {
+  if (typeof input.content === 'string') return input.content;
+  const edits = input.contentEdits !== undefined
+    ? input.contentEdits
+    : input.contentEdit !== undefined ? [input.contentEdit] : undefined;
+  if (!Array.isArray(edits)) return undefined;
+  return applyContentPatch(current, {
+    mode: 'edit',
+    edits: edits.map((edit) => {
+      if (!edit || typeof edit !== 'object' || Array.isArray(edit)) throw new HttpError(400, 'Each content edit must be an object');
+      const value = edit as Record<string, unknown>;
+      if (typeof value.oldString !== 'string' || typeof value.newString !== 'string') throw new HttpError(400, 'Each content edit requires oldString and newString');
+      return {
+        oldString: value.oldString,
+        newString: value.newString,
+        replaceAll: value.replaceAll === true
+      };
+    })
+  });
+}
+
+function expectedHeadVersionId(input: Record<string, unknown>): string | null | undefined {
+  if (!Object.prototype.hasOwnProperty.call(input, 'expectedHeadVersionId')) return undefined;
+  return expectedHeadVersionIdFrom(input, 'expectedHeadVersionId');
+}
+
+function expectedHeadVersionIdFrom(input: Record<string, unknown>, key: string): string | null {
+  return input[key] === null ? null : requiredString(input[key], key);
+}
+
+function numberRecord(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).flatMap(([key, item]) =>
+    typeof item === 'number' && Number.isInteger(item) && item >= 0 ? [[key, item]] : []
+  ));
 }
 
 function stringOrUndefined(value: unknown): string | undefined {
@@ -964,6 +1182,7 @@ async function purgeTrashChapter(prisma: PrismaClient, context: ToolContext & { 
 async function createLocation(prisma: PrismaClient, context: ToolContext & { userId: string }, input: Record<string, unknown>) {
   return new CreateLocationUseCase(prisma).execute(context.userId, context.projectId, {
     name: requiredString(input.name, 'name'),
+    aliases: stringArrayOrUndefined(input.aliases),
     type: stringOrUndefined(input.type),
     description: stringOrUndefined(input.description),
     atmosphere: stringOrUndefined(input.atmosphere),
@@ -975,6 +1194,7 @@ async function createLocation(prisma: PrismaClient, context: ToolContext & { use
 async function updateLocation(prisma: PrismaClient, context: ToolContext & { userId: string }, input: Record<string, unknown>) {
   return new UpdateLocationUseCase(prisma).execute(context.userId, context.projectId, requiredString(input.locationId, 'locationId'), {
     name: stringOrUndefined(input.name),
+    aliases: stringArrayOrUndefined(input.aliases),
     type: stringOrUndefined(input.type),
     imageAssetId: nullableStringOrUndefined(input.imageAssetId) as UpdateLocationInput['imageAssetId'],
     description: stringOrUndefined(input.description),
@@ -998,6 +1218,20 @@ async function createCharacterRelationship(prisma: PrismaClient, context: ToolCo
     type: requiredString(input.type, 'type'),
     note: stringOrUndefined(input.note)
   } satisfies CreateCharacterRelationshipInput);
+}
+
+async function updateCharacterRelationship(prisma: PrismaClient, context: ToolContext & { userId: string }, input: Record<string, unknown>) {
+  return new UpdateCharacterRelationshipUseCase(prisma).execute(
+    context.userId,
+    context.projectId,
+    requiredString(input.fromCharacterId, 'fromCharacterId'),
+    requiredString(input.relationshipId, 'relationshipId'),
+    {
+      toCharacterId: stringOrUndefined(input.toCharacterId),
+      type: stringOrUndefined(input.type),
+      note: input.note === undefined ? undefined : nullableStringOrUndefined(input.note) ?? null
+    } satisfies UpdateCharacterRelationshipInput
+  );
 }
 
 async function deleteCharacterRelationship(prisma: PrismaClient, context: ToolContext & { userId: string }, input: Record<string, unknown>) {
@@ -1055,8 +1289,30 @@ async function createSubmission(prisma: PrismaClient, context: ToolContext & { u
   } satisfies CreateSubmissionInput);
 }
 
+async function updateSubmission(prisma: PrismaClient, context: ToolContext & { userId: string }, input: Record<string, unknown>) {
+  const submissionId = requiredString(input.submissionId, 'submissionId');
+  const submission = await prisma.submission.findFirst({
+    where: { id: submissionId, projectId: context.projectId },
+    include: { branch: { include: { headVersion: true } } }
+  });
+  if (!submission) throw new HttpError(404, 'Submission not found');
+  const body = contentMutationBody(submission.branch.headVersion?.body ?? '', input);
+  return new UpdateSubmissionUseCase(prisma).execute(context.userId, context.projectId, submissionId, {
+    expectedHeadVersionId: expectedHeadVersionId(input) ?? null,
+    title: stringOrUndefined(input.title),
+    message: input.message === undefined ? undefined : nullableStringOrUndefined(input.message) ?? null,
+    body,
+    proposedTitle: stringOrUndefined(input.proposedTitle),
+    proposedNumber: input.proposedNumber === null ? null : numberOrUndefined(input.proposedNumber),
+    proposedActId: input.proposedActId === undefined ? undefined : nullableStringOrUndefined(input.proposedActId) ?? null
+  } satisfies UpdateSubmissionInput);
+}
+
 async function mergeSubmission(prisma: PrismaClient, context: ToolContext & { userId: string }, input: Record<string, unknown>) {
-  return new MergeSubmissionUseCase(prisma).execute(context.userId, requiredString(input.submissionId, 'submissionId'));
+  return new MergeSubmissionUseCase(prisma).execute(context.userId, requiredString(input.submissionId, 'submissionId'), {
+    expectedMainHeadVersionId: expectedHeadVersionIdFrom(input, 'expectedMainHeadVersionId'),
+    confirm: true
+  });
 }
 
 async function declineSubmission(prisma: PrismaClient, context: ToolContext & { userId: string }, input: Record<string, unknown>) {
@@ -1079,9 +1335,7 @@ async function updateScene(prisma: PrismaClient, context: ToolContext & { userId
   const sceneId = requiredString(input.sceneId, 'sceneId');
   const scene = await prisma.scene.findFirst({ where: { id: sceneId, chapter: { projectId: context.projectId, deletedAt: null } }, include: { bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } } } });
   if (!scene) throw new HttpError(404, 'Scene not found');
-  const content = isContentEdit(input.contentEdit)
-    ? applyContentEdit(bodyOf(scene.bodyWriting), input.contentEdit)
-    : typeof input.content === 'string' ? input.content : undefined;
+  const content = contentMutationBody(bodyOf(scene.bodyWriting), input);
   return new SceneUseCase(prisma).update(
     context.userId,
     context.projectId,
@@ -1095,17 +1349,34 @@ async function deleteScene(prisma: PrismaClient, context: ToolContext & { userId
   const sceneId = requiredString(input.sceneId, 'sceneId');
   const scene = await prisma.scene.findFirst({ where: { id: sceneId, chapter: { projectId: context.projectId, deletedAt: null } }, select: { chapterId: true } });
   if (!scene) throw new HttpError(404, 'Scene not found');
-  return new SceneUseCase(prisma).delete(context.userId, context.projectId, scene.chapterId, sceneId);
+  return new SceneUseCase(prisma).delete(context.userId, context.projectId, scene.chapterId, sceneId, {
+    expectedRevision: numberOrUndefined(input.expectedRevision)
+  });
+}
+
+async function reorderScenes(prisma: PrismaClient, context: ToolContext & { userId: string }, input: Record<string, unknown>) {
+  return new SceneUseCase(prisma).reorder(
+    context.userId,
+    context.projectId,
+    requiredString(input.chapterId, 'chapterId'),
+    {
+      sceneIds: stringArrayOrUndefined(input.sceneIds) ?? [],
+      expectedRevisions: numberRecord(input.expectedRevisions),
+      buildRunId: stringOrUndefined(input.buildRunId)
+    } satisfies ReorderScenesInput
+  );
 }
 
 function sceneMutationInput(input: Record<string, unknown>): CreateSceneInput {
   const fields = [
-    'status', 'storyDate', 'storyTime', 'estimatedWordCount', 'sceneFunction', 'goal', 'obstacle', 'stakes',
+    'status', 'storyDate', 'storyTime', 'estimatedWordCount', 'tension', 'sceneFunction', 'goal', 'obstacle', 'stakes',
     'conflict', 'turn', 'revelation', 'outcome', 'emotionalValueShift', 'characterPresentIds',
     'characterReferencedIds', 'plotThreadIds', 'setupPayoffIds', 'knowledgeDeltas', 'objectTransfers',
     'injuryStateChanges', 'worldRuleRefs', 'entryState', 'exitState', 'summary', 'writerNotes', 'aiNotes'
   ];
   const data: Record<string, unknown> = {
+    expectedRevision: input.expectedRevision,
+    expectedHeadVersionId: input.expectedHeadVersionId,
     title: input.title,
     order: input.order,
     povCharacterId: input.povCharacterId,
@@ -1147,6 +1418,10 @@ async function updateAsset(prisma: PrismaClient, context: ToolContext & { userId
     name: stringOrUndefined(input.name),
     folderId: input.folderId === undefined ? undefined : nullableStringOrUndefined(input.folderId)
   });
+}
+
+async function deleteAsset(prisma: PrismaClient, context: ToolContext & { userId: string }, input: Record<string, unknown>) {
+  return new ProjectAssetUseCase(prisma).delete(context.userId, context.projectId, requiredString(input.assetId, 'assetId'));
 }
 
 async function detachAsset(prisma: PrismaClient, context: ToolContext & { userId: string }, input: Record<string, unknown>) {

@@ -15,7 +15,7 @@ describe('OpenTales MCP capability surface', () => {
     const result = await request(auth('read-write'), 'tools/list');
     const tools = result.tools as Array<{
       name: string;
-      annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
+      annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; idempotentHint?: boolean };
     }>;
 
     expect(tools.length).toBeGreaterThan(100);
@@ -23,6 +23,13 @@ describe('OpenTales MCP capability surface', () => {
     expect(tools.find((tool) => tool.name === 'createChapter')?.annotations?.readOnlyHint).toBe(false);
     expect(tools.find((tool) => tool.name === 'deleteChapter')?.annotations?.destructiveHint).toBe(true);
     expect(tools.find((tool) => tool.name === 'rerunBuildTask')?.annotations?.readOnlyHint).toBe(false);
+    expect(tools.find((tool) => tool.name === 'applyStoryPatch')?.annotations?.idempotentHint).toBe(true);
+    expect(tools.find((tool) => tool.name === 'compileChapterFromScenes')?.annotations?.idempotentHint).toBe(true);
+    expect(tools.find((tool) => tool.name === 'invalidateBuildUnit')?.annotations?.destructiveHint).toBe(true);
+    expect(tools.find((tool) => tool.name === 'updateSubmission')?.annotations?.readOnlyHint).toBe(false);
+    expect(tools.find((tool) => tool.name === 'readBuildReview')?.annotations?.readOnlyHint).toBe(true);
+    expect(tools.find((tool) => tool.name === 'readBuildArtifact')?.annotations?.readOnlyHint).toBe(true);
+    expect(tools.find((tool) => tool.name === 'mergeBuildReview')?.annotations?.destructiveHint).toBe(true);
     expect(tools.some((tool) => tool.name === 'task')).toBe(false);
     expect(tools.some((tool) => tool.name === 'askUser')).toBe(false);
     expect(tools.some((tool) => tool.name === 'applyBuildUnitPatch')).toBe(false);
@@ -38,6 +45,9 @@ describe('OpenTales MCP capability surface', () => {
     expect(names).not.toContain('startNovelBuild');
     expect(names).not.toContain('rerunBuildTask');
     expect(names).not.toContain('commitCanonDelta');
+    expect(names).not.toContain('applyStoryPatch');
+    expect(names).not.toContain('updateSubmission');
+    expect(names).not.toContain('mergeBuildReview');
   });
 
   it('publishes workspace, agent, and skill prompts plus project resource templates', async () => {

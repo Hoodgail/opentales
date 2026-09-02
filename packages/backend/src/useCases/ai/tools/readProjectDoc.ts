@@ -7,7 +7,7 @@ import { bodyOf, readRangeInputSchema, readTextRange, type ToolContext } from '.
 export function readProjectDocTool(prisma: PrismaClient, context: ToolContext) {
   return tool({
     description:
-      'Read a project note, brainstorm, instruction, or reference doc. Use bounded line or offset ranges unless full text is required.',
+      'Read a project document plus its branch/head concurrency token. Before updateProjectDoc prose edits, copy headVersionId into expectedHeadVersionId.',
     inputSchema: readRangeInputSchema.extend({ docId: z.string() }),
     execute: async (input) => {
       const doc = await prisma.projectDoc.findFirst({
@@ -21,12 +21,17 @@ export function readProjectDocTool(prisma: PrismaClient, context: ToolContext) {
       const range = readTextRange(bodyOf(doc.bodyWriting), input);
       return {
         id: doc.id,
+        writingId: doc.bodyWritingId,
+        branchId: doc.bodyWriting.defaultBranch?.id ?? null,
+        headVersionId: doc.bodyWriting.defaultBranch?.headVersionId ?? null,
         folderId: doc.folderId,
         title: doc.title,
         path: doc.folder ? `${doc.folder.path}/${doc.title}` : doc.title,
         kind: doc.kind,
         range: range.range,
         content: range.content,
+        wordCount: doc.bodyWriting.defaultBranch?.headVersion?.wordCount ?? 0,
+        totalCharacters: bodyOf(doc.bodyWriting).length,
         updatedAt: doc.updatedAt.toISOString()
       };
     }

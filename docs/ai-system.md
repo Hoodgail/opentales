@@ -84,6 +84,8 @@ Hosted clients such as ChatGPT, Gemini, and Claude.ai connect through OAuth 2.1 
 
 The MCP adapter registers the same tool objects used by interactive OpenTales agents, so names, Zod schemas, bounded reads, mutation use cases, and permission checks do not drift. Skills, agent prompts, and author instruction docs are also available through MCP resources and prompt templates. Build lifecycle tools expose resume, bounded retry, and explicit failed-boundary rerun; `task`, `askUser`, and fenced worker-lease tools remain internal because the external host owns orchestration/user interaction and the durable worker owns persisted Novel Build task execution. Full setup and security behavior are documented in [`mcp.md`](mcp.md).
 
+The external story-writing harness also exposes optimistic prose tools. `readChapter`, `readScene`, `readProjectDoc`, `readSubmission`, and `readBuildUnit` return the current branch/head tokens. `updateChapter`, `updateScene`, `updateProjectDoc`, `updateSubmission`, and `updateBuildUnit` accept full replacement for empty bodies or exact-string edits. `applyStoryPatch` batches up to 50 canonical/proposal changes atomically with an idempotent receipt. Public build workspace tools cover isolated unit repair, compilation, comparison, review, and owner-controlled merge without exposing worker leases.
+
 ## Agent sessions
 
 The agent panel supports multiple chat sessions per project. The frontend loads the session list and the active session through the SDK:
@@ -216,12 +218,16 @@ Tools that require approval in Manual mode include:
 - `updateCharacter`
 - `createChapter`
 - `updateChapter`
+- `applyStoryPatch`
 - `createProjectDoc`
 - `updateProjectDoc`
 - `createFolder`
 - `updateFolder`
 - `deleteFolder`
 - `updateAsset`
+- `updateSubmission`
+- `reorderScenes`
+- Novel Build workspace mutations such as `updateBuildUnit`, `compileBuild`, and `mergeBuildReview`
 - `startNovelBuild`
 
 Folder and path mutations follow the active execution mode. A parent folder cannot contain duplicate child names across folders, docs, and foldered assets. Root docs and root folders appear in the file tree; root assets remain outside the tree unless moved into a folder.

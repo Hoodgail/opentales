@@ -64,7 +64,13 @@ const STORY_READ_TOOLS = new Set([
   'listBuildRuns',
   'getBuildState',
   'listBuildUnits',
-  'readBuildUnit'
+  'readBuildUnit',
+  'listBuildArtifacts',
+  'readBuildArtifact',
+  'readBuildCompilation',
+  'compareBuildManuscript',
+  'listBuildReviews',
+  'readBuildReview'
 ]);
 
 const DIAGNOSTIC_TOOLS = new Set(['runStoryLint', 'reportTaskResult']);

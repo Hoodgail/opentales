@@ -112,11 +112,28 @@ The server adapts the tool definitions in `packages/backend/src/useCases/ai/tool
 The following runtime-only capabilities are intentionally not remote workspace tools:
 
 - `task` and `askUser` depend on an OpenTales-managed interactive agent session. External hosts already own delegation and user interaction, so the server exposes agent prompts instead.
-- `applyBuildUnitPatch`, `compileBuildManuscript`, and `reportTaskResult` require a fenced durable-worker lease. Public agents use Novel Build creation, state, resume, retry, explicit boundary rerun, artifact, checkpoint, and monitoring tools while the backend worker owns persisted task execution.
+- `applyBuildUnitPatch`, `compileBuildManuscript`, and `reportTaskResult` require a fenced durable-worker lease. Public agents use the separate `updateBuildUnit` and `compileBuild` workspace operations, which apply project permissions and optimistic concurrency without impersonating a worker task.
 
 When a failed task has exhausted its retry budget, call `getBuildState` with `detail: "tasks"`, then call `rerunBuildTask` with that task's ID and the run's current revision. This explicitly invalidates transitive downstream output and resets the boundary's attempt budget. `resumeNovelBuild` intentionally refuses to bypass an exhausted failed boundary.
 
 Mutations called through a read/write key execute immediately on the server after any approval enforced by the MCP host. Tool annotations identify reads and destructive operations so compatible clients can apply local approval policy. The result must confirm a change before an agent claims it succeeded.
+
+### Story-writing harness
+
+External agents have a complete read/create/edit/remove path for canonical story entities, project documents, proposals, and isolated Novel Build manuscripts. Prose mutations use one consistent protocol:
+
+1. Read the target with `readChapter`, `readScene`, `readProjectDoc`, `readSubmission`, or `readBuildUnit`.
+2. Copy the returned `headVersionId`. Scenes and build units also return a numeric `revision`; build units additionally use the current build revision.
+3. Use a full `content` or `patch.mode="replace"` replacement to initialize or intentionally clear an empty body, or use exact `oldString`/`newString` edits for a bounded change. Ambiguous and missing matches fail without writing.
+4. On `409`, re-read the target and reconsider the edit. Never blindly retry with stale tokens.
+
+`applyStoryPatch` applies up to 50 chapter, scene, project-document, or open-submission prose changes atomically. It requires one idempotency key and every current concurrency token, returns compact new-head and word-delta receipts, and safely replays an identical retry. `updateSubmission` changes an existing open proposal in place, so continuity repairs do not require a duplicate submission or premature merge. `reorderScenes` uses a complete ordered ID list plus every current scene revision. `compileChapterFromScenes` deterministically joins revision-pinned canonical scenes into their chapter body, eliminating manual copy/concatenate steps.
+
+`mergeSubmission` requires `confirm=true` and the canonical chapter head from `readChapter` or `listChapters` (use `null` for a new-chapter proposal). A stale main head fails closed. If main advanced after the proposal was opened, the agent must read and reconcile that prose before explicitly confirming the newer head.
+
+The public Novel Build workspace tools are separate from worker-only lease tools. They cover authorization, pause/resume/cancel, replan/checkpoint branching, build-unit create/edit/invalidate/reorder, immutable compilation, main comparison, review creation, owner approve/merge/reject, and artifact unpinning. `updateBuildUnit` supports exact or full-body edits and can move a reviewed unit to `accepted`; `invalidateBuildUnit` removes it from active compilation while retaining history. Owner confirmation and frozen-review drift checks remain authoritative.
+
+Build artifact discovery is two-step and bounded: `listBuildArtifacts` returns paginated metadata without content, then `readBuildArtifact` returns one selected schema-versioned artifact with its bindings and links.
 
 ### Resources
 

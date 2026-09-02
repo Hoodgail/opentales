@@ -24,6 +24,7 @@ import { NovelBuildRepository, type NovelBuildTx } from '../../repositories/Nove
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
 import { LocalAssetStorage } from '../../repositories/AssetStorage.js';
 import { countWords } from '../../utils/wordCount.js';
+import { applyContentPatch } from '../../utils/contentPatch.js';
 import { WritingUseCase } from '../writings/WritingUseCase.js';
 import { toStoryArtifact, toBuildRun } from './novelBuildMapper.js';
 import { stableHash, STORY_SCHEMA_VERSION, validateArtifactContent } from './schemas.js';
@@ -208,6 +209,9 @@ export class BuildManuscriptUseCase {
       const run = fenced?.run ?? await this.builds.lockRun(tx, projectId, buildRunId);
       const replay = await this.builds.operationReplay<JsonObject>(tx, buildRunId, input.idempotencyKey, 'patch-build-unit', requestHash);
       if (replay) return;
+      if (input.body !== undefined && input.contentPatch !== undefined) {
+        throw new HttpError(400, 'body and contentPatch are mutually exclusive');
+      }
       assertBuildRevision(run.revision, input.expectedBuildRevision);
       const unit = await tx.buildManuscriptUnit.findFirst({
         where: { id: unitId, projectId, buildRunId, invalidatedAt: null },
@@ -221,19 +225,25 @@ export class BuildManuscriptUseCase {
         this.assertTaskUnitScope(task.executionPolicy, unit.key, unit.parentUnitId);
       }
       await tx.$queryRaw`SELECT id FROM "WritingBranch" WHERE id = ${unit.branchId} FOR UPDATE`;
-      const branch = await tx.writingBranch.findUniqueOrThrow({ where: { id: unit.branchId } });
+      const branch = await tx.writingBranch.findUniqueOrThrow({
+        where: { id: unit.branchId },
+        include: { headVersion: { select: { body: true } } }
+      });
       if (branch.headVersionId !== input.expectedHeadVersionId) throw new HttpError(409, 'Build unit branch head is stale', { expected: input.expectedHeadVersionId, actual: branch.headVersionId });
       validateTension(input.tension);
       let headVersionId = branch.headVersionId;
-      if (input.body !== undefined) {
-        validateBody(input.body);
+      const nextBody = input.contentPatch !== undefined
+        ? applyContentPatch(branch.headVersion?.body ?? '', input.contentPatch)
+        : input.body;
+      if (nextBody !== undefined) {
+        validateBody(nextBody);
         const version = await tx.writingVersion.create({
           data: {
             branchId: branch.id,
             sourceTaskId: fenced?.task.id ?? null,
             parentVersionId: branch.headVersionId,
-            body: input.body,
-            wordCount: countWords(input.body),
+            body: nextBody,
+            wordCount: countWords(nextBody),
             authorId: userId,
             message: input.message ? required(input.message, 'Version message', 1_000) : 'Update isolated Novel Build unit'
           }

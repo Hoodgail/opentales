@@ -160,7 +160,8 @@ export class ProjectDocUseCase {
           writingId: existing.bodyWritingId,
           body: input.content,
           authorId: userId,
-          message: 'Update project document'
+          message: 'Update project document',
+          expectedHeadVersionId: input.expectedHeadVersionId
         });
       }
     });

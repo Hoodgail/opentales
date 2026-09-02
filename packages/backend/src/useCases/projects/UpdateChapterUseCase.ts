@@ -64,7 +64,8 @@ export class UpdateChapterUseCase {
           writingId: chapter.bodyWritingId,
           body: input.content,
           authorId: userId,
-          message: 'Update chapter body'
+          message: 'Update chapter body',
+          expectedHeadVersionId: input.expectedHeadVersionId
         });
       }
     });

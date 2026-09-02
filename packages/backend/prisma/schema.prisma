@@ -179,6 +179,7 @@ enum SubmissionStatus {
 
 enum ActivityType {
   SUBMISSION_OPENED
+  SUBMISSION_UPDATED
   SUBMISSION_MERGED
   SUBMISSION_DECLINED
   COMMENT_ADDED
@@ -543,6 +544,7 @@ model Project {
   writingAnnotations     WritingAnnotationThread[]
   imports                ProjectImport[]
   renameRefactorReceipts RenameRefactorReceipt[]
+  storyPatchReceipts     StoryPatchReceipt[]
   mcpApiKeys             ProjectMcpApiKey[]
   mcpOAuthCodes          McpOAuthAuthorizationCode[]
   mcpOAuthTokens         McpOAuthToken[]
@@ -2246,6 +2248,21 @@ model RenameRefactorReceipt {
 
   @@unique([projectId, idempotencyKey])
   @@index([projectId, targetType, targetId])
+}
+
+model StoryPatchReceipt {
+  id             String   @id @default(cuid())
+  projectId      String
+  idempotencyKey String
+  operation      String
+  requestHash    String
+  response       Json
+  createdAt      DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, idempotencyKey])
+  @@index([projectId, createdAt])
 }
 
 model SnapshotOperationReceipt {

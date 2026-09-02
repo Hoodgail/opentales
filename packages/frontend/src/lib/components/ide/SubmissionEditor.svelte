@@ -83,6 +83,8 @@
     switch (type) {
       case 'submission-opened':
         return 'opened this submission';
+      case 'submission-updated':
+        return 'updated this submission';
       case 'submission-merged':
         return 'merged this submission';
       case 'submission-declined':

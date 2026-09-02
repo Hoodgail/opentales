@@ -10,6 +10,7 @@ export const projectSubmissionRoutes = Router();
 projectSubmissionRoutes.use(requireAuth);
 projectSubmissionRoutes.get('/:projectId/submissions', asyncHandler(controller.list));
 projectSubmissionRoutes.post('/:projectId/submissions', asyncHandler(controller.create));
+projectSubmissionRoutes.patch('/:projectId/submissions/:submissionId', asyncHandler(controller.update));
 
 // Submission-scoped: get / merge / decline / comment.
 export const submissionRoutes = Router();
