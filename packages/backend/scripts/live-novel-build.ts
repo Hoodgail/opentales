@@ -62,12 +62,9 @@ try {
       reason: 'Explicit live validation rerun after correcting the implementation; invalidate dependent outputs.'
     });
   }
-  // Explicit conservative validation accounting, not a claim about provider billing.
-  const price = { inputMicrosPerMillion: 10_000_000, outputMicrosPerMillion: 40_000_000, source: 'live validation accounting ceiling; not provider billing', version: '1' };
-  const modelPricing = { [model]: price, [existingSettings.model]: price };
   let completed = false;
   for (let sweep = 0; sweep < 500; sweep++) {
-    const count = await resumeRunnableBuilds(prisma, { buildRunIds: [buildRunId], maxTasksPerSweep: 1, modelPricing });
+    const count = await resumeRunnableBuilds(prisma, { buildRunIds: [buildRunId], maxTasksPerSweep: 1 });
     const run = await prisma.buildRun.findUniqueOrThrow({ where: { id: buildRunId } });
     const tasks = await prisma.buildTask.findMany({ where: { buildRunId }, orderBy: { createdAt: 'asc' }, select: { key: true, status: true, attempts: true, lastError: true } });
     console.log(JSON.stringify({ status: run.status, phase: run.currentPhase, done: tasks.filter(t => t.status === 'DONE').length, total: tasks.length, errors: tasks.filter(t => t.lastError).map(t => ({ key: t.key, error: t.lastError })), lastError: run.lastError }));

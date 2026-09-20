@@ -11,6 +11,7 @@ import {
   createSceneTaskTemplates,
   type TaskTemplate
 } from '../../novelBuild/schemas.js';
+import { ModelsDevPricingCache, loadModelPricing } from '../runtime/modelPricing.js';
 import type { BuildModelExecutor, BuildModelExecutorInput } from './NovelBuildWorker.js';
 
 process.env.DATABASE_URL ??= 'postgresql://opentales:opentales@127.0.0.1:5432/opentales_test';
@@ -488,6 +489,25 @@ describe('durable Novel Build execution contract', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('uses cached official pricing for aliased task reservations without static test rates', async () => {
+    const fetchFn = vi.fn(async () => new Response(JSON.stringify({ google: { models: {
+      'gemini-3.8-flash': { cost: { input: 0.75, output: 3.75 }, reasoning_options: [{ type: 'effort', values: ['high'] }] }
+    } } })));
+    const cache = new ModelsDevPricingCache({ fetchFn: fetchFn as typeof fetch });
+    const prisma = { projectAiSettings: { findUnique: vi.fn(async () => ({
+      model: 'gemini-3.8-flash-high', providerKind: 'OPENAI_COMPATIBLE'
+    })) } } as unknown as PrismaClient;
+    const worker = new NovelBuildWorker(prisma, { modelPricingLoader: () => loadModelPricing({ cache, configured: {} }) }) as any;
+    await worker.refreshModelPricing();
+    await worker.refreshModelPricing();
+    const task = {
+      ...PLANNING_TASK_TEMPLATES[0], qualityThreshold: null, acceptanceCriteria: {}, maxAttempts: 1,
+      executionPolicy: { maxInputTokens: 1000, maxOutputTokens: 500, modelMaxAttempts: 1 }
+    };
+    expect(await worker.taskReservation({ projectId: 'project' }, task)).toEqual({ tokens: 1500, costMicros: 2625 });
+    expect(fetchFn).toHaveBeenCalledOnce();
   });
 
   it('refreshes remote pricing and turns a resolved pricing pause into an explicit resume boundary', async () => {
