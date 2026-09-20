@@ -578,7 +578,7 @@ function location(id: string, name: string): DiagnosticLocationSnapshot {
   };
 }
 
-function artifact(
+export function artifact(
   overrides: Pick<StoryArtifact, 'id' | 'key' | 'title' | 'type' | 'content'> & Partial<StoryArtifact>
 ): StoryArtifact {
   const { id, key, title, type, content, ...rest } = overrides;

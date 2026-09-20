@@ -54,6 +54,15 @@
   }: Props = $props();
 
   let tab = $state<Tab>('task');
+  const revisionBudgetIteration = $derived.by(() => {
+    if (!task) return 0;
+    const policy = task.executionPolicy;
+    const value = policy && typeof policy === 'object' && !Array.isArray(policy)
+      ? policy.revisionIterationBaseline : undefined;
+    const baseline = typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= task.revisionIteration ? value : 0;
+    return task.revisionIteration - baseline;
+  });
+
   const tabs: Array<{ id: Tab; label: string }> = [
     { id: 'task', label: 'Contract' },
     { id: 'trace', label: 'Trace' },
@@ -131,7 +140,7 @@
         <dl class="divide-y divide-border/55 text-[11px]">
           <div class="grid grid-cols-[5.5rem_1fr] gap-2 py-2"><dt class="text-muted-foreground">Agent</dt><dd class="text-foreground">{task.assignedAgent}</dd></div>
           <div class="grid grid-cols-[5.5rem_1fr] gap-2 py-2"><dt class="text-muted-foreground">Attempts</dt><dd class="font-mono text-foreground">{task.attempts} / {task.maxAttempts}</dd></div>
-          <div class="grid grid-cols-[5.5rem_1fr] gap-2 py-2"><dt class="text-muted-foreground">Revision</dt><dd class="font-mono text-foreground">{task.revisionIteration} / {task.maxRevisionIterations}</dd></div>
+          <div class="grid grid-cols-[5.5rem_1fr] gap-2 py-2"><dt class="text-muted-foreground">Revision</dt><dd class="font-mono text-foreground">{revisionBudgetIteration} / {task.maxRevisionIterations}</dd></div>
           <div class="grid grid-cols-[5.5rem_1fr] gap-2 py-2"><dt class="text-muted-foreground">Quality gate</dt><dd class="font-mono text-foreground">{task.qualityThreshold ?? 'not set'}</dd></div>
           <div class="grid grid-cols-[5.5rem_1fr] gap-2 py-2"><dt class="text-muted-foreground">Reserved</dt><dd class="font-mono text-foreground">{compactNumber(task.reservedTokens)} tok · ${(task.reservedCostMicros / 1_000_000).toFixed(2)} USD</dd></div>
           {#if task.startedAt}<div class="grid grid-cols-[5.5rem_1fr] gap-2 py-2"><dt class="text-muted-foreground">Started</dt><dd class="text-foreground">{new Date(task.startedAt).toLocaleString()}</dd></div>{/if}

@@ -19,8 +19,8 @@ const trimmedString = (label: string, max = 20_000) =>
 const stringList = z.array(z.string().trim().min(1).max(2_000)).max(1_000);
 const referenceSchema = z
   .object({
-    type: trimmedString('Reference type', 100),
-    id: trimmedString('Reference id', 500),
+    type: trimmedString('Reference type', 100).describe('Entity or artifact kind, for example character, location, scene-plan, or plot-thread. Never a relationship label such as sibling.'),
+    id: trimmedString('Reference id', 500).describe('Copy an exact persisted identifier or stable content key from the input artifacts; never invent an opaque database ID.'),
     key: z.string().trim().min(1).max(500).optional(),
     label: z.string().trim().min(1).max(500).optional()
   })
@@ -88,7 +88,7 @@ const characterBibleSchema = z
     voice: z.string().max(10_000).optional(),
     knowledge: stringList,
     secrets: stringList,
-    relationships: z.array(referenceSchema).max(1_000)
+    relationships: z.array(referenceSchema.extend({ type: z.literal('character') })).max(1_000).describe('References to other characters. Put sibling, parent, friend, etc. in label; type must be character.')
   })
   .strict();
 
@@ -141,8 +141,8 @@ const beatSchema = z
     beatKey: trimmedString('Beat key', 500),
     title: trimmedString('Beat title', 1_000),
     function: trimmedString('Beat function', 5_000),
-    causeKeys: stringList,
-    consequenceKeys: stringList,
+    causeKeys: stringList.describe('Exact beatKey values of causal predecessor beats, never descriptions or backstory. Use [] when no beat causes this beat.'),
+    consequenceKeys: stringList.describe('Exact beatKey values of consequence beats, never prose. Use [] when no linked beat exists.'),
     threadRefs: z.array(referenceSchema).max(1_000),
     expectedPayoff: z.string().max(5_000).optional()
   })
@@ -193,8 +193,8 @@ const scenePlanSchema = z
     title: z.string().trim().max(1_000).optional(),
     povRef: referenceSchema.optional(),
     locationRef: referenceSchema.optional(),
-    storyDate: z.string().trim().min(1).max(500).optional(),
-    storyTime: z.string().trim().min(1).max(500).optional(),
+    storyDate: z.iso.date().optional().describe('Exact YYYY-MM-DD calendar date only. Omit when unknown; put relative labels such as final morning in entryState instead.'),
+    storyTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/).optional().describe('Exact 24-hour HH:MM or HH:MM:SS start time only, without AM/PM or ranges. Put durations in entryState.'),
     estimatedWordCount: z.number().int().min(0).max(1_000_000).optional(),
     function: trimmedString('Scene function', 5_000),
     goal: trimmedString('Scene goal', 5_000),
@@ -595,7 +595,7 @@ export function createSceneTaskTemplates(sceneKey: string, dependencyCheckpointK
     }),
     task('diagnostics', 'run-scene-diagnostics', [`${prefix}:canon`], 'critic', 70, {
       skillVersions: { 'novel-build': '1.1.0', 'novel-critic': '2.0.0', 'novel-continuity': '1.1.0' },
-      acceptanceCriteria: { deterministicValidationRequired: true },
+      acceptanceCriteria: { diagnosticEvidenceRequired: true },
       executionPolicy: { deterministic: true }
     }),
     task('critic', 'critique-scene', [`${prefix}:diagnostics`], 'critic', 60, {

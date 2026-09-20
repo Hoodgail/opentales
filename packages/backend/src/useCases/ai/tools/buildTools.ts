@@ -164,7 +164,7 @@ const rawTaskResultSchema = z.object({
   idempotencyKey: z.string().optional(),
   status: z.enum(['complete', 'blocked', 'failed']).optional(),
   decisions: z.array(z.unknown()).optional(),
-  artifactIds: z.array(z.string()).optional(),
+  artifactIds: z.array(z.string()).optional().describe('Only StoryArtifact IDs created by this task. Use [] for canon extraction or manuscript edits; put fact, state, event, loop, unit, and version IDs in evidence instead.'),
   evidence: z.array(z.unknown()).optional(),
   checks: z.record(z.string(), z.unknown()).optional(),
   quality: z.record(z.string(), z.unknown()).optional(),

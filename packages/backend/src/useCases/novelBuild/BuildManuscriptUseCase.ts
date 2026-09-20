@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Prisma, type PrismaClient, type Role } from '@prisma/client';
 import type {
+  BuildTaskLeaseInput,
   ApproveBuildReviewInput,
   BuildCompilation,
   BuildComparison,
@@ -827,14 +828,16 @@ export class BuildManuscriptUseCase {
     userId: string,
     projectId: string,
     buildRunId: string,
-    input: RegisterBuildExportInput
+    input: RegisterBuildExportInput,
+    lease?: BuildTaskLeaseInput
   ): Promise<StoryArtifact> {
     await this.access.assertPermission(userId, projectId, 'project:admin');
     validateIdempotency(input.idempotencyKey);
     if (!Array.isArray(input.outputs) || input.outputs.length < 1 || input.outputs.length > 20) throw new HttpError(400, 'At least one real export output is required');
     const requestHash = stableHash(input);
     const artifactId = await this.builds.transaction(async (tx) => {
-      const run = await this.builds.lockRun(tx, projectId, buildRunId);
+      const fenced = lease ? await this.builds.assertTaskLease(tx, projectId, buildRunId, lease) : null;
+      const run = fenced?.run ?? await this.builds.lockRun(tx, projectId, buildRunId);
       await this.assertVerifiedExportOutputs(tx, projectId, buildRunId, input.compilationId, input.outputs);
       const replay = await this.builds.operationReplay<JsonObject>(tx, buildRunId, input.idempotencyKey, 'register-build-export', requestHash);
       if (replay && typeof replay.artifactId === 'string') return replay.artifactId;
@@ -867,6 +870,7 @@ export class BuildManuscriptUseCase {
           projectId,
           buildRunId,
           type: 'EXPORT_MANIFEST',
+          taskId: fenced?.task.id ?? null,
           key,
           title: 'Export Manifest',
           version: (previous?.version ?? 0) + 1,

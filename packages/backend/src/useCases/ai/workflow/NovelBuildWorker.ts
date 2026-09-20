@@ -4,7 +4,8 @@ import { hasToolCall, stepCountIs, streamText, tool, type ToolSet } from 'ai';
 import { z } from 'zod';
 import type { JsonValue } from '@opentales/sdk';
 import type { BuildTaskLease } from '@opentales/sdk';
-import { NovelBuildUseCase } from '../../novelBuild/NovelBuildUseCase.js';
+import { ProjectExportUseCase } from '../../exportImport/ProjectExportUseCase.js';
+import { NovelBuildUseCase, revisionBudgetIteration } from '../../novelBuild/NovelBuildUseCase.js';
 import { StoryStateUseCase } from '../../novelBuild/StoryStateUseCase.js';
 import { BuildManuscriptUseCase } from '../../novelBuild/BuildManuscriptUseCase.js';
 import {
@@ -515,7 +516,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const candidateModels = uniqueStrings([...(modelId ? [modelId] : []), ...route.fallbacks]);
     const unknownModel = candidateModels.find((candidate) => !lookupExecutionModelPrice(this.modelPricing, settings?.providerKind, candidate));
     if (!candidateModels.length || unknownModel) return `Cost budget cannot safely authorize task ${task.key}: pricing is unknown for model ${unknownModel ?? modelId ?? '(unconfigured)'}. OpenTales refreshes models.dev automatically; AI_MODEL_PRICING_JSON is available as an explicit sourced/versioned override.`;
-    const judgeRequired = typeof jsonRecord(task.acceptanceCriteria).rubric === 'string' || task.qualityThreshold !== null;
+    const judgeRequired = typeof jsonRecord(task.acceptanceCriteria).rubric === 'string' || task.qualityThreshold !== null || allowsUnchangedReview(task);
     const judgeModelId = judgeRequired ? process.env.AI_JUDGE_MODEL?.trim() || modelId : null;
     if (judgeRequired && !lookupExecutionModelPrice(this.modelPricing, settings?.providerKind, judgeModelId)) return `Cost budget cannot safely authorize task ${task.key}: pricing is unknown for judge model ${judgeModelId ?? '(unconfigured)'}. OpenTales refreshes models.dev automatically; AI_MODEL_PRICING_JSON is available as an explicit sourced/versioned override.`;
     if (run.maxCostMicros === null) return null;
@@ -530,7 +531,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     if (deterministicTask(task)) return { tokens: 0, costMicros: 0 };
     const policy = jsonRecord(task.executionPolicy);
     const defaults = defaultTaskBudget(task);
-    const judgeRequired = typeof jsonRecord(task.acceptanceCriteria).rubric === 'string' || task.qualityThreshold !== null;
+    const judgeRequired = typeof jsonRecord(task.acceptanceCriteria).rubric === 'string' || task.qualityThreshold !== null || allowsUnchangedReview(task);
     const inputTokens = numeric(policy.maxInputTokens, defaults.maxInputTokens);
     const outputTokens = numeric(policy.maxOutputTokens, defaults.maxOutputTokens);
     const judgeInputTokens = judgeRequired ? numeric(policy.maxInputTokens, defaults.maxInputTokens) : 0;
@@ -568,7 +569,8 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const policy = jsonRecord(claimed.task.executionPolicy);
     const maxDurationMs = clamp(numeric(policy.maxDurationMs, 15 * 60_000), 1_000, 24 * 60 * 60_000);
     const durationTimer = setTimeout(() => controller.abort(new Error(`Task exceeded maxDurationMs=${maxDurationMs}`)), maxDurationMs);
-    durationTimer.unref?.();
+    // An awaited task owns this deadline. Keep standalone workers alive through
+    // provider backoff or an idle stream; idle background polling remains unref'd.
     let settle!: () => void;
     const settled = new Promise<void>((resolve) => { settle = resolve; });
     const unregister = registerBuildExecution(
@@ -593,6 +595,8 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       if (controller.signal.aborted) throw controller.signal.reason ?? new Error('Build task interrupted');
       await raceWithAbort(this.finalizeExecution(claimed, execution, controller.signal, stopHeartbeat), controller.signal);
     } catch (error) {
+      // Heartbeats advance task.revision; quiesce them before reading the failure CAS token.
+      await stopHeartbeat();
       await this.failOrRetry(claimed, error);
     } finally {
       await stopHeartbeat();
@@ -696,12 +700,14 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     } else if (claimed.task.type === 'run-chapter-diagnostics' || claimed.task.type === 'run-scene-diagnostics') {
       const policy = jsonRecord(claimed.task.executionPolicy);
       const lint = await runStoryLint(this.prisma, claimed.run.projectId, { buildRunId: claimed.run.id, chapterIds: stringArray(policy.chapterIds), userId: requiredUserId(claimed.run) });
+      const collectForRevision = collectsInitialSceneDiagnostics(claimed.task);
+      toolResults = [{ toolName: 'runStoryLint', output: { counts: lint.counts, issues: lint.issues.slice(0, 100) } }];
       result = {
-        status: lint.counts.error > 0 ? 'blocked' : 'complete',
+        status: lint.counts.error > 0 && !collectForRevision ? 'blocked' : 'complete',
         decisions: [],
         artifactIds: [],
         evidence: lint.issues.slice(0, 100).map((issue: { code: string; message: string; evidence: Array<{ id: string }> }) => ({ type: 'diagnostic', id: issue.evidence[0]?.id, summary: `${issue.code}: ${issue.message}` })),
-        checks: { deterministicValidationRequired: lint.counts.error === 0 },
+        checks: collectForRevision ? { diagnosticEvidenceRequired: true } : { deterministicValidationRequired: lint.counts.error === 0 },
         quality: { deterministic: lint.counts.error === 0 ? 1 : 0 },
         unresolvedQuestions: lint.counts.error ? [`${lint.counts.error} error diagnostic(s) require correction`] : []
       };
@@ -713,8 +719,29 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       result = { ...basicResult(true, 'checkpoint', `Checkpoint ${checkpointLabel(claimed.task)} is ready to commit atomically with task completion.`), evidence: [{ type: 'checkpoint', summary: checkpointLabel(claimed.task) }] };
       if (claimed.task.key === 'final-checkpoint') result.checks.final = true;
     } else if (claimed.task.type === 'export-preparation') {
+      const lease = {
+        taskId: claimed.task.id, workerId: this.workerId,
+        leaseToken: claimed.lease.leaseToken,
+        leaseGeneration: claimed.lease.leaseGeneration,
+        runGeneration: claimed.lease.runGeneration
+      };
+      await this.assertCurrentLease(claimed);
+      const run = await this.prisma.buildRun.findUniqueOrThrow({ where: { id: claimed.run.id } });
+      // Recompile after manuscript revisions, not from the earlier chapter checkpoints.
+      const compilation = await new BuildManuscriptUseCase(this.prisma).compile(requiredUserId(claimed.run), run.projectId, run.id, {
+        idempotencyKey: `worker-export-compile:${claimed.task.id}:${claimed.task.attempts}:${claimed.task.revisionIteration}`,
+        expectedBuildRevision: run.revision, lease
+      });
+      const exported = await new ProjectExportUseCase(this.prisma).create(requiredUserId(claimed.run), run.projectId, {
+        idempotencyKey: `worker-export:${claimed.task.id}:${claimed.task.attempts}:${claimed.task.revisionIteration}`,
+        format: 'text', preset: 'reading-copy',
+        target: { kind: 'build', buildRunId: run.id, compilationId: compilation.id },
+        options: { includeTitlePage: true, chapterNumbering: true }
+      }, undefined, lease);
+      if (exported.status !== 'ready') throw new Error(`Build export failed: ${exported.error ?? exported.status}`);
+      await this.assertCurrentLease(claimed);
       const exportManifest = await this.prisma.storyArtifact.findFirst({
-        where: { buildRunId: claimed.run.id, type: 'EXPORT_MANIFEST', status: { in: ['VALIDATED', 'ACCEPTED'] }, invalidatedAt: null, exportCompilations: { some: { buildRunId: claimed.run.id } } },
+        where: { buildRunId: claimed.run.id, type: 'EXPORT_MANIFEST', status: { in: ['VALIDATED', 'ACCEPTED'] }, invalidatedAt: null, exportCompilations: { some: { buildRunId: claimed.run.id, id: compilation.id } } },
         orderBy: { createdAt: 'desc' }
       });
       result = exportManifest
@@ -726,7 +753,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     } else if (claimed.task.type === 'compile-chapter-unit') {
       const run = await this.prisma.buildRun.findUniqueOrThrow({ where: { id: claimed.run.id } });
       const compilation = await new BuildManuscriptUseCase(this.prisma).compile(requiredUserId(claimed.run), claimed.run.projectId, claimed.run.id, {
-        idempotencyKey: `worker-compile:${claimed.task.id}:${claimed.task.attempts}`,
+        idempotencyKey: `worker-compile:${claimed.task.id}:${claimed.task.attempts}:${claimed.task.revisionIteration}`,
         expectedBuildRevision: run.revision,
         lease: {
           taskId: claimed.task.id,
@@ -911,6 +938,16 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const operations = Array.isArray(jsonRecord(input).operations)
       ? jsonRecord(input).operations as unknown[]
       : [];
+    const proposedBeats = operations.map(jsonRecord)
+      .filter(operation => operation.action === 'upsert' && operation.type === 'beat')
+      .map(operation => operation.content);
+    if (proposedBeats.length) {
+      const existing = await this.prisma.storyArtifact.findMany({
+        where: { buildRunId: claimed.run.id, type: 'BEAT', invalidatedAt: null, status: { in: ['DRAFT', 'VALIDATED', 'ACCEPTED'] } },
+        select: { content: true }
+      });
+      validateBeatReferences(proposedBeats, existing.map(artifact => String(jsonRecord(artifact.content).beatKey ?? '')), claimed.task.type === 'create-beat-shard');
+    }
     if (['create-scene-plans', 'create-scene-plan-shard'].includes(claimed.task.type)
       && jsonRecord(claimed.task.acceptanceCriteria).exactChapterSceneKeysRequired === true) {
       const policy = jsonRecord(claimed.task.executionPolicy);
@@ -1008,12 +1045,12 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const validation = await this.validateTaskResult(claimed, execution);
     const acceptance = jsonRecord(claimed.task.acceptanceCriteria);
     const rubric = typeof acceptance.rubric === 'string' ? acceptance.rubric : null;
-    const judge = rubric || claimed.task.qualityThreshold !== null
+    const judge = rubric || claimed.task.qualityThreshold !== null || (allowsUnchangedReview(claimed.task) && validation.passed)
       ? await this.runIndependentJudge(claimed, execution, validation, rubric ?? 'task-quality-v1', abortSignal)
       : null;
     const score = judge?.score ?? (validation.passed ? 1 : 0);
     const disposition = execution.result.status === 'complete'
-      ? evaluationDisposition(await this.contractFor(claimed), score, claimed.task.revisionIteration, validation.passed)
+      ? evaluationDisposition(await this.contractFor(claimed), score, revisionBudgetIteration(claimed.task), validation.passed)
       : execution.result.status === 'blocked' ? 'escalate' : 'revise';
     await this.storyState.appendEvaluation(requiredUserId(claimed.run), claimed.run.projectId, claimed.run.id, {
       taskId: claimed.task.id,
@@ -1038,7 +1075,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     if (claimed.task.type === 'finalization' && disposition === 'accept') {
       const run = await this.prisma.buildRun.findUniqueOrThrow({ where: { id: claimed.run.id } });
       const compilation = await new BuildManuscriptUseCase(this.prisma).compile(requiredUserId(claimed.run), claimed.run.projectId, claimed.run.id, {
-        idempotencyKey: `worker-final-compilation:${claimed.task.id}:${claimed.task.attempts}`,
+        idempotencyKey: `worker-final-compilation:${claimed.task.id}:${claimed.task.attempts}:${claimed.task.revisionIteration}`,
         expectedBuildRevision: run.revision,
         lease: {
           taskId: claimed.task.id,
@@ -1085,7 +1122,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     if (execution.result.status === 'blocked') {
       const reason = execution.result.unresolvedQuestions.join('\n') || validation.feedback || 'Build task reached a true external blocker';
       const failed = await this.builds.fail(requiredUserId(claimed.run), claimed.run.projectId, claimed.run.id, claimed.task.id, {
-        idempotencyKey: `worker-blocked:${claimed.task.id}:${claimed.task.attempts}`,
+        idempotencyKey: `worker-blocked:${claimed.task.id}:${claimed.task.attempts}:${claimed.task.revisionIteration}`,
         workerId: this.workerId,
         leaseToken: claimed.lease.leaseToken,
         leaseGeneration: claimed.lease.leaseGeneration,
@@ -1116,9 +1153,9 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       const revisionTask = graph
         .filter((task) => ancestorIds.has(task.id) && /revision|revis/i.test(task.type) && task.scopeUnitIds.some((unitId) => claimed.task.scopeUnitIds.includes(unitId)))
         .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0];
-      if (revisionTask && revisionTask.revisionIteration < revisionTask.maxRevisionIterations) {
+      if (revisionTask && revisionBudgetIteration(revisionTask) < revisionTask.maxRevisionIterations) {
         const failed = await this.builds.fail(requiredUserId(claimed.run), claimed.run.projectId, claimed.run.id, claimed.task.id, {
-          idempotencyKey: `quality-gate-revise:${claimed.task.id}:${claimed.task.attempts}`,
+          idempotencyKey: `quality-gate-revise:${claimed.task.id}:${claimed.task.attempts}:${claimed.task.revisionIteration}`,
           workerId: this.workerId,
           leaseToken: claimed.lease.leaseToken,
           leaseGeneration: claimed.lease.leaseGeneration,
@@ -1131,7 +1168,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
           idempotencyKey: `quality-gate-rerun-revision:${revisionTask.id}:${revisionTask.revisionIteration}`,
           expectedRevision: failed.buildRun.revision,
           reason: 'Independent regrade requested bounded revision.'
-        }, { waitForAbort: false });
+        }, { waitForAbort: false, consumeRevisionIteration: true });
         return;
       }
       await this.markTaskFailed(claimed, validation.feedback || judge?.result.feedback || 'Independent quality gate failed after exhausting the bounded revision budget');
@@ -1159,7 +1196,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       return;
     }
 
-    if (disposition === 'revise' && claimed.task.revisionIteration < claimed.task.maxRevisionIterations) {
+    if (disposition === 'revise' && revisionBudgetIteration(claimed.task) < claimed.task.maxRevisionIterations) {
       await this.builds.fail(requiredUserId(claimed.run), claimed.run.projectId, claimed.run.id, claimed.task.id, {
         idempotencyKey: `worker-revise:${claimed.task.id}:${claimed.task.attempts}:${claimed.task.revisionIteration}`,
         workerId: this.workerId,
@@ -1483,6 +1520,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         phase: claimed.task.phase,
         attempt: claimed.task.attempts,
         revisionIteration: claimed.task.revisionIteration,
+        revisionBudgetIteration: revisionBudgetIteration(claimed.task),
         baselineUnitHeads: claimed.baselineUnitHeads,
         targetStoryOrder: targetSceneUnit ? (targetSceneUnit.parentUnit?.order ?? 0) * 10_000 + targetSceneUnit.order : null,
         unitContinuationBatches: scopedContinuationRole ? chunkStrings(claimed.scopeUnitIds, 12) : [],
@@ -1626,7 +1664,17 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       });
       checks.allChapterCheckpointsRequired = chapterCheckpoints.length > 0 && chapterCheckpoints.every((task) => task.status === 'DONE');
     }
-    if (acceptance.deterministicValidationRequired === true) {
+    if (collectsInitialSceneDiagnostics(claimed.task)) {
+      checks.diagnosticEvidenceRequired = deterministicTask(claimed.task)
+        && execution.toolResults.some(value => {
+          const receipt = jsonRecord(value);
+          const counts = jsonRecord(jsonRecord(receipt.output).counts);
+          return receipt.toolName === 'runStoryLint' && typeof counts.error === 'number';
+        });
+      // Existing persisted task graphs used the older criterion name for this stage.
+      if (acceptance.deterministicValidationRequired === true) checks.deterministicValidationRequired = checks.diagnosticEvidenceRequired;
+    }
+    if (acceptance.deterministicValidationRequired === true && !collectsInitialSceneDiagnostics(claimed.task)) {
       if (['aggregate-beats', 'aggregate-scene-plans'].includes(claimed.task.type)) {
         checks.deterministicValidationRequired = await this.validatePlanningAggregateCandidate(claimed);
       } else {
@@ -1658,13 +1706,18 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         && units.length > 0
         && units.every((unit) => Boolean(unit.branch.headVersionId && unit.branch.headVersion?.body?.trim() && unit.branch.headVersionId !== claimed.baselineUnitHeads[unit.id]));
     }
-    const runtimeRevisionHeadChangeRequired = roleForTask(claimed.task.assignedAgent) === 'reviser' && claimed.task.scopeUnitIds.length > 0;
-    if (acceptance.boundedRevision === true || acceptance.finalManuscriptRequired === true || runtimeRevisionHeadChangeRequired) {
+    const runtimeRevisionEvidenceRequired = roleForTask(claimed.task.assignedAgent) === 'reviser' && claimed.task.scopeUnitIds.length > 0;
+    if (acceptance.boundedRevision === true || acceptance.finalManuscriptRequired === true || runtimeRevisionEvidenceRequired) {
       const units = claimed.task.scopeUnitIds.length
-        ? await this.prisma.buildManuscriptUnit.findMany({ where: { id: { in: claimed.task.scopeUnitIds }, buildRunId: claimed.run.id, invalidatedAt: null }, include: { branch: true } })
+        ? await this.prisma.buildManuscriptUnit.findMany({ where: { id: { in: claimed.task.scopeUnitIds }, buildRunId: claimed.run.id, invalidatedAt: null }, include: { branch: { include: { headVersion: true } } } })
         : [];
-      const checkName = acceptance.finalManuscriptRequired === true ? 'finalManuscriptRequired' : acceptance.boundedRevision === true ? 'boundedRevision' : 'runtimeRevisionHeadChanged';
-      checks[checkName] = units.length > 0 && units.every((unit) => unit.branch.headVersionId && unit.branch.headVersionId !== claimed.baselineUnitHeads[unit.id]);
+      const allowReviewedUnchanged = allowsUnchangedReview(claimed.task);
+      const checkName = acceptance.finalManuscriptRequired === true ? 'finalManuscriptRequired' : acceptance.boundedRevision === true ? 'boundedRevision' : allowReviewedUnchanged ? 'runtimeRevisionReviewedOrChanged' : 'runtimeRevisionHeadChanged';
+      checks[checkName] = units.length === claimed.task.scopeUnitIds.length && units.length > 0 && units.every((unit) =>
+        unit.branch.headVersionId && unit.branch.headVersion?.body?.trim() && (
+          unit.branch.headVersionId !== claimed.baselineUnitHeads[unit.id]
+          || (allowReviewedUnchanged && hasCurrentUnitRead(unit.id, unit.branch.headVersionId, execution.toolCalls, execution.toolResults))
+        ));
     }
     if (acceptance.exportManifestRequired === true) {
       checks.exportManifestRequired = Boolean(await this.prisma.buildCompilation.findFirst({
@@ -1685,7 +1738,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const passed = result.status === 'complete'
       && requiredTypes.every((type) => checks[`artifact:${type}`] === true)
       && requiredKeys.every((key) => checks[`artifact-key:${key}`] === true)
-      && (!runtimeRevisionHeadChangeRequired || Object.entries(checks).some(([name, value]) => ['finalManuscriptRequired', 'boundedRevision', 'runtimeRevisionHeadChanged'].includes(name) && value))
+      && (!runtimeRevisionEvidenceRequired || Object.entries(checks).some(([name, value]) => ['finalManuscriptRequired', 'boundedRevision', 'runtimeRevisionHeadChanged', 'runtimeRevisionReviewedOrChanged'].includes(name) && value))
       && (!runtimeCriticEvidenceRequired || checks.runtimeCriticEvidenceRequired === true)
       && !Object.entries(checks).some(([name, value]) => name.startsWith('writing-binding:') && value === false)
       && !Object.entries(checks).some(([name, value]) => name.startsWith('artifact-count:') && value === false)
@@ -1711,6 +1764,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       select: { key: true, content: true }
     });
     if (expected !== null && artifacts.length !== expected) return false;
+    if (claimed.task.type === 'aggregate-beats') validateBeatReferences(artifacts.map(artifact => artifact.content), []);
     const contentKey = claimed.task.type === 'aggregate-beats' ? 'beatKey' : 'sceneKey';
     const keys = artifacts.map((artifact) => jsonRecord(artifact.content)[contentKey]);
     return keys.every((key): key is string => typeof key === 'string' && key.length > 0) && new Set(keys).size === keys.length;
@@ -1813,9 +1867,9 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         trace.model,
         !trace.price || pessimisticTokenDelta > 0 || (failure.mayHaveUnreportedUsage && costMicros === claimed.task.reservedCostMicros)
       ),
-      toolCalls: [],
-      toolResults: [],
-      outputs: {},
+      toolCalls: jsonSafe(jsonRecord(error).workerToolCalls ?? []) as JsonValue,
+      toolResults: jsonSafe(jsonRecord(error).workerToolResults ?? []) as JsonValue,
+      outputs: jsonSafe({ text: jsonRecord(error).workerOutputText ?? '' }) as JsonValue,
       validatorResults: {},
       inputTokens,
       outputTokens,
@@ -1894,6 +1948,13 @@ function isNewerSemver(candidate: string, current: string): boolean {
   return false;
 }
 
+function collectsInitialSceneDiagnostics(task: BuildTask): boolean {
+  return task.type === 'run-scene-diagnostics' && (
+    jsonRecord(task.acceptanceCriteria).diagnosticEvidenceRequired === true
+    || (task.key.startsWith('scene:') && task.key.endsWith(':diagnostics'))
+  );
+}
+
 function deterministicTask(task: BuildTask): boolean {
   const policy = jsonRecord(task.executionPolicy);
   return policy.deterministic === true || ['checkpoint', 'drafting-complete-barrier', 'export-preparation', 'assemble-chapter-context', 'assemble-scene-context', 'run-chapter-diagnostics', 'run-scene-diagnostics'].includes(task.type);
@@ -1963,8 +2024,21 @@ function roleForTask(assignedAgent: string): RuntimeRole {
   return 'creator';
 }
 
+export function validateBeatReferences(proposed: unknown[], existingKeys: string[], allowForwardShardReferences = false): void {
+  const beats = proposed.map(jsonRecord);
+  const keys = new Set([...existingKeys, ...beats.map(beat => String(beat.beatKey ?? ''))]);
+  for (const beat of beats) {
+    for (const linked of [...stringArray(beat.causeKeys), ...stringArray(beat.consequenceKeys)]) {
+      if (!keys.has(linked) && !(allowForwardShardReferences && /^[^\s]{1,500}$/u.test(linked))) throw new Error(
+        `Beat '${String(beat.beatKey)}' references missing beat '${linked}'. causeKeys and consequenceKeys must contain exact beatKey values from existing beats or this batch, not prose. Put backstory in function and use [] for no linked beat. Submit linked new beats together.`
+      );
+    }
+  }
+}
+
 export function objectiveForTask(task: BuildTask, buildObjective: string, manifestValue: Prisma.JsonValue): string {
   const manifest = jsonRecord(manifestValue);
+  const target = jsonRecord(manifest.target);
   const requiredTypes = stringArray(jsonRecord(task.acceptanceCriteria).requiredArtifactTypes);
   const cardinality = (Array.isArray(manifest.artifactSpecs) ? manifest.artifactSpecs : [])
     .map(jsonRecord)
@@ -1976,12 +2050,27 @@ export function objectiveForTask(task: BuildTask, buildObjective: string, manife
     });
   return [
     `Complete durable task ${task.key} (${task.type}) for this build objective: ${buildObjective}.`,
+    typeof target.targetWordCount === 'number'
+      ? `Whole-manuscript length target: ${target.targetWordCount} words; minimum ${target.minWordCount ?? 'unspecified'}, maximum ${target.maxWordCount ?? 'unspecified'}. These counts apply to all scenes combined, not each scene. Reviser tasks must compress or expand the saved prose toward this target while preserving the causal ending.`
+      : '',
+    roleForTask(task.assignedAgent ?? '') === 'critic' && task.type !== 'quality-gate'
+      ? 'This is a diagnostic review, followed by a reviser. Complete the review with specific evidence and actionable findings even when the manuscript needs editing; score its quality honestly. Do not report blocked merely because edits or length reduction are needed downstream. deterministicValidationRequired checks runStoryLint errors at this stage; final manuscript length is enforced at finalization, after editing. Only a genuine missing input or external blocker prevents completing the review.'
+      : '',
+    ['copy-edit', 'finalization'].includes(task.type)
+      ? 'Inspect every assigned unit with readBuildUnit. Persist needed corrections, but do not manufacture edits to already-correct prose: unchanged nonempty units can pass with verified reads of their current head versions. Completion claims without those tool receipts do not count.'
+      : '',
     cardinality.length
       ? `Manifest artifact cardinality is authoritative and overrides conflicting suggestions in input artifacts: ${cardinality.join(', ')}.`
       : '',
     requiredTypes.length
       ? 'Persist every required structured artifact with status VALIDATED using scoped tools before reporting its ID.'
-      : 'This task requires no artifact output. Report observable checks and evaluation evidence directly.',
+      : 'This task requires no artifact output: report artifactIds as []. Canon fact/state/event/loop IDs and manuscript unit/version IDs belong in evidence, never artifactIds. Report observable checks and evaluation evidence directly.',
+    ['create-beats', 'create-beat-shard'].includes(task.type)
+      ? 'causeKeys and consequenceKeys contain only exact beatKey values, never prose, names, or historical events. Use [] for absent links and describe backstory in function. Submit connected new beats in one batch. Sharded tasks may use stable single-token keys for later shards; all references must resolve when the beat corpus is complete.'
+      : '',
+    task.type === 'extract-scene-canon'
+      ? 'Read the assigned build unit and copy exact IDs: sourceUnitId and scene references use unit.id; chapter references use unit.parentUnitId; artifact references use unit.planArtifactId, never writingId or branchId. Keys in metadata are not database IDs. On a rejected reference, correct that exact field rather than guessing IDs or dropping all provenance. Query current canon before committing. A subject/predicate pair is one property with one value at a time: use specific predicates (water-level, electrical-condition), never generic has_condition/has_fact for unrelated facts. On re-extraction reuse the exact keys already sourced to this scene, not keys from earlier scenes that merely mention the same entity. Do not create competing keys or move an earlier scene state to the current scene. Entity stateKey is also a single property: use specific keys such as knows-relay-mechanism and knows-shared-loss, never generic knowledge for independent beliefs. Avoid redundant narrative inventory summaries under possession; use specific item properties when a durable state is needed. Validity intervals are inclusive: if a new state starts at order N, the earlier state must end at N-1, not N. Preserve earlier state intervals and model changes with non-overlapping validity intervals. Read diagnostics and resolve canon conflicts before reporting.'
+      : '',
     task.type === 'create-finale-plan'
       ? 'Set mainThreadKey to the main plot-thread content.threadKey; the build validator also accepts that plot-thread artifact\'s exact stable key.'
       : '',
@@ -1989,7 +2078,7 @@ export function objectiveForTask(task: BuildTask, buildObjective: string, manife
       ? 'Use exactly the chapter briefs\' declared sceneKeys. Preserve each declared chapterKey and set ordinal to its 1-based position within that chapter; never redistribute scenes or use a book-global ordinal.'
       : '',
     requiredTypes.length
-      ? 'Every typed reference must use an exact stable id or key from a persisted input artifact or a sibling output; do not invent namespaced aliases such as character:name, thread:name, setup:name, or location:name.'
+      ? 'Reference type is the entity kind (character, location, scene-plan, etc.), never a relationship such as sibling; put relationship meaning in label. Every typed reference must use an exact stable id or key from a persisted input artifact or a sibling output; do not invent namespaced aliases such as character:name, thread:name, setup:name, or location:name.'
       : '',
     'Report only observable decisions, artifact IDs, validator evidence, checks, and quality scores.'
   ].filter(Boolean).join(' ');
@@ -2052,6 +2141,24 @@ function basicResult(passed: boolean, check: string, summary: string): WorkerRes
 function compactToolCall(value: unknown): Record<string, unknown> {
   const record = jsonRecord(value);
   return { toolCallId: record.toolCallId, toolName: record.toolName, input: observableValue(record.input) };
+}
+
+function allowsUnchangedReview(task: Pick<BuildTask, 'type'>): boolean {
+  return ['copy-edit', 'finalization'].includes(task.type);
+}
+
+export function hasCurrentUnitRead(unitId: string, headVersionId: string, calls: unknown[], results: unknown[]): boolean {
+  return calls.some(value => {
+    const call = jsonRecord(value);
+    if (call.toolName !== 'readBuildUnit' || typeof call.toolCallId !== 'string' || jsonRecord(call.input).unitId !== unitId) return false;
+    return results.some(value => {
+      const receipt = jsonRecord(value);
+      const output = jsonRecord(receipt.output);
+      return receipt.toolName === 'readBuildUnit' && receipt.toolCallId === call.toolCallId
+        && output.id === unitId && output.headVersionId === headVersionId
+        && typeof output.body === 'string' && output.body.trim().length > 0;
+    });
+  });
 }
 
 function compactToolResult(value: unknown): Record<string, unknown> {
@@ -2165,13 +2272,14 @@ function isReservationConflict(error: unknown): boolean {
   return record.status === 409 && /insufficient unreserved (token|cost) budget/i.test(record.message ?? '');
 }
 
-function guardWorkerTools(
+export function guardWorkerTools(
   tools: ToolSet,
   maxToolCalls: number,
   abortSignal: AbortSignal,
   assertLease: () => Promise<void>
 ): ToolSet {
   let calls = 0;
+  const reportReserve = tools.reportTaskResult ? (maxToolCalls >= 8 ? 2 : 1) : 0;
   return Object.fromEntries(Object.entries(tools).map(([name, toolDefinition]) => {
     const definition = toolDefinition as typeof toolDefinition & { execute?: (...args: unknown[]) => unknown };
     if (!definition.execute) return [name, definition];
@@ -2181,8 +2289,11 @@ function guardWorkerTools(
       execute: async (...args: unknown[]) => {
         if (abortSignal.aborted) throw abortSignal.reason ?? new Error('Build task interrupted');
         await assertLease();
+        if (calls >= maxToolCalls) throw new Error(`Task exceeded maxToolCalls=${maxToolCalls}`);
+        if (name !== 'reportTaskResult' && calls >= maxToolCalls - reportReserve) {
+          throw new Error(`Work-tool budget exhausted; ${reportReserve} call(s) are reserved for reportTaskResult within maxToolCalls=${maxToolCalls}. Report the persisted result now, using evidence for unresolved issues.`);
+        }
         calls += 1;
-        if (calls > maxToolCalls) throw new Error(`Task exceeded maxToolCalls=${maxToolCalls}`);
         const result = await execute(...args);
         await assertLease();
         if (abortSignal.aborted) throw abortSignal.reason ?? new Error('Build task interrupted');
@@ -2190,6 +2301,17 @@ function guardWorkerTools(
       }
     }];
   })) as ToolSet;
+}
+
+/** A rejected report is tool feedback, not completion; let the model repair it. */
+export function hasSuccessfulTaskReport({ steps }: { steps: Array<{ toolResults?: unknown[] }> }): boolean {
+  return steps.some(step => (step.toolResults ?? []).some(value => {
+    const result = jsonRecord(value);
+    const output = jsonRecord(result.output);
+    return result.toolName === 'reportTaskResult'
+      && output.ok === true
+      && workerResultSchema.safeParse(output.observableResult).success;
+  }));
 }
 
 async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<BuildModelExecutorOutput> {
@@ -2212,7 +2334,7 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
         system: input.system,
         prompt: input.prompt,
         tools: input.tools,
-        stopWhen: [hasToolCall('reportTaskResult'), stepCountIs(input.stepLimit)],
+        stopWhen: [hasSuccessfulTaskReport, stepCountIs(input.stepLimit)],
         abortSignal: input.abortSignal,
         maxOutputTokens: input.contract.budget.maxOutputTokens,
         providerOptions: providerOptionsForAiModel(
@@ -2265,7 +2387,12 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
           text
         );
       } catch (error) {
-        if (error && typeof error === 'object') Object.assign(error, { providerUsageComplete: true });
+        if (error && typeof error === 'object') Object.assign(error, {
+          providerUsageComplete: true,
+          workerToolCalls: steps.flatMap(step => step.toolCalls ?? []).map(compactToolCall),
+          workerToolResults: steps.flatMap(step => step.toolResults ?? []).map(compactToolResult),
+          workerOutputText: boundedText(text, 6_000)
+        });
         throw error;
       }
       return {

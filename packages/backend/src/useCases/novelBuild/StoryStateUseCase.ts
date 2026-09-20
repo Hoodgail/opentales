@@ -493,7 +493,7 @@ export class StoryStateUseCase {
       this.prisma.project.findUniqueOrThrow({ where: { id: projectId }, include: getProjectInclude() }),
       this.prisma.buildRun.findUniqueOrThrow({ where: { id: buildRunId } }),
       this.prisma.buildManuscriptUnit.findMany({
-        where: { projectId, buildRunId, invalidatedAt: null },
+        where: { projectId, buildRunId, invalidatedAt: null, OR: [{ planArtifactId: null }, { planArtifact: { is: { invalidatedAt: null, status: { in: ['DRAFT', 'VALIDATED', 'ACCEPTED'] } } } }] },
         orderBy: [{ kind: 'asc' }, { containerKey: 'asc' }, { order: 'asc' }],
         include: { branch: { include: { headVersion: true } } }
       })
@@ -974,7 +974,11 @@ export class StoryStateUseCase {
       const content = artifact.content as JsonObject;
       if (artifact.type === 'CHAPTER_BRIEF') briefs.add(typeof content.chapterKey === 'string' ? content.chapterKey : artifact.key);
       if (artifact.type === 'SCENE_PLAN') scenes.add(typeof content.sceneKey === 'string' ? content.sceneKey : artifact.key);
-      if (artifact.type === 'CHARACTER_BIBLE') characters.add(typeof content.characterKey === 'string' ? content.characterKey : artifact.key);
+      if (artifact.type === 'CHARACTER_BIBLE') {
+        for (const key of [artifact.id, artifact.key, content.characterKey, content.name, ...stringArray(content.aliases)]) {
+          if (typeof key === 'string') characters.add(key);
+        }
+      }
     }
     for (const artifact of artifacts) {
       const content = artifact.content as JsonObject;
@@ -985,10 +989,12 @@ export class StoryStateUseCase {
       // Act architecture is produced before chapter briefs, so its declared chapter
       // keys are forward references. The planning quality gate validates that the
       // eventual brief set matches these declarations exactly and atomically.
-      if (artifact.type === 'RELATIONSHIP_GRAPH') {
+      // Dossiers can name characters produced by later batches/shards. Downstream
+      // artifacts must use the completed character corpus, including exact artifact IDs.
+      if (artifact.type !== 'CHARACTER_BIBLE') {
         for (const ref of collectReferences(content)) if (ref.type === 'character' && !characters.has(ref.id) && !characters.has(ref.key ?? '')) {
           const exists = await tx.character.findFirst({ where: { id: ref.id, projectId }, select: { id: true } });
-          if (!exists) throw new HttpError(409, `Relationship graph references missing character '${ref.id}'`);
+          if (!exists) throw new HttpError(409, `Artifact '${artifact.key}' references missing character '${ref.id}'. Copy an exact character-bible id or characterKey.`);
         }
       }
     }
@@ -1296,20 +1302,20 @@ export class StoryStateUseCase {
   }
 
   private async assertStateSources(tx: NovelBuildTx, projectId: string, buildRunId: string, value: { sourceArtifactId?: string | null; sourceChapterId?: string | null; sourceSceneId?: string | null }) {
-    if (value.sourceArtifactId) await this.assertRecord(tx.storyArtifact.findFirst({ where: { id: value.sourceArtifactId, projectId, buildRunId } }), 'Source artifact does not belong to this build');
+    if (value.sourceArtifactId) await this.assertRecord(tx.storyArtifact.findFirst({ where: { id: value.sourceArtifactId, projectId, buildRunId } }), `sourceArtifactId '${value.sourceArtifactId.slice(0, 120)}' does not belong to this build; copy an exact StoryArtifact id or unit.planArtifactId, not a writing/unit id`);
     if (value.sourceChapterId) {
       const [chapter, unit] = await Promise.all([
         tx.chapter.findFirst({ where: { id: value.sourceChapterId, projectId, deletedAt: null }, select: { id: true } }),
         tx.buildManuscriptUnit.findFirst({ where: { id: value.sourceChapterId, projectId, buildRunId, kind: 'CHAPTER', invalidatedAt: null }, select: { id: true } })
       ]);
-      if (!chapter && !unit) throw new HttpError(400, 'Source chapter does not belong to this project/build');
+      if (!chapter && !unit) throw new HttpError(400, `sourceChapterId '${value.sourceChapterId.slice(0, 120)}' does not belong to this project/build; copy the chapter unit id (scene.parentUnitId), not chapterKey`);
     }
     if (value.sourceSceneId) {
       const [scene, unit] = await Promise.all([
         tx.scene.findFirst({ where: { id: value.sourceSceneId, chapter: { projectId, deletedAt: null } }, select: { id: true } }),
         tx.buildManuscriptUnit.findFirst({ where: { id: value.sourceSceneId, projectId, buildRunId, kind: 'SCENE', invalidatedAt: null }, select: { id: true } })
       ]);
-      if (!scene && !unit) throw new HttpError(400, 'Source scene does not belong to this project/build');
+      if (!scene && !unit) throw new HttpError(400, `sourceSceneId '${value.sourceSceneId.slice(0, 120)}' does not belong to this project/build; copy an exact scene unit.id`);
     }
   }
 

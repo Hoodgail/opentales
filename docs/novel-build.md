@@ -124,7 +124,9 @@ OpenTales generates and validates:
 - Markdown bundle, plain text, and sanitized HTML;
 - a structured OpenTales project archive.
 
-Exports may target main or a compiled build. They are private authenticated assets with checksums, sizes, format metadata, branch-head provenance, regeneration/deletion history, and secure downloads. The Novel Build final gate accepts only a `READY` project export whose stored bytes, checksum, compilation, and branch heads match its Export Manifest.
+Exports may target main or a compiled build. They are private authenticated assets with checksums, sizes, format metadata, branch-head provenance, regeneration/deletion history, and secure downloads. The worker automatically recompiles the final revised manuscript and generates a plain-text reading-copy export before the final checkpoint. It no longer requires a separate manual export to finish. Export-manifest registration is fenced by the active task lease; a paused or superseded worker cannot register its output. Other formats remain available through Publish.
+
+The Novel Build final gate accepts only a `READY` project export whose stored bytes, checksum, compilation, and branch heads match its Export Manifest.
 
 Imports support DOCX, Markdown, text, HTML, and project archives. Preview runs before apply and reports chapter mapping and conflicts. Applying is explicit and transactional. HTML is sanitized; ZIP paths, compressed/uncompressed sizes, file counts, MIME type, and project ownership are validated.
 
@@ -182,3 +184,22 @@ pnpm --dir packages/backend eval:model
 ```
 
 The command writes a machine-readable report with means, thresholds, and variance; it is not required for credential-free CI.
+
+### Complete live-provider validation
+
+Use a migrated disposable database and configure an OpenAI-compatible endpoint:
+
+```bash
+export DATABASE_URL='postgresql://.../opentales_test'
+export JWT_SECRET='local-validation-secret'
+export LIVE_API_KEY='...'
+export LIVE_BASE_URL='https://your-provider.example/v1'
+export LIVE_MODEL='your-model'
+pnpm --dir packages/backend eval:novel-build
+```
+
+The command creates an isolated test project, runs the actual worker and provider through a two-chapter, three-scene story, and writes its run ID, task report, manuscript, verified export, and verification summary to `LIVE_OUTPUT_DIR` (default `/tmp/opentales-live-result`). It exits unsuccessfully for incomplete/paused builds, empty scenes, out-of-range prose, unfinished tasks, or a mismatched export checksum. Set `LIVE_BUILD_ID` to inspect or continue the same fixture run; the selected `LIVE_MODEL` is applied to that fixture project on resume. This does not bypass paused tasks or quality gates. To explicitly repair a failed boundary after changing the implementation, also set `LIVE_RERUN_TASK` to its task key; the normal rerun API invalidates dependent outputs before regenerating them. Credentials are read from the environment and encrypted in project settings.
+
+For explicit test-budget changes, set `LIVE_MAX_TOKENS` (default 5,000,000). On an existing run, this calls the normal authorization endpoint with the existing scope and unchanged cost cap before continuing; it does not mark tasks complete.
+
+The runner uses explicit conservative accounting rates of $10/$40 per million input/output tokens for test budget enforcement. These are test accounting ceilings, not verified provider prices or a billing estimate. Normal application pricing remains unchanged. Run PostgreSQL-backed CI as well: embedded database validation does not prove production concurrency behavior.
