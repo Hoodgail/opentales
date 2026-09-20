@@ -17,7 +17,7 @@ process.env.JWT_SECRET ??= 'integration-test-secret-not-for-production';
 const exportAssetRoot = databaseUrl ? await mkdtemp(path.join(os.tmpdir(), 'opentales-worker-exports-')) : null;
 if (exportAssetRoot) process.env.ASSETS_DIR = exportAssetRoot;
 const { resumeRunnableBuilds } = await import('./NovelBuildWorker.js');
-const { NovelBuildUseCase } = await import('../../novelBuild/NovelBuildUseCase.js');
+const { NovelBuildUseCase, revisionBudgetIteration } = await import('../../novelBuild/NovelBuildUseCase.js');
 const { BuildManuscriptUseCase } = await import('../../novelBuild/BuildManuscriptUseCase.js');
 const { StoryStateUseCase } = await import('../../novelBuild/StoryStateUseCase.js');
 const { storyIntelligenceTools } = await import('../tools/storyIntelligence.js');
@@ -145,30 +145,10 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
       });
     }
     run = await prisma.buildRun.findUniqueOrThrow({ where: { id: buildRunId } });
-    const draftingFailures = await prisma.buildTask.findMany({ where: { buildRunId, status: 'FAILED' }, select: { key: true, lastError: true } });
-    const draftUnitsAtPause = await prisma.buildManuscriptUnit.findMany({ where: { buildRunId }, include: { branch: { include: { headVersion: true } } } });
-    expect(run.status, `${run.lastError ?? ''}\n${draftingFailures.map((task) => `${task.key}: ${task.lastError ?? ''}`).join('\n')}\n${draftUnitsAtPause.map((unit) => `${unit.key}:${unit.branch.headVersion?.wordCount ?? 0}`).join(', ')}`).toBe('PAUSED');
-    const nonDone = await prisma.buildTask.findMany({ where: { buildRunId, status: { not: 'DONE' } }, select: { key: true, status: true, lastError: true } });
-    const diagnosticResult = await new StoryStateUseCase(prisma).diagnostics(userId, projectId, buildRunId);
-    const blockerReason = run.lastError ?? nonDone.find((task) => task.key === 'export-preparation')?.lastError ?? '';
-    expect(blockerReason, `phase=${run.currentPhase}\n${diagnosticResult.diagnostics.map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`).join('\n')}\n${nonDone.map((task) => `${task.key} [${task.status}]: ${task.lastError ?? ''}`).join('\n')}`).toContain('export');
-
-    const compilation = await prisma.buildCompilation.findFirstOrThrow({ where: { buildRunId }, orderBy: { createdAt: 'desc' } });
-    const generatedExport = await new ProjectExportUseCase(prisma).create(userId, projectId, {
-      idempotencyKey: `generate-export:${suffix}`,
-      format: 'text',
-      preset: 'reading-copy',
-      target: { kind: 'build', buildRunId, compilationId: compilation.id },
-      options: { includeTitlePage: true, chapterNumbering: true }
-    });
-    expect(generatedExport.status).toBe('ready');
-    expect(generatedExport.assetId).toBeTruthy();
-    generatedExportIds.push(generatedExport.id);
-    run = await prisma.buildRun.findUniqueOrThrow({ where: { id: buildRunId } });
-    await builds.resume(userId, projectId, buildRunId, { idempotencyKey: `resume-export:${suffix}`, expectedRevision: run.revision });
-    await resumeRunnableBuilds(prisma, { workerId: `integration-final:${suffix}`, maxTasksPerSweep: 50, modelExecutor: executor, judgeExecutor, buildRunIds: [buildRunId], modelPricing: fixturePricing });
-
-    run = await prisma.buildRun.findUniqueOrThrow({ where: { id: buildRunId } });
+    // Completion must include real export generation with no external repair step.
+    const exports = await prisma.projectExport.findMany({ where: { buildRunId, status: 'READY' } });
+    expect(exports.length).toBeGreaterThan(0);
+    generatedExportIds.push(...exports.map(item => item.id));
     const tasks = await prisma.buildTask.findMany({ where: { buildRunId } });
     const failedDetails = tasks.filter((task) => task.status === 'FAILED').map((task) => `${task.key}: ${task.lastError}`).join('\n');
     expect(run.status, `${run.lastError ?? ''}\n${failedDetails}`).toBe('COMPLETED');
@@ -495,6 +475,29 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
     expect((await prisma.buildTask.findUniqueOrThrow({ where: { id: lineFixture.task.id } })).status).toBe('FAILED');
   });
 
+  it('accepts unchanged copy-edited prose only after a real current-head read and independent evaluation', async () => {
+    for (const reviewed of [true, false]) {
+      const fixture = await createIsolatedSceneRun(prisma, projectId, userId, `${suffix}-copy-reviewed-${reviewed}`, {
+        taskType: 'copy-edit', assignedAgent: 'reviser', acceptanceCriteria: {},
+        skillVersions: { 'novel-build': '1.1.0', 'novel-copy-edit': '1.0.0' }, maxAttempts: 1, maxRevisionIterations: 0
+      });
+      await resumeRunnableBuilds(prisma, {
+        workerId: `copy-reviewed:${reviewed}`, buildRunIds: [fixture.run.id], maxTasksPerSweep: 1, modelPricing: fixturePricing,
+        judgeExecutor: deterministicJudgeExecutor(),
+        modelExecutor: async input => {
+          const output = workerSuccess(100, 25);
+          if (!reviewed) return output;
+          const args = { buildRunId: fixture.run.id, unitId: fixture.sceneUnit.id };
+          const receipt = await invokeWorkerTool(input, 'readBuildUnit', args);
+          return { ...output, toolCalls: [{ toolName: 'readBuildUnit', toolCallId: 'copy-read', input: args }], toolResults: [{ toolName: 'readBuildUnit', toolCallId: 'copy-read', output: receipt }] };
+        }
+      });
+      expect((await prisma.buildTask.findUniqueOrThrow({ where: { id: fixture.task.id } })).status).toBe(reviewed ? 'DONE' : 'FAILED');
+      expect((await prisma.writingBranch.findUniqueOrThrow({ where: { id: fixture.sceneUnit.branchId } })).headVersionId).toBe(fixture.sceneUnit.branch.headVersionId);
+      if (reviewed) expect(await prisma.buildEvaluationResult.count({ where: { taskId: fixture.task.id, kind: 'MODEL', passed: true } })).toBe(1);
+    }
+  });
+
   it('pins exact skill provenance and rejects same-version override content changes before another attempt', async () => {
     const fixture = await createIsolatedSceneRun(prisma, projectId, userId, `${suffix}-skill-pin`, { maxAttempts: 2 });
     await resumeRunnableBuilds(prisma, {
@@ -681,6 +684,90 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
     expect(await prisma.canonFact.count({ where: { buildRunId: canonFixture.run.id, isCurrent: true, invalidatedAt: null } })).toBe(0);
     expect(await prisma.canonFact.count({ where: { buildRunId: canonFixture.run.id, status: 'INVALIDATED' } })).toBe(1);
   });
+
+  it('resets explicit restart allowances while preserving monotonic IDs and bounded automatic revisions', async () => {
+    const fixture = await createIsolatedSceneRun(prisma, projectId, userId, `${suffix}-revision-baseline`, { taskType: 'revise-scene-unit', maxRevisionIterations: 1 });
+    await prisma.buildTask.update({ where: { id: fixture.task.id }, data: { revisionIteration: 5 } });
+    const builds = new NovelBuildUseCase(prisma);
+    const rerun = async (key: string, automatic = false) => {
+      const run = await prisma.buildRun.findUniqueOrThrow({ where: { id: fixture.run.id } });
+      await builds.rerun(userId, projectId, run.id, fixture.task.id, { idempotencyKey: key, expectedRevision: run.revision }, { consumeRevisionIteration: automatic });
+      return prisma.buildTask.findUniqueOrThrow({ where: { id: fixture.task.id } });
+    };
+    const restarted = await rerun('owner-restart');
+    expect(restarted.revisionIteration).toBe(6);
+    expect(revisionBudgetIteration(restarted)).toBe(0);
+    const automatic = await rerun('bounded-regrade', true);
+    expect(automatic.revisionIteration).toBe(7);
+    expect(revisionBudgetIteration(automatic)).toBe(1);
+    await expect(rerun('exhausted-regrade', true)).rejects.toMatchObject({ status: 409 });
+    const explicit = await rerun('another-owner-restart');
+    expect(explicit.revisionIteration).toBe(8);
+    expect(revisionBudgetIteration(explicit)).toBe(0);
+    expect(explicit.maxRevisionIterations).toBe(1);
+  }, 15_000);
+
+  it('reruns an ancestor while fencing a running descendant before reblocking it', async () => {
+    const fixture = await createIsolatedSceneRun(prisma, projectId, userId, `${suffix}-active-rerun`);
+    const parent = await prisma.buildTask.create({ data: {
+      buildRunId: fixture.run.id, key: 'ancestor', type: 'checkpoint', phase: 'drafting', status: 'DONE',
+      assignedAgent: 'orchestrator', skillVersions: {}, acceptanceCriteria: {}, executionPolicy: {}
+    } });
+    await prisma.buildTask.update({ where: { id: fixture.task.id }, data: { dependencyIds: [parent.id] } });
+    const builds = new NovelBuildUseCase(prisma);
+    const claimed = await builds.claim(userId, projectId, fixture.run.id, { idempotencyKey: 'claim-active-descendant', workerId: 'old-worker', leaseMs: 60_000 });
+    expect(claimed?.task.id).toBe(fixture.task.id);
+    await builds.rerun(userId, projectId, fixture.run.id, parent.id, { idempotencyKey: 'rerun-active-ancestor', expectedRevision: claimed!.buildRun.revision, reason: 'Repair ancestor output' });
+    const reset = await prisma.buildTask.findUniqueOrThrow({ where: { id: fixture.task.id } });
+    expect(reset.status).toBe('BLOCKED');
+    expect(reset.leaseToken).toBeNull();
+    expect(reset.leaseGeneration).toBeGreaterThan(claimed!.lease!.leaseGeneration);
+    await expect(builds.heartbeat(userId, projectId, fixture.run.id, fixture.task.id, {
+      idempotencyKey: 'stale-worker-heartbeat', workerId: 'old-worker', expectedRevision: claimed!.task.revision,
+      leaseToken: claimed!.lease!.leaseToken, leaseGeneration: claimed!.lease!.leaseGeneration, runGeneration: claimed!.lease!.runGeneration
+    })).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('excludes units tied to invalidated plans from replanning diagnostics', async () => {
+    const fixture = await createIsolatedSceneRun(prisma, projectId, userId, `${suffix}-obsolete-plan`);
+    const plan = await prisma.storyArtifact.create({ data: {
+      projectId, buildRunId: fixture.run.id, type: 'SCENE_PLAN', key: 'obsolete-plan', title: 'Obsolete',
+      schemaVersion: 'story-ir-v1', status: 'INVALIDATED', invalidatedAt: new Date(), contentHash: 'obsolete', content: {}
+    } });
+    await prisma.buildManuscriptUnit.update({ where: { id: fixture.sceneUnit.id }, data: { planArtifactId: plan.id, storyTime: 'invalid-clock' } });
+    const diagnostics = await new StoryStateUseCase(prisma).diagnostics(userId, projectId, fixture.run.id);
+    expect(diagnostics.diagnostics.filter(item => item.code === 'invalid-story-time')).toEqual([]);
+  });
+
+  it('collects initial scene errors for revision but blocks the post-revision diagnostic gate', async () => {
+    for (const stage of ['initial', 'legacy-initial', 'final']) {
+      const collect = stage !== 'final';
+      const fixture = await createIsolatedSceneRun(prisma, projectId, userId, `${suffix}-diagnostic-${stage}`, {
+        taskType: 'run-scene-diagnostics', assignedAgent: 'critic',
+        acceptanceCriteria: stage === 'initial' ? { diagnosticEvidenceRequired: true } : { deterministicValidationRequired: true }
+      });
+      if (stage === 'legacy-initial') await prisma.buildTask.update({ where: { id: fixture.task.id }, data: { key: 'scene:fixture:diagnostics' } });
+      await prisma.buildManuscriptUnit.update({ where: { id: fixture.sceneUnit.id }, data: { storyTime: 'invalid-clock' } });
+      await resumeRunnableBuilds(prisma, { workerId: `diagnostic:${collect}`, buildRunIds: [fixture.run.id], maxTasksPerSweep: 1, modelPricing: fixturePricing });
+      const task = await prisma.buildTask.findUniqueOrThrow({ where: { id: fixture.task.id } });
+      expect(task.status, task.lastError ?? 'no recorded error').toBe(collect ? 'DONE' : 'READY');
+      const trace = await prisma.buildTrace.findFirstOrThrow({ where: { taskId: task.id } });
+      expect(JSON.stringify(trace.toolResults)).toContain('invalid-story-time');
+      if (!collect) {
+        const paused = await prisma.buildRun.findUniqueOrThrow({ where: { id: fixture.run.id } });
+        expect(paused.status).toBe('PAUSED');
+        await prisma.buildManuscriptUnit.update({ where: { id: fixture.sceneUnit.id }, data: { storyDate: 'invalid-date' } });
+        await new NovelBuildUseCase(prisma).rerun(userId, projectId, fixture.run.id, task.id, {
+          idempotencyKey: `diagnostic-rerun:${fixture.run.id}`, expectedRevision: paused.revision
+        });
+        await resumeRunnableBuilds(prisma, { workerId: 'diagnostic:rerun', buildRunIds: [fixture.run.id], maxTasksPerSweep: 1, modelPricing: fixturePricing });
+        const rerun = await prisma.buildRun.findUniqueOrThrow({ where: { id: fixture.run.id } });
+        expect(rerun.status).toBe('PAUSED');
+        expect(rerun.lastError).toContain('2 error diagnostic(s)');
+        expect((await prisma.buildTask.findUniqueOrThrow({ where: { id: task.id } })).lastError).not.toContain('idempotency');
+      }
+    }
+  }, 15_000);
 
   it('rejects a forged artifact type and a scene canon delta without assigned-unit provenance', async () => {
     const forged = await createBudgetRun(prisma, projectId, userId, `${suffix}-forged`, 'priced/model', 1_000_000);

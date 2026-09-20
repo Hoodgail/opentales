@@ -20,11 +20,34 @@ export class CreateChapterUseCase {
     this.access = new ProjectAccessRepository(prisma);
   }
 
-  async execute(
+  async execute(userId: string, projectId: string, input: CreateChapterInput): Promise<ManuscriptProject> {
+    await this.create(userId, projectId, input);
+    return reloadManuscript(this.prisma, projectId);
+  }
+
+  async executeWithReceipt(userId: string, projectId: string, input: CreateChapterInput) {
+    const id = await this.create(userId, projectId, input);
+    const chapter = await this.prisma.chapter.findUniqueOrThrow({
+      where: { id },
+      select: {
+        id: true, title: true, number: true, bodyWritingId: true,
+        bodyWriting: { select: { defaultBranch: { select: { id: true, headVersionId: true, headVersion: { select: { wordCount: true } } } } } }
+      }
+    });
+    return {
+      id: chapter.id, title: chapter.title, number: chapter.number,
+      writingId: chapter.bodyWritingId,
+      branchId: chapter.bodyWriting.defaultBranch?.id ?? null,
+      headVersionId: chapter.bodyWriting.defaultBranch?.headVersionId ?? null,
+      wordCount: chapter.bodyWriting.defaultBranch?.headVersion?.wordCount ?? 0
+    };
+  }
+
+  private async create(
     userId: string,
     projectId: string,
     input: CreateChapterInput
-  ): Promise<ManuscriptProject> {
+  ): Promise<string> {
     await this.access.assertProjectAccess(userId, projectId);
 
     const title = input.title?.trim();
@@ -32,7 +55,7 @@ export class CreateChapterUseCase {
       throw new HttpError(400, 'Chapter title is required');
     }
 
-    await this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx) => {
       if (input.actId) {
         const act = await tx.act.findFirst({
           where: { id: input.actId, projectId },
@@ -84,7 +107,7 @@ export class CreateChapterUseCase {
         authorId: userId
       });
 
-      await tx.chapter.create({
+      const chapter = await tx.chapter.create({
         data: {
           projectId,
           actId: input.actId ?? null,
@@ -98,8 +121,7 @@ export class CreateChapterUseCase {
           order: nextOrder
         }
       });
+      return chapter.id;
     });
-
-    return reloadManuscript(this.prisma, projectId);
   }
 }

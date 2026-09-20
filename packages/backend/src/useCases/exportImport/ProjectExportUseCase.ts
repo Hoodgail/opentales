@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient, type ProjectExport as PrismaProjectExport } from '@prisma/client';
 import type {
+  BuildTaskLeaseInput,
   CreateProjectExportInput,
   JsonValue,
   ProjectExport,
@@ -67,7 +68,7 @@ export class ProjectExportUseCase {
     return rows.map(toProjectExport);
   }
 
-  async create(userId: string, projectId: string, rawInput: CreateProjectExportInput, regeneratedFromId?: string): Promise<ProjectExport> {
+  async create(userId: string, projectId: string, rawInput: CreateProjectExportInput, regeneratedFromId?: string, lease?: BuildTaskLeaseInput): Promise<ProjectExport> {
     await this.access.assertPermission(userId, projectId, 'project:write');
     let input: z.infer<typeof createSchema>;
     try { input = createSchema.parse(rawInput); }
@@ -145,7 +146,7 @@ export class ProjectExportUseCase {
         }
       });
       if (snapshot.target === 'build' && snapshot.buildRunId && snapshot.compilationId) {
-        const manifest = await this.registerVerifiedBuildOutputs(userId, projectId, snapshot.buildRunId, snapshot.compilationId, row.id);
+        const manifest = await this.registerVerifiedBuildOutputs(userId, projectId, snapshot.buildRunId, snapshot.compilationId, row.id, lease);
         row = await this.prisma.projectExport.update({
           where: { id: row.id },
           data: { provenance: json({ ...provenance, exportManifestArtifactId: manifest.id }) }
@@ -246,7 +247,7 @@ export class ProjectExportUseCase {
     return generateProjectArchive(archive.payload, archive.assetFiles);
   }
 
-  private async registerVerifiedBuildOutputs(userId: string, projectId: string, buildRunId: string, compilationId: string, currentExportId: string) {
+  private async registerVerifiedBuildOutputs(userId: string, projectId: string, buildRunId: string, compilationId: string, currentExportId: string, lease?: BuildTaskLeaseInput) {
     const ready = await this.prisma.projectExport.findMany({
       where: { projectId, buildRunId, compilationId, status: 'READY', assetId: { not: null }, deletedAt: null },
       orderBy: { generatedAt: 'desc' }
@@ -267,7 +268,7 @@ export class ProjectExportUseCase {
       expectedBuildRevision: run.revision,
       compilationId,
       outputs
-    });
+    }, lease);
   }
 
   private async persistPrivateAsset(userId: string, projectId: string, filename: string, mimeType: string, buffer: Buffer, checksum: string) {

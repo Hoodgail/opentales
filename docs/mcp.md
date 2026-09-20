@@ -120,6 +120,8 @@ Mutations called through a read/write key execute immediately on the server afte
 
 ### Story-writing harness
 
+`createChapter` stores prose in `content`; `summary` is metadata, and omitting `content` intentionally creates an empty chapter. Unknown fields such as `body` are rejected instead of silently discarded. Chapter writes return compact receipts containing the chapter ID, word count, and new head token, even for large manuscripts. Verify written prose with `readChapter` and its word count.
+
 External agents have a complete read/create/edit/remove path for canonical story entities, project documents, proposals, and isolated Novel Build manuscripts. Prose mutations use one consistent protocol:
 
 1. Read the target with `readChapter`, `readScene`, `readProjectDoc`, `readSubmission`, or `readBuildUnit`.

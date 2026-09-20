@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   makeCleanDiagnosticsFixture,
   entityState,
+  artifact,
   makeFalsePositiveDiagnosticsFixture,
   makeTruePositiveDiagnosticsFixture
 } from './__fixtures__/storyDiagnosticsFixtures.js';
@@ -15,6 +16,35 @@ import {
 describe('StoryDiagnosticsEngine', () => {
   it('returns no diagnostics for a coherent, conservatively annotated snapshot', () => {
     expect(runStoryDiagnostics(makeCleanDiagnosticsFixture())).toEqual([]);
+  });
+
+  it('recognizes isolated character-bible references without publishing canonical characters', () => {
+    const input = makeCleanDiagnosticsFixture();
+    input.characters = [];
+    input.artifacts = ['mara', 'elias'].map(name => artifact({ id: `bible-${name}`, key: `character-${name}`, title: name, type: 'character-bible', content: { characterKey: `character-${name}`, name } }));
+    input.chapters[0]!.scenes[0]!.povCharacterId = 'bible-mara';
+    const unknown = () => runStoryDiagnostics(input).filter(item => item.code === 'unknown-character-reference');
+    expect(unknown()).toEqual([]);
+    input.chapters[0]!.scenes[0]!.povCharacterId = 'missing-character';
+    expect(unknown()).toHaveLength(1);
+  });
+
+  it('orders planned causal dependencies by chapter before chapter-local scene ordinal', () => {
+    const input = makeCleanDiagnosticsFixture();
+    input.chapters = [];
+    input.artifacts = [
+      artifact({ id: 'c1', key: 'c1', title: 'First', type: 'chapter-brief', content: { chapterKey: 'c1', number: 1 } }),
+      artifact({ id: 'c2', key: 'c2', title: 'Second', type: 'chapter-brief', content: { chapterKey: 'c2', number: 2 } }),
+      artifact({ id: 's2', key: 's2', title: 'Second', type: 'scene-plan', content: { sceneKey: 's2', chapterKey: 'c2', ordinal: 1, dependencies: ['s1'] } }),
+      artifact({ id: 's1', key: 's1', title: 'First', type: 'scene-plan', content: { sceneKey: 's1', chapterKey: 'c1', ordinal: 1, dependencies: [] } })
+    ];
+    const orderingErrors = () => runStoryDiagnostics(input).filter(item => item.code === 'causal-predecessor-after-scene');
+    expect(orderingErrors()).toEqual([]);
+    input.artifacts[2]!.content = { sceneKey: 's2', chapterKey: 'c1', ordinal: 1, dependencies: ['s1'] };
+    input.artifacts[3]!.content = { sceneKey: 's1', chapterKey: 'c1', ordinal: 2, dependencies: [] };
+    expect(orderingErrors()).toHaveLength(1);
+    input.artifacts[3]!.content = { sceneKey: 's1', chapterKey: 'c2', ordinal: 1, dependencies: [] };
+    expect(orderingErrors()).toHaveLength(1);
   });
 
   it('detects every semantic and craft family required by the research document', () => {
@@ -153,6 +183,17 @@ describe('StoryDiagnosticsEngine', () => {
     expect(runStoryDiagnostics(input).map((diagnostic) => diagnostic.code)).not.toContain(
       'object-owner-changed-without-transfer'
     );
+  });
+
+  it('does not interpret character inventory descriptions as object owner identities', () => {
+    const input = makeCleanDiagnosticsFixture();
+    input.entityStates = [
+      entityState({ id: 'inventory-before', key: 'inventory-before', entityType: 'character', entityId: 'character-mara', stateKey: 'possession', value: 'Carries the spool inside her coat.', validFromOrder: 0, validToOrder: 0 }),
+      entityState({ id: 'inventory-after', key: 'inventory-after', entityType: 'character', entityId: 'character-mara', stateKey: 'possession', value: 'Carries the spool and shared logbook.', validFromOrder: 1, validToOrder: null })
+    ];
+    expect(runStoryDiagnostics(input).map(item => item.code)).not.toContain('object-owner-changed-without-transfer');
+    input.entityStates[0]!.validToOrder = null;
+    expect(runStoryDiagnostics(input).map(item => item.code)).toContain('entity-state-conflict');
   });
 
   it('honors the pantser opt-out even when project metadata requirements are configured', () => {

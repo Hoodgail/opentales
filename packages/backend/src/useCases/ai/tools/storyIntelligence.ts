@@ -40,20 +40,24 @@ const pageInput = z.object({
   limit: z.number().int().min(1).max(100).optional()
 });
 
+const sceneSourceId = z.string().trim().min(1).describe('Exact canonical scene ID or build SCENE unit.id from readBuildUnit. Never a scene key, writingId, or guessed ID.');
+const chapterSourceId = z.string().trim().min(1).describe('Exact canonical chapter ID or build CHAPTER unit ID; use a scene unit.parentUnitId, never metadata.chapterKey.');
+const artifactSourceId = z.string().trim().min(1).describe('Exact StoryArtifact ID, such as readBuildUnit.planArtifactId. Never a manuscript unit.id, writingId, or branchId. Omit when citing only prose.');
+
 const factSchema = z.object({
   key: z.string().trim().min(1),
   subjectType: z.string().trim().min(1),
   subjectId: z.string().trim().min(1),
-  predicate: z.string().trim().min(1),
+  predicate: z.string().trim().min(1).describe('One specific property, with a single canonical value per overlapping interval. Use water-level and electrical-condition, not generic has_condition for multiple independent facts.'),
   object: z.unknown(),
   status: z.enum(['PROPOSED', 'CANONICAL', 'DISPUTED']).default('CANONICAL'),
-  validFromSceneId: z.string().trim().min(1).optional(),
-  validToSceneId: z.string().trim().min(1).optional(),
+  validFromSceneId: sceneSourceId.optional(),
+  validToSceneId: sceneSourceId.optional(),
   validFromOrder: z.number().int().optional(),
-  validToOrder: z.number().int().optional(),
-  sourceChapterId: z.string().trim().min(1).optional(),
-  sourceSceneId: z.string().trim().min(1).optional(),
-  sourceArtifactId: z.string().trim().min(1).optional(),
+  validToOrder: z.number().int().optional().describe('Inclusive final story order. To end before a new state at order N, use N-1, not N.'),
+  sourceChapterId: chapterSourceId.optional(),
+  sourceSceneId: sceneSourceId.optional(),
+  sourceArtifactId: artifactSourceId.optional(),
   sourceSpan: z.unknown().optional(),
   confidence: z.number().min(0).max(1).default(1)
 });
@@ -62,15 +66,15 @@ const entityStateSchema = z.object({
   key: z.string().trim().min(1),
   entityType: z.string().trim().min(1),
   entityId: z.string().trim().min(1),
-  stateKey: z.string().trim().min(1),
+  stateKey: z.string().trim().min(1).describe('One specific property with one value per interval. Use knows-relay-mechanism rather than generic knowledge for independent beliefs. Do not conflate an inventory description with an object owner ID.'),
   value: z.unknown(),
   status: z.enum(['PROPOSED', 'ACTIVE']).default('ACTIVE'),
-  validFromSceneId: z.string().trim().min(1).optional(),
-  validToSceneId: z.string().trim().min(1).optional(),
+  validFromSceneId: sceneSourceId.optional(),
+  validToSceneId: sceneSourceId.optional(),
   validFromOrder: z.number().int().optional(),
-  validToOrder: z.number().int().optional(),
+  validToOrder: z.number().int().optional().describe('Inclusive final story order. To end before a new state at order N, use N-1, not N.'),
   storyOrder: z.number().int().optional(),
-  sourceArtifactId: z.string().trim().min(1).optional(),
+  sourceArtifactId: artifactSourceId.optional(),
   sourceFactKey: z.string().trim().min(1).optional(),
   sourceSpan: z.unknown().optional()
 });
@@ -81,11 +85,11 @@ const timelineEventSchema = z.object({
   description: z.string().optional(),
   chronology: z.unknown(),
   sortOrder: z.number().optional(),
-  chapterId: z.string().trim().min(1).optional(),
-  sceneId: z.string().trim().min(1).optional(),
+  chapterId: chapterSourceId.optional(),
+  sceneId: sceneSourceId.optional(),
   dependencyIds: z.array(z.string()).default([]),
   participantRefs: z.unknown().default([]),
-  sourceArtifactId: z.string().trim().min(1).optional(),
+  sourceArtifactId: artifactSourceId.optional(),
   sourceSpan: z.unknown().optional()
 });
 
@@ -95,10 +99,10 @@ const openLoopSchema = z.object({
   status: z.enum(['OPEN', 'REINFORCED', 'RESOLVED', 'ABANDONED']).default('OPEN'),
   title: z.string().trim().min(1),
   description: z.string().trim().min(1),
-  introducedSceneId: z.string().trim().min(1).optional(),
-  resolvedSceneId: z.string().trim().min(1).optional(),
-  introducedArtifactId: z.string().trim().min(1).optional(),
-  resolvedArtifactId: z.string().trim().min(1).optional(),
+  introducedSceneId: sceneSourceId.optional(),
+  resolvedSceneId: sceneSourceId.optional(),
+  introducedArtifactId: artifactSourceId.optional(),
+  resolvedArtifactId: artifactSourceId.optional(),
   targetPayoff: z.string().optional(),
   metadata: z.unknown().optional()
 });

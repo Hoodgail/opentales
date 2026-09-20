@@ -326,7 +326,7 @@ export const mutationToolSchemas = {
     contentEdit: contentEditSchema.optional(),
     contentEdits: z.array(contentEditSchema).min(1).max(100).optional()
   }).strict(), ['title', 'summary', 'status', 'povCharacterId', 'locationId', 'publishedAt', 'content', 'contentEdit', 'contentEdits']).superRefine(validateContentMutation),
-  createChapter: z.object({ title: nonEmptyString, actId: optionalString, summary: optionalString, content: manuscriptContentSchema.optional(), status: chapterStatusSchema.optional(), povCharacterId: optionalString, locationId: optionalString }),
+  createChapter: z.object({ title: nonEmptyString, actId: optionalString, summary: optionalString, content: manuscriptContentSchema.optional().describe('The actual chapter prose. Omitting content creates an empty chapter; summary is metadata, not prose.'), status: chapterStatusSchema.optional(), povCharacterId: optionalString, locationId: optionalString }).strict(),
   compileChapterFromScenes: z.object({
     chapterId: nonEmptyString,
     idempotencyKey: nonEmptyString,
@@ -432,7 +432,7 @@ const mutationToolDescriptions = {
   updateLocation: 'Update a location. Requires locationId and at least one location field to change.',
   deleteLocation: 'Delete a location. Requires locationId.',
   updateChapter: 'Update chapter metadata or prose. For prose, readChapter first, pass its headVersionId as expectedHeadVersionId, then use content for a full replacement (including an empty draft) or contentEdit/contentEdits for exact replacements.',
-  createChapter: 'Create a chapter. Requires title.',
+  createChapter: 'Create a chapter with title and content (the actual prose). Omitting content creates an empty chapter. summary is metadata only.',
   compileChapterFromScenes: 'Deterministically replace one chapter body with all of its ordered scene bodies. Read the chapter and list/read every scene first, then provide the chapter head and complete scene revision map. Identical retries are idempotent.',
   deleteChapter: 'Delete a chapter. Requires chapterId.',
   restoreTrashChapter: 'Restore a trashed chapter. Requires chapterId.',
@@ -526,7 +526,7 @@ export function mutationTools(
     }),
     createChapter: approvalTool({
       description:
-        'Create a new chapter. Only `title` is required; everything else is optional. The user will approve/reject the proposal in the UI.',
+        'Create a chapter with `title` and `content` (the actual prose). Omitting `content` creates an empty chapter; `summary` is metadata only. Read the chapter back to verify its saved prose.',
       inputSchema: mutationToolSchemas.createChapter,
       execute: async (input, options?: AgentToolInvocationContext) => {
         const validated = validateMutationInput('createChapter', input);
@@ -799,7 +799,8 @@ async function updateChapter(
     publishedAt: input.publishedAt === undefined ? undefined : nullableStringOrUndefined(input.publishedAt),
     expectedHeadVersionId: expectedHeadVersionId(input)
   };
-  return new UpdateChapterUseCase(prisma).execute(context.userId, context.projectId, chapterId, data);
+  const chapter = await new UpdateChapterUseCase(prisma).execute(context.userId, context.projectId, chapterId, data);
+  return { id: chapter.id, title: chapter.title, number: chapter.number, writingId: chapter.writingId, branchId: chapter.branchId, headVersionId: chapter.headVersionId, wordCount: chapter.wordCount };
 }
 
 async function createChapter(
@@ -818,7 +819,7 @@ async function createChapter(
     summary: stringOrUndefined(input.summary),
     content: manuscriptContentOrUndefined(input.content)
   };
-  return new CreateChapterUseCase(prisma).execute(context.userId, context.projectId, data);
+  return new CreateChapterUseCase(prisma).executeWithReceipt(context.userId, context.projectId, data);
 }
 
 async function createCharacter(

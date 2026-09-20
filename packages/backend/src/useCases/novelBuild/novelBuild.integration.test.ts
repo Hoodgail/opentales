@@ -354,6 +354,46 @@ describeDatabase('durable Novel Build integration', () => {
     }, { allowTaskBinding: false })).resolves.toMatchObject({ artifacts: expect.any(Array) });
   }, 30_000);
 
+  it('rejects malformed character references before persisting downstream planning artifacts', async () => {
+    const run = await builds.create(ownerId, projectId, {
+      idempotencyKey: 'integration:reference-validation', brainstorm: 'Two siblings save a radio station.',
+      autonomyMode: 'autonomous-draft',
+      authorizationScope: {
+        artifactTypes: ['character-bible', 'timeline'], chapterIds: [], sceneIds: [],
+        allowPlanningArtifacts: true, allowCanonWrites: true, allowChapterWrites: true,
+        allowSceneWrites: true, allowDiagnostics: true, expiresAt: null
+      }
+    });
+    const character = { characterKey: 'mara', name: 'Mara', aliases: [], wants: [], needs: [], contradictions: [], knowledge: [], secrets: [], relationships: [] };
+    const batch = (key: string, type: 'character-bible' | 'timeline', content: import('@opentales/sdk').JsonObject, revision: number) => story.applyArtifactBatch(ownerId, projectId, run.id, {
+      idempotencyKey: key, expectedBuildRevision: revision,
+      operations: [{ op: 'create', artifact: { type, key, title: key, status: 'validated', content } }]
+    });
+    await expect(batch('bad-dossier', 'character-bible', { ...character, relationships: [{ type: 'sibling', id: 'ivo' }] }, run.revision)).rejects.toMatchObject({ status: 400 });
+    const accepted = await batch('mara', 'character-bible', character, run.revision);
+    const current = await builds.get(ownerId, projectId, run.id);
+    const timeline = (id: string) => ({ events: [{ eventKey: 'arrival', title: 'Arrival', chronology: {}, dependencyKeys: [], participantRefs: [{ type: 'character', id }] }] });
+    await expect(batch('bad-timeline', 'timeline', timeline('invented-database-id'), current.revision)).rejects.toMatchObject({ status: 409 });
+    expect(await prisma.storyArtifact.count({ where: { buildRunId: run.id, type: 'TIMELINE' } })).toBe(0);
+    await expect(batch('good-timeline', 'timeline', timeline(accepted.artifacts[0]!.id), current.revision)).resolves.toMatchObject({ artifacts: expect.any(Array) });
+  });
+
+  it('clears a stale pause error when a build is reauthorized', async () => {
+    const run = await builds.create(ownerId, projectId, {
+      idempotencyKey: 'integration:reauthorize', brainstorm: 'A keeper restores a lighthouse.', autonomyMode: 'assist'
+    });
+    const paused = await builds.pause(ownerId, projectId, run.id, {
+      idempotencyKey: 'integration:reauthorize-pause', expectedRevision: run.revision, reason: 'Token budget paused the build.'
+    });
+    expect(paused.lastError).toBe('Token budget paused the build.');
+    const authorized = await builds.authorize(ownerId, projectId, run.id, {
+      idempotencyKey: 'integration:reauthorize-resume', expectedRevision: paused.revision,
+      authorizationScope: paused.authorizationScope, maxTokens: 1_000_000
+    });
+    expect(authorized.status).toBe('planning');
+    expect(authorized.lastError).toBeNull();
+  });
+
   it('requires manifest approval for Plan & Review and records explicit authorization', async () => {
     const assist = await builds.create(ownerId, projectId, {
       idempotencyKey: 'integration:assist-unscoped', brainstorm: 'A small assist-mode premise.', autonomyMode: 'assist'

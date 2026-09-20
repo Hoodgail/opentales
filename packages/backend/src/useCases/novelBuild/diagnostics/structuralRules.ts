@@ -367,6 +367,7 @@ function runObjectTransferContinuityRules(
   activeStates: EntityState[]
 ): void {
   const ownershipStates = activeStates.filter((state) =>
+    !/^(character|person)$/.test(normalizeKey(state.entityType)) &&
     /owner|ownership|holder|possessor|possession/.test(normalizeKey(state.stateKey))
   );
   const byObject = groupBy(
@@ -775,6 +776,13 @@ function runWorldRuleRules(context: DiagnosticContext): void {
 }
 
 function runCharacterRules(context: DiagnosticContext): void {
+  const knownCharacterIds = new Set(context.characterById.keys());
+  for (const artifact of context.activeArtifacts) {
+    if (artifact.type !== 'character-bible' || !isJsonObject(artifact.content)) continue;
+    for (const id of [artifact.id, artifact.key, jsonString(artifact.content.characterKey)]) {
+      if (id) knownCharacterIds.add(id);
+    }
+  }
   for (const scene of context.scenes) {
     const characterIds = uniqueBy(
       [
@@ -789,7 +797,7 @@ function runCharacterRules(context: DiagnosticContext): void {
       (value) => value
     );
     for (const characterId of characterIds) {
-      if (context.characterById.has(characterId)) continue;
+      if (knownCharacterIds.has(characterId)) continue;
       context.add({
         code: 'unknown-character-reference',
         category: 'character',
@@ -1036,7 +1044,7 @@ function runPlotRules(context: DiagnosticContext): void {
           relatedRefs: item.refs,
           suggestedResolution: 'Restore the predecessor, relink the dependency, or revise the causal chain.'
         });
-      } else if (dependency.order >= item.order) {
+      } else if (compareDependencyOrder(dependency, item) >= 0) {
         context.add({
           code: 'causal-predecessor-after-scene',
           category: 'plot',
@@ -1779,11 +1787,16 @@ function linkedOrder(sceneId: string | null, context: DiagnosticContext): number
   return context.sceneOrder.get(sceneId) ?? null;
 }
 
+function compareDependencyOrder(left: PlannedDependency, right: PlannedDependency): number {
+  return left.chapterOrder - right.chapterOrder || left.order - right.order;
+}
+
 interface PlannedDependency {
   id: string;
   key: string;
   title: string;
   order: number;
+  chapterOrder: number;
   dependencyIds: string[];
   evidence: StorySourceSpan[];
   refs: StoryReference[];
@@ -1791,7 +1804,15 @@ interface PlannedDependency {
 
 function sceneDependencies(context: DiagnosticContext): PlannedDependency[] {
   const planById = new Map(context.activeArtifacts.filter((artifact) => artifact.type === 'scene-plan').map((artifact) => [artifact.id, artifact]));
-  const live = context.scenes.map((scene, index) => {
+  const chapterNumbers = new Map(context.chapters.map(chapter => [chapter.id, chapter.number]));
+  const plannedChapterNumbers = new Map(context.activeArtifacts.flatMap(artifact => {
+    if (artifact.type !== 'chapter-brief' || !isJsonObject(artifact.content)) return [];
+    const content = artifact.content as JsonObject;
+    return typeof content.number === 'number' && Number.isFinite(content.number)
+      ? [[jsonString(content.chapterKey) ?? artifact.key, content.number] as const]
+      : [];
+  }));
+  const live = context.scenes.map((scene) => {
     const plan = scene.sourceArtifactId ? planById.get(scene.sourceArtifactId) : undefined;
     const planContent = plan && isJsonObject(plan.content) ? plan.content as JsonObject : undefined;
     const key = jsonString(scene.metadata?.sceneKey) ?? (planContent ? jsonString(planContent.sceneKey) : null) ?? plan?.key ?? scene.id;
@@ -1799,7 +1820,8 @@ function sceneDependencies(context: DiagnosticContext): PlannedDependency[] {
       id: scene.id,
       key,
       title: scene.title,
-      order: index,
+      chapterOrder: chapterNumbers.get(scene.chapterId) ?? 0,
+      order: scene.order,
       dependencyIds: scene.dependencyIds ?? [],
       evidence: [sceneEvidence(scene)],
       refs: [sceneReference(scene)]
@@ -1817,6 +1839,7 @@ function sceneDependencies(context: DiagnosticContext): PlannedDependency[] {
           id: artifact.id,
           key,
           title: jsonString(content.title) ?? artifact.title,
+          chapterOrder: plannedChapterNumbers.get(jsonString(content.chapterKey) ?? '') ?? 0,
           order:
             typeof content.ordinal === 'number' && Number.isFinite(content.ordinal)
               ? content.ordinal
@@ -1827,7 +1850,7 @@ function sceneDependencies(context: DiagnosticContext): PlannedDependency[] {
         }
       ];
     });
-  return [...live, ...plans].sort((left, right) => left.order - right.order || left.id.localeCompare(right.id));
+  return [...live, ...plans].sort((left, right) => compareDependencyOrder(left, right) || left.id.localeCompare(right.id));
 }
 
 function findEvidenceAt(

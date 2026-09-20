@@ -149,6 +149,7 @@ export class NovelBuildUseCase {
           status: nextStatus,
           currentPhase: nextPhase,
           pausedAt: null,
+          lastError: null,
           revision: { increment: 1 }
         }
       });
@@ -702,7 +703,7 @@ export class NovelBuildUseCase {
     buildRunId: string,
     taskId: string,
     input: BuildLifecycleInput,
-    options: { waitForAbort?: boolean } = {}
+    options: { waitForAbort?: boolean; consumeRevisionIteration?: boolean } = {}
   ): Promise<BuildTaskActionResult> {
     await this.access.assertPermission(userId, projectId, 'project:write');
     let invalidatedTaskIds: string[] = [];
@@ -710,6 +711,9 @@ export class NovelBuildUseCase {
       assertExpectedRevision(run.revision, input.expectedRevision);
       if (TERMINAL_RUN_STATUSES.has(run.status)) throw new HttpError(409, `Cannot rerun a ${run.status.toLowerCase()} build`);
       const target = await this.repository.getTask(tx, buildRunId, taskId);
+      if (options.consumeRevisionIteration && revisionBudgetIteration(target) >= target.maxRevisionIterations) {
+        throw new HttpError(409, 'Task revision iteration budget is exhausted');
+      }
       const tasks = await tx.buildTask.findMany({ where: { buildRunId } });
       invalidatedTaskIds = transitiveDownstream(tasks, taskId);
       const invalidatedTasks = tasks.filter((task) => invalidatedTaskIds.includes(task.id));
@@ -742,11 +746,19 @@ export class NovelBuildUseCase {
       });
       const byId = new Map(tasks.map((task) => [task.id, task]));
       for (const taskIdToReset of invalidatedTaskIds) {
-        const task = byId.get(taskIdToReset)!;
+        let task = byId.get(taskIdToReset)!;
         const outsideDependenciesDone = task.dependencyIds
           .filter((dependencyId) => !invalidatedSet.has(dependencyId))
           .every((dependencyId) => byId.get(dependencyId)?.status === 'DONE');
         const nextStatus = taskIdToReset === taskId && outsideDependenciesDone ? 'READY' : 'BLOCKED';
+        if (nextStatus === 'BLOCKED' && (task.status === 'RUNNING' || task.status === 'REVIEW')) {
+          // Release execution before reblocking a descendant. Both transitions and
+          // the lease fence below commit atomically in this rerun transaction.
+          task = (await this.repository.transitionTask(tx, task, {
+            status: 'READY', idempotencyKey: `${input.idempotencyKey}:release:${task.id}`,
+            reason: input.reason ?? `Rerun invalidated an active dependency of ${task.key}`
+          })).task;
+        }
         await this.repository.transitionTask(tx, task, {
           status: nextStatus,
           idempotencyKey: `${input.idempotencyKey}:reset:${task.id}`,
@@ -754,6 +766,10 @@ export class NovelBuildUseCase {
           data: {
             attempts: 0,
             revisionIteration: { increment: 1 },
+            executionPolicy: {
+              ...(isJsonObjectValue(task.executionPolicy) ? task.executionPolicy : {}),
+              ...(!options.consumeRevisionIteration || task.id !== target.id ? { revisionIterationBaseline: task.revisionIteration + 1 } : {})
+            } as Prisma.InputJsonValue,
             outputArtifactIds: task.outputArtifactIds.filter((artifactId) => pinnedArtifactIds.includes(artifactId)),
             progress: 0,
             leaseOwner: null,
@@ -885,11 +901,17 @@ export class NovelBuildUseCase {
       });
       const byId = new Map(tasks.map((task) => [task.id, task]));
       for (const taskId of invalidatedTaskIds) {
-        const task = byId.get(taskId)!;
+        let task = byId.get(taskId)!;
         const outsideDependenciesDone = task.dependencyIds
           .filter((dependencyId) => !invalidatedSet.has(dependencyId))
           .every((dependencyId) => byId.get(dependencyId)?.status === 'DONE');
         const nextStatus = task.id === target.id && outsideDependenciesDone ? 'READY' : 'BLOCKED';
+        if (nextStatus === 'BLOCKED' && (task.status === 'RUNNING' || task.status === 'REVIEW')) {
+          task = (await this.repository.transitionTask(tx, task, {
+            status: 'READY', idempotencyKey: `${input.idempotencyKey}:release:${task.id}`,
+            reason: 'Author re-plan invalidated an active dependency'
+          })).task;
+        }
         await this.repository.transitionTask(tx, task, {
           status: nextStatus,
           idempotencyKey: `${input.idempotencyKey}:reset:${task.id}`,
@@ -898,6 +920,10 @@ export class NovelBuildUseCase {
           data: {
             attempts: 0,
             revisionIteration: { increment: 1 },
+            executionPolicy: {
+              ...(isJsonObjectValue(task.executionPolicy) ? task.executionPolicy : {}),
+              revisionIterationBaseline: task.revisionIteration + 1
+            } as Prisma.InputJsonValue,
             outputArtifactIds: task.outputArtifactIds.filter((artifactId) => pinnedArtifactIds.includes(artifactId)),
             progress: 0,
             leaseOwner: null,
@@ -1204,7 +1230,7 @@ export class NovelBuildUseCase {
     }
     if (qualityScore !== undefined && (qualityScore < 0 || qualityScore > 1)) throw new HttpError(400, 'qualityScore must be between 0 and 1');
     if (task.type === 'quality-gate' && task.qualityThreshold !== null && qualityScore !== undefined && qualityScore < task.qualityThreshold) throw new HttpError(409, `Quality score ${qualityScore} is below the required threshold ${task.qualityThreshold}`);
-    if ((task.type.includes('revision') || task.type.startsWith('revise-')) && task.revisionIteration > task.maxRevisionIterations) throw new HttpError(409, 'Task revision iteration budget is exhausted');
+    if ((task.type.includes('revision') || task.type.startsWith('revise-')) && revisionBudgetIteration(task) > task.maxRevisionIterations) throw new HttpError(409, 'Task revision iteration budget is exhausted');
     if (task.key === 'planning-quality-gate') {
       await this.validateBuildCompletenessInTransaction(tx, buildRunId, { requireExport: false, planningOnly: true });
     }
@@ -1733,13 +1759,28 @@ export class NovelBuildUseCase {
       where: { buildRunId_kind_key: { buildRunId: run.id, kind: input.kind, key: input.key } }
     });
     if (existing) {
-      if (existing.planArtifactId !== input.planArtifactId && existing.status !== 'INVALIDATED') {
-        await tx.buildManuscriptUnit.update({ where: { id: existing.id }, data: {
-          planArtifactId: input.planArtifactId, sourceChapterId: input.sourceChapterId, sourceSceneId: input.sourceSceneId,
-          metadata: input.metadata as Prisma.InputJsonValue, revision: { increment: 1 }
+      if (existing.status === 'INVALIDATED') return existing;
+      const projection = {
+        planArtifactId: input.planArtifactId, sourceChapterId: input.sourceChapterId ?? null, sourceSceneId: input.sourceSceneId ?? null,
+        parentUnitId: input.parentUnitId, containerKey: input.containerKey, order: input.order,
+        chapterNumber: input.chapterNumber, title: input.title,
+        povCharacterId: input.povCharacterId ?? null, locationId: input.locationId ?? null,
+        storyDate: input.storyDate ?? null, storyTime: input.storyTime ?? null, tension: input.tension ?? null,
+        metadata: existing.planArtifactId === input.planArtifactId && isJsonObjectValue(existing.metadata)
+          ? { ...existing.metadata, ...input.metadata } : input.metadata
+      };
+      const changed = Object.entries(projection).some(([key, value]) => stableHash(existing[key as keyof typeof existing]) !== stableHash(value));
+      const updated = changed ? await tx.buildManuscriptUnit.update({ where: { id: existing.id }, data: {
+        ...projection, metadata: projection.metadata as Prisma.InputJsonValue, revision: { increment: 1 }
+      } }) : existing;
+      const role = input.kind === 'CHAPTER' ? 'chapter-plan' : 'scene-plan';
+      if (!await tx.storyArtifactBinding.findFirst({ where: { artifactId: input.planArtifactId, unitId: existing.id, bindingKind: 'BUILD_UNIT', role } })) {
+        await tx.storyArtifactBinding.create({ data: {
+          projectId: run.projectId, buildRunId: run.id, artifactId: input.planArtifactId,
+          unitId: existing.id, bindingKind: 'BUILD_UNIT', role
         } });
       }
-      return existing;
+      return updated;
     }
     const writing = await tx.writing.create({ data: { projectId: run.projectId, kind: input.kind === 'CHAPTER' ? 'CHAPTER_BODY' : 'SCENE_BODY' } });
     const branch = await tx.writingBranch.create({ data: { writingId: writing.id, buildRunId: run.id, name: run.branchName } });
@@ -2082,4 +2123,11 @@ function resolvePlanReference(value: JsonValue | undefined, references: Map<stri
   return (typeof value.id === 'string' ? references.get(value.id) : undefined)
     ?? (typeof value.key === 'string' ? references.get(value.key) : undefined)
     ?? null;
+}
+
+/** Monotonic iterations identify writes; explicit owner restarts reset only the retry allowance. */
+export function revisionBudgetIteration(task: Pick<BuildTask, 'revisionIteration' | 'executionPolicy'>): number {
+  const value = isJsonObjectValue(task.executionPolicy) ? task.executionPolicy.revisionIterationBaseline : undefined;
+  const baseline = typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= task.revisionIteration ? value : 0;
+  return task.revisionIteration - baseline;
 }

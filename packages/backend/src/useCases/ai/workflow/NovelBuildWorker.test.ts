@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { PrismaClient } from '@prisma/client';
 import {
   PLANNING_TASK_TEMPLATES,
+  ARTIFACT_CONTENT_SCHEMAS,
   REVISION_TASK_TEMPLATES,
   createChapterCompilationTaskTemplates,
   createPlanningTaskTemplates,
@@ -21,6 +24,10 @@ const {
   extractJudgeResult,
   extractWorkerResult,
   hasRuntimeCriticEvidence,
+  hasCurrentUnitRead,
+  hasSuccessfulTaskReport,
+  guardWorkerTools,
+  validateBeatReferences,
   judgeEvidenceCharacterBudget,
   lookupExecutionModelPrice,
   measuredInvocationUsage,
@@ -36,6 +43,95 @@ const {
 const { isLegacyLogicalReference, referenceVariants } = await import('../../novelBuild/NovelBuildUseCase.js');
 
 describe('durable Novel Build execution contract', () => {
+  it('requires a matching nonempty current-head read receipt for unchanged copy edits', () => {
+    const calls = [{ toolName: 'readBuildUnit', toolCallId: 'read-1', input: { unitId: 'scene-1' } }];
+    const receipt = { toolName: 'readBuildUnit', toolCallId: 'read-1', output: { id: 'scene-1', headVersionId: 'current-head', body: 'Saved prose.' } };
+    expect(hasCurrentUnitRead('scene-1', 'current-head', calls, [receipt])).toBe(true);
+    expect(hasCurrentUnitRead('scene-1', 'new-head', calls, [receipt])).toBe(false);
+    expect(hasCurrentUnitRead('scene-1', 'current-head', [], [receipt])).toBe(false);
+    expect(hasCurrentUnitRead('scene-1', 'current-head', calls, [{ ...receipt, toolCallId: 'other-call' }])).toBe(false);
+    expect(hasCurrentUnitRead('scene-1', 'current-head', calls, [{ ...receipt, output: { ...receipt.output, body: '' } }])).toBe(false);
+  });
+
+  it('keeps a standalone worker alive until an idle provider reaches its deadline', async () => {
+    const moduleUrl = new URL('./NovelBuildWorker.ts', import.meta.url).href;
+    const script = `
+      const { NovelBuildWorker } = await import(${JSON.stringify(moduleUrl)});
+      const worker = new NovelBuildWorker({});
+      worker.startTaskHeartbeat = () => async () => {};
+      worker.executeModelTask = () => new Promise(() => {});
+      worker.failOrRetry = async (_task, error) => { console.log(error.message); };
+      await worker.executeClaimedTask({
+        run: { id: 'idle-run' }, task: { id: 'idle-task', type: 'draft-scene', executionPolicy: { maxDurationMs: 1000 } },
+        lease: { leaseToken: 'idle-lease', leaseGeneration: 1 }
+      });
+    `;
+    const result = await promisify(execFile)(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], { timeout: 10_000 });
+    expect(result.stdout).toContain('Task exceeded maxDurationMs=1000');
+    expect(result.stderr).not.toContain('unsettled top-level await');
+  }, 15_000);
+
+  it('rejects invalid plan dates and time ranges at the schema boundary', () => {
+    const fields = (ARTIFACT_CONTENT_SCHEMAS['scene-plan'] as import('zod').ZodObject).shape;
+    for (const value of ['Final operating morning', '2026-02-30']) expect(fields.storyDate.safeParse(value).success).toBe(false);
+    expect(fields.storyDate.safeParse('2026-02-28').success).toBe(true);
+    expect(fields.storyDate.safeParse(undefined).success).toBe(true);
+    for (const value of ['04:45-05:05 AM', '25:00', '09:65']) expect(fields.storyTime.safeParse(value).success).toBe(false);
+    for (const value of ['04:45', '04:45:30', undefined]) expect(fields.storyTime.safeParse(value).success).toBe(true);
+  });
+
+  it('reserves final reporting and repair calls without exceeding the total tool budget', async () => {
+    const work = vi.fn(async () => ({ saved: true }));
+    const report = vi.fn().mockResolvedValueOnce({ ok: false }).mockResolvedValueOnce({ ok: true });
+    const guarded = guardWorkerTools({ readBuildUnit: { execute: work }, reportTaskResult: { execute: report } } as any, 8, new AbortController().signal, async () => {});
+    const call = (name: string) => (guarded[name] as any).execute({});
+    for (let index = 0; index < 6; index++) await call('readBuildUnit');
+    await expect(call('readBuildUnit')).rejects.toThrow('reserved for reportTaskResult');
+    await expect(call('reportTaskResult')).resolves.toEqual({ ok: false });
+    await expect(call('reportTaskResult')).resolves.toEqual({ ok: true });
+    await expect(call('reportTaskResult')).rejects.toThrow('maxToolCalls=8');
+    expect(work).toHaveBeenCalledTimes(6);
+    expect(report).toHaveBeenCalledTimes(2);
+  });
+
+  it('continues after rejected task reports and stops only after a validated receipt', () => {
+    expect(hasSuccessfulTaskReport({ steps: [{ toolResults: [] }] })).toBe(false);
+    expect(hasSuccessfulTaskReport({ steps: [{ toolResults: [{ toolName: 'reportTaskResult', output: { error: 'Artifact does not exist' } }] }] })).toBe(false);
+    expect(hasSuccessfulTaskReport({ steps: [{ toolResults: [{ toolName: 'reportTaskResult', output: { ok: true, observableResult: { status: 'invented' } } }] }] })).toBe(false);
+    expect(hasSuccessfulTaskReport({ steps: [{ toolResults: [{ toolName: 'reportTaskResult', output: { ok: true, observableResult: { status: 'complete', artifactIds: [] } } }] }] })).toBe(true);
+  });
+
+  it('rejects prose in causal beat references before persisting the batch', () => {
+    expect(() => validateBeatReferences([{ beatKey: 'arrival', causeKeys: ["Arthur Vance's death four months ago"], consequenceKeys: [] }], [])).toThrow('must contain exact beatKey');
+    expect(() => validateBeatReferences([
+      { beatKey: 'arrival', causeKeys: [], consequenceKeys: ['choice'] },
+      { beatKey: 'choice', causeKeys: ['arrival'], consequenceKeys: [] }
+    ], [])).not.toThrow();
+    expect(() => validateBeatReferences([{ beatKey: 'choice', causeKeys: ['arrival'], consequenceKeys: [] }], ['arrival'])).not.toThrow();
+    expect(() => validateBeatReferences([{ beatKey: 'beat-20', causeKeys: [], consequenceKeys: ['beat-21'] }], [], true)).not.toThrow();
+    expect(() => validateBeatReferences([{ beatKey: 'beat-20', causeKeys: ['A backstory sentence'], consequenceKeys: [] }], [], true)).toThrow('must contain exact beatKey');
+  });
+
+  it('waits for an in-flight heartbeat before recording a failed attempt', async () => {
+    const worker = new NovelBuildWorker({} as PrismaClient) as any;
+    const events: string[] = [];
+    vi.spyOn(worker, 'startTaskHeartbeat').mockReturnValue(async () => {
+      await new Promise(resolve => setTimeout(resolve, 5));
+      events.push('heartbeat settled');
+    });
+    vi.spyOn(worker, 'executeModelTask').mockRejectedValue(new Error('Provider failed'));
+    const fail = vi.spyOn(worker, 'failOrRetry').mockImplementation(async () => {
+      expect(events).toEqual(['heartbeat settled']);
+      events.push('failure recorded');
+    });
+    await worker.executeClaimedTask({
+      run: { id: 'heartbeat-failure-run' },
+      task: { id: 'heartbeat-failure-task', type: 'draft-scene', executionPolicy: {} },
+      lease: { leaseToken: 'lease', leaseGeneration: 1 }
+    });
+    expect(fail).toHaveBeenCalledOnce();
+  });
+
   it('normalizes stable planning aliases while fencing legacy logical references by type', () => {
     expect(referenceVariants('character:decimus-rhal')).toEqual(expect.arrayContaining(['character:decimus-rhal', 'decimus-rhal']));
     expect(isLegacyLogicalReference({ type: 'plot-thread', id: 'thread:ancient-breach' })).toBe(true);

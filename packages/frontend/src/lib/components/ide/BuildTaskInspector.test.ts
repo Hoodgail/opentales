@@ -32,6 +32,12 @@ describe('BuildTaskInspector tabs', () => {
     expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe('build-task-tab-task-1-trace');
   });
 
+  it('shows the current revision allowance after an explicit restart', () => {
+    const restarted = { ...task, revisionIteration: 6, executionPolicy: { revisionIterationBaseline: 6 } };
+    render(BuildTaskInspector, { task: restarted, tasks: [restarted] });
+    expect(screen.getByText('Revision').nextElementSibling?.textContent).toBe('0 / 1');
+  });
+
   it('replaces exhausted retry with the explicit failed-boundary rerun action', async () => {
     const exhausted = {
       ...task,

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, type Prisma } from '@prisma/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ApplyStoryArtifactBatchInput, JsonValue } from '@opentales/sdk';
 
@@ -293,6 +293,25 @@ describeDatabase('Novel Build correction-wave invariants', () => {
     expect(await prisma.canonFact.count({ where: { buildRunId: buildId, key: 'must-rollback' } })).toBe(0);
   });
 
+  it('identifies rejected canon provenance IDs without accepting keys or writing IDs', async () => {
+    for (const [field, value, hint] of [
+      ['sourceArtifactId', 'writing-id-is-not-an-artifact', 'planArtifactId'],
+      ['sourceChapterId', 'chapter-2-what-leaves-the-water', 'parentUnitId'],
+      ['sourceSceneId', 'mistyped-scene-id', 'unit.id']
+    ]) {
+      const run = await builds.get(ownerId, projectId, buildId);
+      await expect(story.applyStateBatch(ownerId, projectId, buildId, {
+        idempotencyKey: `correction:bad-provenance:${field}`, expectedBuildRevision: run.revision,
+        operations: [{ op: 'upsert-canon-fact', value: { ...fact('rejected-provenance', 'value', 3, null, sceneId), [field]: value } }]
+      })).rejects.toMatchObject({ status: 400, message: expect.stringContaining(value) });
+      await expect(story.applyStateBatch(ownerId, projectId, buildId, {
+        idempotencyKey: `correction:bad-provenance-hint:${field}`, expectedBuildRevision: run.revision,
+        operations: [{ op: 'upsert-canon-fact', value: { ...fact('rejected-provenance', 'value', 3, null, sceneId), [field]: value } }]
+      })).rejects.toThrow(hint);
+    }
+    expect(await prisma.canonFact.count({ where: { buildRunId: buildId, key: 'rejected-provenance' } })).toBe(0);
+  });
+
   it('CAS-updates and atomically reorders full Scene metadata while synchronizing mapped build units', async () => {
     const suffix = randomUUID();
     const reorderProjectId = `reorder-project-${suffix}`;
@@ -485,6 +504,26 @@ describeDatabase('Novel Build correction-wave invariants', () => {
     expect(await prisma.buildTask.count({ where: { buildRunId: scale.id, type: 'create-scene-plan-shard' } })).toBe(32);
     const aggregateScenePlans = await prisma.buildTask.findFirstOrThrow({ where: { buildRunId: scale.id, type: 'aggregate-scene-plans' } });
     expect(aggregateScenePlans.dependencyIds).toHaveLength(32);
+    const firstPlan = result.artifacts.find(artifact => artifact.key === 'scale-scene-1')!;
+    const firstUnit = await prisma.buildManuscriptUnit.findUniqueOrThrow({ where: { buildRunId_kind_key: { buildRunId: scale.id, kind: 'SCENE', key: 'scale-scene-1' } } });
+    const changed = await story.applyArtifactBatch(ownerId, projectId, scale.id, {
+      idempotencyKey: 'correction:replace-scene-plan', expectedBuildRevision: result.buildRevision,
+      operations: [{ op: 'replace', artifactId: firstPlan.id, expectedVersion: firstPlan.version, artifact: {
+        type: 'scene-plan', key: firstPlan.key, title: 'Corrected scene', status: 'accepted',
+        content: { ...firstPlan.content, title: 'Corrected scene', storyDate: '2026-09-20', storyTime: '05:05', povRef: { type: 'character', id: characterId } }
+      } }]
+    }, { allowTaskBinding: false });
+    const replacement = changed.artifacts.find(artifact => artifact.id !== firstPlan.id)!;
+    expect(await prisma.buildManuscriptUnit.findUniqueOrThrow({ where: { id: firstUnit.id } })).toMatchObject({
+      planArtifactId: replacement.id, title: 'Corrected scene', storyDate: '2026-09-20', storyTime: '05:05', povCharacterId: characterId,
+      branchId: firstUnit.branchId
+    });
+    expect(await prisma.storyArtifactBinding.count({ where: { artifactId: replacement.id, unitId: firstUnit.id, bindingKind: 'BUILD_UNIT' } })).toBe(1);
+    // Repair older runs that already point at the replacement but retained old scalar fields.
+    await prisma.buildManuscriptUnit.update({ where: { id: firstUnit.id }, data: { storyTime: '05:05-05:20 AM', metadata: { ...replacement.content, customNote: 'keep runtime annotation' } as Prisma.InputJsonObject } });
+    await prisma.$transaction(tx => builds.materializeChapterGraphsInTransaction(tx, scale.id));
+    expect(await prisma.buildManuscriptUnit.findUniqueOrThrow({ where: { id: firstUnit.id } })).toMatchObject({ storyTime: '05:05', metadata: { customNote: 'keep runtime annotation' } });
+
     await prisma.canonFact.createMany({ data: Array.from({ length: 510 }, (_, index) => ({
       projectId, buildRunId: scale.id, key: `cursor-fact-${index}`, subjectType: 'fixture', subjectId: `fixture-${index}`,
       predicate: 'contains', object: `cursorneedle ${index}`, status: 'CANONICAL' as const, confidence: 1
