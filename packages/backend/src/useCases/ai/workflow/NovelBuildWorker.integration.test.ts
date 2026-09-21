@@ -289,6 +289,33 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
     await exports.delete(userId, projectId, generated.id);
   }, 120_000);
 
+  it('uses a catalog-sized request window at the model boundary and honors an explicit input cap', async () => {
+    for (const explicitCap of [undefined, 64000]) {
+      const run = await createBudgetRun(prisma, projectId, userId, `${suffix}-window-${explicitCap}`, 'priced/model', 10000000);
+      const brainstorm = explicitCap ? 'Brief context.' : 'Remember the established diner names. '.repeat(16000) + 'FINAL-BRAINSTORM-DETAIL';
+      await prisma.buildRun.update({ where: { id: run.id }, data: { brainstorm } });
+      await prisma.buildTask.updateMany({ where: { buildRunId: run.id }, data: { executionPolicy: {
+        model: 'priced/model', maxOutputTokens: 12000, ...(explicitCap ? { maxInputTokens: explicitCap } : {})
+      } } });
+      const executor = vi.fn<BuildModelExecutor>(async input => {
+        expect(input.contract.budget.maxInputTokens).toBe(explicitCap ?? 1036576);
+        expect(input.contract.metadata.contextWindow).toEqual({ contextTokens: 1048576, inputTokens: 1036576 });
+        if (!explicitCap) {
+          expect(input.system).toContain('FINAL-BRAINSTORM-DETAIL');
+          expect(input.system.length).toBeGreaterThan(400000);
+        }
+        return workerSuccess(100, 25);
+      });
+      await resumeRunnableBuilds(prisma, {
+        workerId: `window:${explicitCap}`, buildRunIds: [run.id], maxTasksPerSweep: 1, modelExecutor: executor,
+        modelPricing: { 'priced/model': { inputMicrosPerMillion: 1000, outputMicrosPerMillion: 1000, source: 'catalog fixture', version: '1', limits: { context: 1048576, output: 65536 } } }
+      });
+      expect(executor).toHaveBeenCalledTimes(1);
+      const trace = await prisma.buildTrace.findFirstOrThrow({ where: { buildRunId: run.id } });
+      expect((trace.inputs as { contextCoverage: { requestInputTokens: number } }).contextCoverage.requestInputTokens).toBe(explicitCap ?? 1036576);
+    }
+  });
+
   it('pauses before a priced task can exceed the authorized cost ceiling', async () => {
     const expensiveRun = await createBudgetRun(prisma, projectId, userId, suffix, 'priced/model', 1);
     const executor = vi.fn<BuildModelExecutor>(async () => { throw new Error('executor must not run past preflight budget gate'); });

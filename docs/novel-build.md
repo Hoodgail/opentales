@@ -237,6 +237,9 @@ The available request input is the smallest supported input across the worker's 
 
 If the actual available budget is insufficient, priority packing reports truncation and retains retrieval identifiers; workers can read the complete persisted records. Tool history is checked before subsequent model requests and is never silently discarded. Context-size estimates are approximate, not provider tokenizer counts. A larger context reduces missing evidence but does not guarantee factual consistency, so reference validation and manuscript quality gates remain required.
 
-`BuildTrace.inputs.contextCoverage` records the resolved window, request input allowance, estimated tool-schema size, context budget, per-section packing results, truncation, and cumulative task budget. `contextTokenCount` measures the packed context; provider usage measures the complete request including repeated context across tool exchanges. These are different quantities.
+`BuildTrace.inputs.contextCoverage` records the resolved window, request input allowance, estimated tool-schema size, context budget, per-section packing results, truncation, and task invocation limits. `contextTokenCount` measures the packed context; provider usage measures the complete request including repeated context across tool exchanges. These are different quantities.
 
 The build's `maxTokens` is cumulative across requests and retries. It is not a context-window setting. Using a large context repeatedly can consume a 5M budget quickly. Each tool-loop request checks remaining build tokens and priced cost; increasing context capacity does not remove these limits.
+
+
+During selective replanning, a surviving scene may temporarily refer to an invalidated predecessor. Artifact writes accept that pending dependency only if its exact key is declared in a validated or accepted chapter brief. Invented keys still fail. Diagnostics continue to report the missing scene until its replacement is persisted, and planning completion still requires the complete scene set.

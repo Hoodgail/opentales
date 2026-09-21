@@ -972,13 +972,17 @@ export class StoryStateUseCase {
     });
     const briefs = new Set<string>();
     const scenes = new Set<string>();
+    const declaredScenes = new Set<string>();
     const characters = new Set<string>();
     const locations = new Set<string>();
     const canonicalLocations = await tx.location.findMany({ where: { projectId }, select: { id: true, name: true } });
     for (const location of canonicalLocations) for (const key of [location.id, location.name].flatMap(referenceVariants)) locations.add(key);
     for (const artifact of artifacts) {
       const content = artifact.content as JsonObject;
-      if (artifact.type === 'CHAPTER_BRIEF') briefs.add(typeof content.chapterKey === 'string' ? content.chapterKey : artifact.key);
+      if (artifact.type === 'CHAPTER_BRIEF') {
+        briefs.add(typeof content.chapterKey === 'string' ? content.chapterKey : artifact.key);
+        if (artifact.status === 'VALIDATED' || artifact.status === 'ACCEPTED') for (const key of stringArray(content.sceneKeys)) declaredScenes.add(key);
+      }
       if (artifact.type === 'SCENE_PLAN') scenes.add(typeof content.sceneKey === 'string' ? content.sceneKey : artifact.key);
       if (artifact.type === 'WORLD_BIBLE' && Array.isArray(content.geography)) {
         for (const entry of content.geography.filter(isObject)) for (const key of [entry.key, entry.name].flatMap(referenceVariants)) locations.add(key);
@@ -996,7 +1000,10 @@ export class StoryStateUseCase {
       }
       if (artifact.type === 'SCENE_PLAN') {
         if (typeof content.chapterKey !== 'string' || !briefs.has(content.chapterKey)) throw new HttpError(409, `Scene plan '${artifact.key}' references missing chapter brief '${String(content.chapterKey)}'`);
-        for (const dependency of stringArray(content.dependencies)) if (!scenes.has(dependency)) throw new HttpError(409, `Scene plan '${artifact.key}' references missing dependency '${dependency}'`);
+        // Replanning can temporarily remove a producer while its consumers remain.
+        // Exact allocations authorize these pending references during writes;
+        // diagnostics and the planning gate still require persisted scene plans.
+        for (const dependency of stringArray(content.dependencies)) if (!scenes.has(dependency) && !declaredScenes.has(dependency)) throw new HttpError(409, `Scene plan '${artifact.key}' references missing dependency '${dependency}'`);
       }
       // Act architecture is produced before chapter briefs, so its declared chapter
       // keys are forward references. The planning quality gate validates that the

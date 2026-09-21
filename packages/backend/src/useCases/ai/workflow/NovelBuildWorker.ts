@@ -1539,7 +1539,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         ? criterionEntries.map(([id, value]) => ({ id, description: criterionDescription(id, value), check: id === 'rubric' ? 'rubric' : 'deterministic' }))
         : [{ id: 'task-complete', description: `${claimed.task.type} completes with persisted evidence.` }],
       budget: {
-        maxInputTokens: numeric(policy.maxInputTokens, contextWindow ? contextWindow.inputTokens * (maxToolCalls + 1) : defaults.maxInputTokens),
+        maxInputTokens: numeric(policy.maxInputTokens, contextWindow?.inputTokens ?? defaults.maxInputTokens),
         maxOutputTokens: numeric(policy.maxOutputTokens, defaults.maxOutputTokens),
         maxToolCalls,
         maxDurationMs: numeric(policy.maxDurationMs, defaults.maxDurationMs),
