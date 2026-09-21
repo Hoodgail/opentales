@@ -187,7 +187,7 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
     expect(pricedTraces.length).toBeGreaterThan(0);
     expect(pricedTraces.every((trace) => (trace.costMicros ?? 0) > 0)).toBe(true);
     expect(pricedTraces.filter(trace => trace.status === 'COMPLETED').every((trace) => trace.costMicros === (trace.inputTokens ?? 0) * 2 + (trace.outputTokens ?? 0) * 8)).toBe(true);
-    expect(pricedTraces.some(trace => trace.status === 'FAILED' && trace.error?.includes('Controlled transient failure'))).toBe(true);
+    expect(pricedTraces.some(trace => trace.status === 'FAILED' && trace.error?.includes('Controlled transient failure')), JSON.stringify(pricedTraces.filter(trace => trace.status !== 'COMPLETED').map(trace => ({ status: trace.status, error: trace.error })))).toBe(true);
     expect(pricedTraces.find(trace => trace.error?.includes('Controlled transient failure'))?.modelParameters).toMatchObject({ pricing: { chargedReservedCeiling: true } });
     expect(tasks.find(task => task.type === 'create-character-bibles')?.attempts).toBe(2);
     expect(run.costMicrosUsed).toBe(traces.reduce((sum, trace) => sum + (trace.costMicros ?? 0), 0));
