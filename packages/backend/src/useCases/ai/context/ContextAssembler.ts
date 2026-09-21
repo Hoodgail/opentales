@@ -82,7 +82,7 @@ export class ContextAssembler {
 
     const [project, docs, targetScene, targetChapter, artifacts, inputArtifacts, canon, entityStates, timelineEvents, openLoops, plotThreads, priorEvaluations, orderedScenes, buildUnits, foundations] = await Promise.all([
       this.loadProject(input.projectId),
-      this.loadPlanningDocs(input.projectId),
+      this.loadPlanningDocs(input.projectId, input.fullContext),
       sceneId ? this.loadScene(input.projectId, sceneId, input.task?.scope.buildRunId) : Promise.resolve(null),
       chapterId ? this.loadChapter(input.projectId, chapterId, input.task?.scope.buildRunId) : Promise.resolve(null),
       this.loadDynamicRows('storyArtifact', { projectId: input.projectId, ...(input.task?.scope.buildRunId ? { buildRunId: input.task.scope.buildRunId } : {}), status: { in: ['VALIDATED', 'ACCEPTED'] }, invalidatedAt: null }, input.fullContext ? undefined : 80),
@@ -128,7 +128,7 @@ export class ContextAssembler {
     const [characters, locations, recentChapters] = await Promise.all([
       this.loadRelevantCharacters(input.projectId, query, explicitCharacterIds, targetScene?.povCharacterId ?? activeChapter?.povCharacterId ?? null, input.fullContext),
       this.loadRelevantLocations(input.projectId, query, explicitLocationIds, targetScene?.locationId ?? activeChapter?.locationId ?? null, input.fullContext),
-      this.loadRecentCausalChapters(input.projectId, activeChapter?.number ?? null, input.task?.scope.buildRunId)
+      this.loadRecentCausalChapters(input.projectId, activeChapter?.number ?? null, input.task?.scope.buildRunId, input.fullContext)
     ]);
     const requiredStateIds = new Set(input.task?.inputs.filter((item) => ['canon-fact', 'entity-state', 'timeline-event'].includes(item.type)).map((item) => item.id) ?? []);
     const requiredStateUnitIds = new Set([...causalUnits.map((unit) => unit.id), ...(targetUnit ? [targetUnit.id] : [])]);
@@ -148,6 +148,21 @@ export class ContextAssembler {
       visiblePlotThreads.map((row) => compactJson(row)),
       visibleOpenLoops.map((row) => compactJson(row))
     );
+
+    // Full context must not spend its window on duplicate copies of the same
+    // artifact. These records already appear complete in their named sections.
+    const representedArtifacts = new Set([
+      ...artifactGroups.storyBriefRows.slice(0, 1), ...artifactGroups.narrativeContractRows.slice(0, 1),
+      ...characterArtifacts, ...artifactGroups.worldRows, ...artifactGroups.threadRows
+    ].map(rowIdentifier));
+    const representedDocs = new Set([
+      ...(artifactGroups.storyBriefRows.length ? [] : docGroups.storyBriefRows.slice(0, 1)),
+      ...(artifactGroups.narrativeContractRows.length ? [] : docGroups.narrativeContractRows.slice(0, 1)),
+      ...docGroups.worldRows, ...docGroups.threadRows, ...docGroups.styleRows
+    ].map(rowIdentifier));
+    const fullTaskDocs = docs.filter(doc => !representedDocs.has(doc.id));
+    const fullTaskArtifacts = [...new Map([...inputArtifacts, ...artifacts].map(row => [rowIdentifier(row), row])).values()]
+      .filter(row => !representedArtifacts.has(rowIdentifier(row)));
 
     const sections: ContextSection[] = [
       {
@@ -174,11 +189,12 @@ export class ContextAssembler {
         content: joinUseful(
           formatActiveTarget(activeChapter, targetScene),
           targetUnit ? formatBuildUnit(targetUnit, input.fullContext) : '',
-          formatImmutableInputs(input.fullContext ? [...new Map([...inputArtifacts, ...artifacts].map(row => [rowIdentifier(row), row])).values()] : inputArtifacts, input.fullContext),
+          formatImmutableInputs(input.fullContext ? fullTaskArtifacts : inputArtifacts, input.fullContext),
+          input.fullContext ? fullTaskDocs.map(doc => compactJson(doc)) : [],
           priorEvaluations.map((evaluation) => compactJson({ id: evaluation.id, passed: evaluation.passed, rubric: evaluation.rubric, scores: evaluation.scores, checks: evaluation.checks, feedback: evaluation.feedback, evidence: evaluation.evidence })),
           buildUnits.length ? `Build manuscript unit index (retrieve prose just in time by id):\n${formatBuildUnitIndex(buildUnits)}` : ''
         ),
-        identifiers: compact([activeChapter?.id, targetScene?.id, targetUnit?.id, ...inputArtifacts.map(rowIdentifier), ...priorEvaluations.map(rowIdentifier), ...buildUnits.map((unit) => unit.id)]),
+        identifiers: compact([activeChapter?.id, targetScene?.id, targetUnit?.id, ...inputArtifacts.map(rowIdentifier), ...(input.fullContext ? fullTaskDocs.map(doc => doc.id) : []), ...priorEvaluations.map(rowIdentifier), ...buildUnits.map((unit) => unit.id)]),
         priority: 96,
         maxTokens: 5_000,
         required: true,
@@ -274,11 +290,11 @@ export class ContextAssembler {
     }) : null);
   }
 
-  private async loadPlanningDocs(projectId: string) {
+  private async loadPlanningDocs(projectId: string, fullContext = false) {
     const docs = await this.prisma.projectDoc.findMany({
       where: { projectId, kind: { in: ['BRAINSTORM', 'INSTRUCTIONS', 'REFERENCE', 'NOTE'] } },
       orderBy: [{ order: 'asc' }, { updatedAt: 'desc' }],
-      take: 60,
+      take: fullContext ? undefined : 60,
       include: { bodyWriting: { include: { defaultBranch: { include: { headVersion: true } } } } }
     });
     return docs.map((doc) => ({ id: doc.id, title: doc.title, content: bodyOf(doc.bodyWriting) }));
@@ -380,7 +396,7 @@ export class ContextAssembler {
       }));
   }
 
-  private async loadRecentCausalChapters(projectId: string, targetNumber: number | null, buildRunId?: string) {
+  private async loadRecentCausalChapters(projectId: string, targetNumber: number | null, buildRunId?: string, fullContext = false) {
     const chapters = await this.prisma.chapter.findMany({
       where: {
         projectId,
@@ -388,7 +404,7 @@ export class ContextAssembler {
         ...(targetNumber === null ? {} : { number: { lt: targetNumber } })
       },
       orderBy: { number: 'desc' },
-      take: 3,
+      take: fullContext ? undefined : 3,
       include: { bodyWriting: { include: { defaultBranch: { include: { headVersion: true } }, branches: { where: buildRunId ? { buildRunId } : { id: '__none__' }, include: { headVersion: true } } } } }
     });
     return chapters.reverse().map((chapter) => ({
@@ -396,7 +412,7 @@ export class ContextAssembler {
       number: chapter.number,
       title: chapter.title,
       summary: chapter.summary,
-      tail: tailWords(chapter.bodyWriting.branches[0]?.headVersion?.body ?? bodyOf(chapter.bodyWriting), 1_200),
+      tail: fullContext ? chapter.bodyWriting.branches[0]?.headVersion?.body ?? bodyOf(chapter.bodyWriting) : tailWords(chapter.bodyWriting.branches[0]?.headVersion?.body ?? bodyOf(chapter.bodyWriting), 1_200),
       branchId: chapter.bodyWriting.branches[0]?.id ?? chapter.bodyWriting.defaultBranch?.id ?? null,
       versionId: chapter.bodyWriting.branches[0]?.headVersionId ?? chapter.bodyWriting.defaultBranch?.headVersionId ?? null
     }));

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { characterIdentityIndex, chapterAllocationIndex, worldLocationIndex, estimateTokens, packContextSections, selectTemporalState, type ContextSection } from './ContextAssembler.js';
+import type { PrismaClient } from '@prisma/client';
+import { ContextAssembler, characterIdentityIndex, chapterAllocationIndex, worldLocationIndex, estimateTokens, packContextSections, selectTemporalState, type ContextSection } from './ContextAssembler.js';
 
 describe('context packing', () => {
 it('preserves exact geography keys beyond a verbose world-bible excerpt', () => {
@@ -113,4 +114,20 @@ it('preserves character names and aliases even when descriptive prose cannot fit
   expect(pack.text).toContain('Mara Chen');
   expect(pack.text).toContain('Night Cook');
   expect(pack.truncated).toBe(true);
+});
+
+it('loads all ordinary project notes through the assembler when a large window can hold them', async () => {
+  const docs = Array.from({ length: 70 }, (_, i) => ({
+    id: `note-${i}`, title: `Notebook ${i}`, bodyWriting: { defaultBranch: { headVersion: { body: 'Established story detail. '.repeat(400) + `END-NOTE-${i}` } } }
+  }));
+  const prisma = {
+    project: { findUnique: async () => null },
+    projectDoc: { findMany: async (args: { take?: number }) => docs.slice(0, args.take) },
+    scene: { findMany: async () => [] }, character: { findMany: async () => [] },
+    location: { findMany: async () => [] }, chapter: { findMany: async () => [] }
+  } as unknown as PrismaClient;
+  const pack = await new ContextAssembler(prisma).assemble({ projectId: 'project', task: null, fullContext: true, tokenBudget: 850000 });
+  expect(pack.estimatedTokens).toBeGreaterThan(100000);
+  expect(pack.truncated).toBe(false);
+  for (let i = 0; i < 70; i++) expect(pack.text).toContain(`END-NOTE-${i}`);
 });
