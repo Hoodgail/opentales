@@ -255,12 +255,12 @@ describe('durable Novel Build execution contract', () => {
       .every((task) => task.acceptanceCriteria.exactChapterSceneKeysRequired === true && task.executionPolicy.exactPlanningReferencesRequired === true)).toBe(true);
     expect(defaultTaskBudget({ type: 'create-beats' } as any)).toMatchObject({
       maxInputTokens: 256_000,
-      maxOutputTokens: 48_000,
+      maxOutputTokens: 64_000,
       maxToolCalls: 16
     });
     expect(defaultTaskBudget({ type: 'create-scene-plans' } as any)).toMatchObject({
       maxInputTokens: 256_000,
-      maxOutputTokens: 48_000
+      maxOutputTokens: 64_000
     });
     expect(defaultTaskBudget({ type: 'create-story-brief' } as any)).toMatchObject({
       maxInputTokens: 96_000,
@@ -354,6 +354,13 @@ describe('durable Novel Build execution contract', () => {
       retryable: true,
       mayHaveUnreportedUsage: false
     });
+  });
+
+  it('backs off unavailable connections instead of exhausting retries in milliseconds', () => {
+    expect(executionFailureDisposition(new Error('Cannot connect to API: Request was cancelled.'))).toMatchObject({ retryable: true, retryAfterMs: 60_000, mayHaveUnreportedUsage: true });
+    expect(executionFailureDisposition(Object.assign(new Error('Service unavailable'), { statusCode: 503 }))).toMatchObject({ retryable: true, retryAfterMs: 60_000 });
+    expect(executionFailureDisposition(Object.assign(new Error('Cannot connect to API'), { isRetryable: false }))).toMatchObject({ retryable: false });
+    expect(executionFailureDisposition(Object.assign(new Error('Cannot connect to API'), { isRetryable: false })).retryAfterMs).toBeUndefined();
   });
 
   it('keeps rate-limit rejection free of invented usage and honors durable cooldown hints', () => {

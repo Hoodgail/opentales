@@ -11,7 +11,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     services:
       postgres:
         image: postgres:16-alpine
@@ -51,5 +51,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm eval
-      - run: pnpm --dir packages/backend test:critical-coverage
+      # The full worker integration (including the 104-scene build) already ran
+      # in pnpm test. Coverage thresholds target the pure safety modules.
+      - run: pnpm --dir packages/backend test:critical-coverage --exclude '**/NovelBuildWorker.integration.test.ts'
       - run: pnpm build

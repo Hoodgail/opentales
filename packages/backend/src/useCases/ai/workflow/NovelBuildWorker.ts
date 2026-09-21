@@ -2091,7 +2091,7 @@ export function defaultTaskBudget(task: BuildTask): {
   if (AGGREGATE_ARTIFACT_TASK_TYPES.has(task.type)) {
     return {
       maxInputTokens: 256_000,
-      maxOutputTokens: 48_000,
+      maxOutputTokens: 64_000,
       maxToolCalls: 16,
       maxDurationMs: 15 * 60_000
     };
@@ -2198,7 +2198,7 @@ export function objectiveForTask(task: BuildTask, buildObjective: string, manife
       ? `Across all ${target.targetChapterCount} briefs, declare exactly ${target.targetSceneCount} globally unique sceneKeys in total. Chapter allocations may be uneven, but their sum must match this exact target. Count the combined allocation before persisting the final batch.`
       : '',
     task.type === 'create-timeline'
-      ? 'Keep timeline events concise: use ordered timestamps or relative markers, exact scene references, and causal dependencies. Do not repeat full scene prose or chapter synopses inside chronology fields.'
+      ? 'Build the planning timeline from the complete supplied scene-plan artifacts. Manuscript units and extracted canon timelines do not exist yet at this stage; sceneRef should reference the exact scene-plan artifact, not an invented manuscript unit. Keep events concise: use ordered timestamps or relative markers, exact scene references, and causal dependencies. Do not repeat full scene prose or chapter synopses inside chronology fields. Persist the timeline and report its returned artifact ID; the worker runs deterministic lint after your report.'
       : '',
     task.type === 'extract-scene-canon'
       ? 'Read the assigned build unit and copy exact IDs: sourceUnitId and scene references use unit.id; chapter references use unit.parentUnitId; artifact references use unit.planArtifactId, never writingId or branchId. Keys in metadata are not database IDs. On a rejected reference, correct that exact field rather than guessing IDs or dropping all provenance. Use the current temporally valid canon supplied in context; query only missing or explicitly truncated records. Commit the assigned scene delta atomically with the exact taskId from the task contract. A subject/predicate pair is one property with one value at a time: use specific predicates (water-level, electrical-condition), never generic has_condition/has_fact for unrelated facts. On re-extraction reuse the exact keys already sourced to this scene, not keys from earlier scenes that merely mention the same entity. Do not create competing keys or move an earlier scene state to the current scene. Entity stateKey is also a single property: use specific keys such as knows-relay-mechanism and knows-shared-loss, never generic knowledge for independent beliefs. Avoid redundant narrative inventory summaries under possession; use specific item properties when a durable state is needed. Validity intervals are inclusive: if a new state starts at order N, the earlier state must end at N-1, not N. Preserve earlier state intervals and model changes with non-overlapping validity intervals. Correct any conflicts rejected by commitCanonDelta before reporting. The next deterministic workflow stage runs diagnostics; do not spend another model round trip repeating it here.'
@@ -2847,7 +2847,8 @@ export function executionFailureDisposition(error: unknown): {
     ? error.message.trim()
     : 'Novel Build task failed';
   const detail = providerErrorDetail(value.responseBody) ?? providerErrorDetail(cause.responseBody);
-  const retryAfterMs = providerRetryAfterMs(statusCode, value.responseHeaders ?? cause.responseHeaders, detail);
+  const retryAfterMs = providerRetryAfterMs(statusCode, value.responseHeaders ?? cause.responseHeaders, detail)
+    ?? (!explicitlyNonRetryable && !permanentRejection && /cannot connect to api|fetch failed|ECONNRESET|socket hang up/i.test(baseMessage) ? 60_000 : undefined);
   return {
     message: detail && !baseMessage.toLowerCase().includes(detail.toLowerCase())
       ? `${baseMessage}: ${detail}`
@@ -2870,7 +2871,7 @@ function providerRetryAfterMs(statusCode: number | null, headers: unknown, detai
   }
   const reset = detail?.match(/resets? in\s+(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?/i);
   if (reset && reset.slice(1).some(Boolean)) return Math.min(86_400_000, Math.max(1000, ((Number(reset[1]) || 0) * 3600 + (Number(reset[2]) || 0) * 60 + (Number(reset[3]) || 0)) * 1000));
-  return statusCode === 429 ? 60_000 : undefined;
+  return statusCode === 429 || statusCode === 503 ? 60_000 : undefined;
 }
 
 function numericStatus(value: unknown): number | null {

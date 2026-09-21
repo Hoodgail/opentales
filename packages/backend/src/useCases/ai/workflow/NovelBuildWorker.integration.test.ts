@@ -359,6 +359,33 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
     } finally { if (priorJudge === undefined) delete process.env.AI_JUDGE_MODEL; else process.env.AI_JUDGE_MODEL = priorJudge; }
   });
 
+  it('accepts the observed reasoning-inclusive timeline output by default while enforcing an explicit lower cap', async () => {
+    for (const explicitCap of [undefined, 48_000]) {
+      const run = await createBudgetRun(prisma, projectId, userId, `${suffix}-timeline-output-${explicitCap}`, 'priced/model', 10_000_000);
+      await prisma.buildRun.update({ where: { id: run.id }, data: { authorizationScope: { artifactTypes: ['timeline'], chapterIds: [], sceneIds: [], allowPlanningArtifacts: true, allowCanonWrites: false, allowChapterWrites: false, allowSceneWrites: false, allowDiagnostics: true, expiresAt: null } } });
+      await prisma.buildTask.updateMany({ where: { buildRunId: run.id }, data: {
+        key: 'timeline', type: 'create-timeline', assignedAgent: 'librarian',
+        skillVersions: { 'novel-build': '1.1.0', 'novel-continuity': '1.1.0' },
+        acceptanceCriteria: { requiredArtifactTypes: ['timeline'] },
+        executionPolicy: { model: 'priced/model', ...(explicitCap ? { maxOutputTokens: explicitCap } : {}) }
+      } });
+      const executor: BuildModelExecutor = async input => {
+        const receipt = await invokeWorkerTool(input, 'applyArtifactBatch', {
+          buildRunId: run.id, taskId: input.contract.scope.buildTaskId, idempotencyKey: 'timeline-output',
+          operations: [{ action: 'upsert', type: 'timeline', key: 'timeline', title: 'Opening timeline', status: 'VALIDATED', content: { events: [{ eventKey: 'opening', title: 'Diner opens', chronology: { order: 1 }, dependencyKeys: [], participantRefs: [] }] } }]
+        }) as { results: Array<{ id: string }> };
+        const output = workerSuccess(376_564, 51_775);
+        return { ...output, result: { ...output.result, artifactIds: receipt.results.map(item => item.id) } };
+      };
+      await resumeRunnableBuilds(prisma, { workerId: `timeline-output:${explicitCap}`, buildRunIds: [run.id], maxTasksPerSweep: 1, modelExecutor: executor,
+        modelPricing: { 'priced/model': { ...fixturePricing['priced/model'], limits: { context: 1_048_576, output: 65_536 } } } });
+      const task = await prisma.buildTask.findFirstOrThrow({ where: { buildRunId: run.id } });
+      expect(task.status, task.lastError ?? '').toBe(explicitCap ? 'FAILED' : 'DONE');
+      expect(await prisma.storyArtifact.count({ where: { buildRunId: run.id, type: 'TIMELINE', invalidatedAt: null } })).toBe(explicitCap ? 0 : 1);
+      if (explicitCap) expect(task.lastError).toContain('outputTokens=51775/48000');
+    }
+  });
+
   it('pauses before a priced task can exceed the authorized cost ceiling', async () => {
     const expensiveRun = await createBudgetRun(prisma, projectId, userId, suffix, 'priced/model', 1);
     const executor = vi.fn<BuildModelExecutor>(async () => { throw new Error('executor must not run past preflight budget gate'); });
@@ -1389,7 +1416,7 @@ function deterministicExecutor(prisma: PrismaClient, buildRunId: string, scale?:
       },
       // Reproduce the live chapter-shard conversation that grew past 96k.
       inputTokens: scale && taskType === 'create-scene-plan-shard' ? 100_881 : 100,
-      outputTokens: scale && taskType === 'create-timeline' ? 19_086 : 50,
+      outputTokens: scale && taskType === 'create-timeline' ? 51_775 : 50,
       toolCalls,
       toolResults,
       modelId: 'priced/model'

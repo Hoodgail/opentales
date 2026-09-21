@@ -257,3 +257,5 @@ Some OpenAI-compatible relays report reasoning separately: `total_tokens = promp
 The production-size database test executes all 32 chapters and 104 scenes through the real worker, revisions, current-head compilation and checksum-verified export using deterministic model responses. This validates workflow mechanics, not the literary quality or availability of a real provider. The independent live-provider builds remain a separate requirement.
 
 Default worker output allowances reserve 32,000 tokens (including reasoning), clamped to the selected routes’ advertised output limits. Explicit policy limits remain authoritative. Manuscript-wide revisers budget a read and a write per scoped unit plus reporting/repair calls, and inspection cannot consume the calls reserved for persisting those units.
+
+Whole-book aggregate planning allows 64,000 output tokens, clamped to catalog limits; the live timeline exposed a 51,775-token invocation including reasoning. Explicit caps still apply. Connection failures and HTTP 503 responses without a retry hint wait one minute before another bounded attempt, avoiding immediate retry exhaustion.
