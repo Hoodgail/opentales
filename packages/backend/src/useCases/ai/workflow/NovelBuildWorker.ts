@@ -912,11 +912,14 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       usage.inputTokens > contract.budget.maxInputTokens || usage.outputTokens > contract.budget.maxOutputTokens
     );
     if (overrun) {
-      throw new Error(
+      throw Object.assign(new Error(
         `Provider usage exceeded the task invocation limit `
         + `(inputTokens=${overrun.inputTokens}/${contract.budget.maxInputTokens}, `
         + `outputTokens=${overrun.outputTokens}/${contract.budget.maxOutputTokens})`
-      );
+      ), {
+        workerToolCalls: generation.toolCalls.map(compactToolCall),
+        workerToolResults: generation.toolResults.map(compactToolResult)
+      });
     }
     const result = workerResultSchema.parse(generation.result);
     if (result.status === 'blocked' && internalBudgetExhausted) {
@@ -2044,6 +2047,11 @@ export function defaultTaskBudget(task: BuildTask): {
       maxToolCalls: 12,
       maxDurationMs: 15 * 60_000
     };
+  }
+  if (task.type === 'create-scene-plan-shard') {
+    // A chapter's inspection/write conversation can exceed 96k even though
+    // the initial packed context fits. Keep a bounded allowance for that growth.
+    return { maxInputTokens: 128_000, maxOutputTokens: 12_000, maxToolCalls: 16, maxDurationMs: 15 * 60_000 };
   }
   return {
     maxInputTokens: 96_000,

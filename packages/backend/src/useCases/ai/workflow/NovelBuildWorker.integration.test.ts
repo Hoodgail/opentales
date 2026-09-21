@@ -554,13 +554,16 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
       workerId: `overrun:${suffix}`, buildRunIds: [fixture.run.id], maxTasksPerSweep: 1,
       modelExecutor: async (input) => {
         const unit = await prisma.buildManuscriptUnit.findUniqueOrThrow({ where: { id: fixture.sceneUnit.id }, include: { branch: true } });
-        await invokeWorkerTool(input, 'applyBuildUnitPatch', {
+        const patchResult = await invokeWorkerTool(input, 'applyBuildUnitPatch', {
           buildRunId: fixture.run.id, taskId: input.contract.scope.buildTaskId, unitId: unit.id,
           idempotencyKey: `overrun-write:${fixture.run.id}`,
           expectedUnitRevision: unit.revision, expectedHeadVersionId: unit.branch.headVersionId,
           body: 'This over-budget attempt body must be compensated.'
         });
-        return workerSuccess(26_000, 1_000);
+        return { ...workerSuccess(26_000, 1_000),
+          toolCalls: [{ toolName: 'applyBuildUnitPatch', toolCallId: 'overrun-patch', input: { unitId: unit.id } }],
+          toolResults: [{ toolName: 'applyBuildUnitPatch', toolCallId: 'overrun-patch', output: patchResult }]
+        };
       }, modelPricing: fixturePricing
     });
     const [run, task, trace, unitAfter] = await Promise.all([
@@ -577,6 +580,8 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
     expect(trace.inputTokens).toBe(26_000);
     expect(trace.outputTokens).toBe(1_000);
     expect(trace.costMicros).toBeGreaterThan(0);
+    expect(trace.toolCalls).toEqual(expect.arrayContaining([expect.objectContaining({ toolName: 'applyBuildUnitPatch' })]));
+    expect(trace.toolResults).toEqual(expect.arrayContaining([expect.objectContaining({ toolName: 'applyBuildUnitPatch' })]));
     expect(unitAfter.branch.headVersion?.body).toBe(fixture.initialBody);
   }, 15_000);
 
@@ -1253,7 +1258,8 @@ function deterministicExecutor(prisma: PrismaClient, buildRunId: string, scale?:
         quality: { fixture: 0.97 },
         unresolvedQuestions: []
       },
-      inputTokens: 100,
+      // Reproduce the live chapter-shard conversation that grew past 96k.
+      inputTokens: scale && taskType === 'create-scene-plan-shard' ? 100_881 : 100,
       outputTokens: 50,
       toolCalls,
       toolResults,
