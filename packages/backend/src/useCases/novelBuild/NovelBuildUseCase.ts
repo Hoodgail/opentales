@@ -509,7 +509,8 @@ export class NovelBuildUseCase {
           }
         });
       }
-      if (['critique-chapter', 'critique-scene'].includes(task.type) && input.qualityScore !== undefined && task.qualityThreshold !== null && input.qualityScore >= task.qualityThreshold) {
+      const revisionRequired = isJsonObjectValue(input.result) && input.result.revisionRequired === true;
+      if (!revisionRequired && ['critique-chapter', 'critique-scene'].includes(task.type) && input.qualityScore !== undefined && task.qualityThreshold !== null && input.qualityScore >= task.qualityThreshold) {
         const revision = await tx.buildTask.findFirst({ where: { buildRunId, dependencyIds: { has: task.id }, type: { in: ['revise-chapter', 'revise-scene-unit'] }, status: 'BLOCKED' } });
         if (revision) {
           await this.repository.transitionTask(tx, revision, {

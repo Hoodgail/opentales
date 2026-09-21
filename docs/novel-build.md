@@ -265,3 +265,5 @@ When every reachable execution route has catalog output limits, workers reserve 
 Setup/payoff-map workers receive a protected index of every typed setup/payoff reference and plot-thread `setupPayoffKeys` entry. A candidate map must cover those identifiers before its batch can be saved. The final planning audit independently checks the same logical references, so legacy incomplete maps still cannot pass acceptance.
 
 Timeline prerequisite diagnostics accept the same current record IDs and stable keys as canon writes. Stable keys survive re-extraction into a new event version. Missing or invalidated prerequisites and reversed chronology still fail; historical IDs are not silently redirected.
+
+A passing prose critique does not skip the downstream revision when current deterministic diagnostics contain errors. The independent judge's score remains unchanged in its evaluation; the completion receipt separately records that revision is required. Final diagnostic and quality gates still enforce acceptance.

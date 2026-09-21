@@ -1269,6 +1269,13 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       && claimed.task.type !== 'quality-gate'
       && validation.passed;
     if (disposition === 'accept' || diagnosticCriticStage) {
+      // A strong prose score cannot waive an unresolved continuity error.
+      // Preserve the judge's real score, but let the downstream reviser run.
+      const maySkipRevision = ['critique-scene', 'critique-chapter'].includes(claimed.task.type)
+        && claimed.task.qualityThreshold !== null && score >= claimed.task.qualityThreshold;
+      const revisionRequired = maySkipRevision
+        && (await this.storyState.diagnostics(requiredUserId(claimed.run), claimed.run.projectId, claimed.run.id))
+          .diagnostics.some(diagnostic => diagnostic.severity === 'error');
       await this.builds.complete(requiredUserId(claimed.run), claimed.run.projectId, claimed.run.id, claimed.task.id, {
         idempotencyKey: `worker-complete:${claimed.task.id}:${claimed.task.attempts}:${claimed.task.revisionIteration}`,
         workerId: this.workerId,
@@ -1277,7 +1284,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         runGeneration: claimed.lease.runGeneration,
         expectedRevision: claimed.task.revision,
         outputArtifactIds: execution.result.artifactIds,
-        result: jsonSafe({ traceId: execution.traceId, evaluation: validation, result: execution.result }) as JsonValue,
+        result: jsonSafe({ traceId: execution.traceId, evaluation: validation, result: execution.result, revisionRequired }) as JsonValue,
         qualityScore: score
       });
       return;

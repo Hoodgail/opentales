@@ -957,6 +957,36 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
     }
   }, 15_000);
 
+  it('does not skip the reviser on a high critic score when deterministic errors remain', async () => {
+    for (const hasError of [true, false]) {
+      const fixture = await createIsolatedSceneRun(prisma, projectId, userId, `${suffix}-critic-errors-${hasError}`, {
+        taskType: 'critique-scene', assignedAgent: 'critic', acceptanceCriteria: { rubric: 'scene-quality-v1' }, qualityThreshold: 0.8,
+        skillVersions: { 'novel-build': '1.1.0', 'novel-critic': '2.0.0' }
+      });
+      if (hasError) await prisma.buildManuscriptUnit.update({ where: { id: fixture.sceneUnit.id }, data: { storyTime: 'invalid-clock' } });
+      const revision = await prisma.buildTask.create({ data: {
+        buildRunId: fixture.run.id, key: 'revision-after-critic', type: 'revise-scene-unit', phase: 'drafting', status: 'BLOCKED',
+        dependencyIds: [fixture.task.id], scopeUnitIds: [fixture.sceneUnit.id], assignedAgent: 'reviser', skillVersions: {}, acceptanceCriteria: {}, executionPolicy: {}
+      } });
+      await resumeRunnableBuilds(prisma, {
+        workerId: `critic-errors:${hasError}`, buildRunIds: [fixture.run.id], maxTasksPerSweep: 1, modelPricing: fixturePricing,
+        judgeExecutor: async () => ({
+          result: { scores: { prose: 0.97, causality: 0.97, character: 0.97, continuity: 0.97 }, feedback: 'High prose score despite the separate deterministic finding.', evidence: [{ type: 'fixture', summary: 'Independent judge invocation' }] },
+          inputTokens: 50, outputTokens: 25, modelId: 'priced/model'
+        }),
+        modelExecutor: async input => {
+          const args = { buildRunId: fixture.run.id };
+          const receipt = await invokeWorkerTool(input, 'runStoryLint', args);
+          return { ...workerSuccess(100, 25), toolCalls: [{ toolName: 'runStoryLint', toolCallId: 'critic-lint', input: args }], toolResults: [{ toolName: 'runStoryLint', toolCallId: 'critic-lint', output: receipt }] };
+        }
+      });
+      const critic = await prisma.buildTask.findUniqueOrThrow({ where: { id: fixture.task.id } });
+      expect(critic.status, critic.lastError ?? 'No recorded failure').toBe('DONE');
+      expect((await prisma.buildTask.findUniqueOrThrow({ where: { id: revision.id } })).status).toBe(hasError ? 'READY' : 'DONE');
+      expect(await prisma.buildEvaluationResult.count({ where: { taskId: fixture.task.id, kind: 'MODEL', passed: true } })).toBe(1);
+    }
+  }, 15_000);
+
   it('rejects a forged artifact type and a scene canon delta without assigned-unit provenance', async () => {
     const forged = await createBudgetRun(prisma, projectId, userId, `${suffix}-forged`, 'priced/model', 1_000_000);
     await resumeRunnableBuilds(prisma, {
