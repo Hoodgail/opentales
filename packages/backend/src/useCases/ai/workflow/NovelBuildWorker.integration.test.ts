@@ -110,8 +110,8 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
     const executor = deterministicExecutor(prisma, buildRunId);
     const judgeExecutor = deterministicJudgeExecutor();
     const [firstWorker, secondWorker] = await Promise.all([
-      resumeRunnableBuilds(prisma, { workerId: `integration-a:${suffix}`, maxTasksPerSweep: 200, modelExecutor: executor, judgeExecutor, buildRunIds: [buildRunId], modelPricing: fixturePricing }),
-      resumeRunnableBuilds(prisma, { workerId: `integration-b:${suffix}`, maxTasksPerSweep: 200, modelExecutor: executor, judgeExecutor, buildRunIds: [buildRunId], modelPricing: fixturePricing })
+      resumeRunnableBuilds(prisma, { workerId: `integration-a:${suffix}`, leaseMs: 30_000, maxTasksPerSweep: 200, modelExecutor: executor, judgeExecutor, buildRunIds: [buildRunId], modelPricing: fixturePricing }),
+      resumeRunnableBuilds(prisma, { workerId: `integration-b:${suffix}`, leaseMs: 30_000, maxTasksPerSweep: 200, modelExecutor: executor, judgeExecutor, buildRunIds: [buildRunId], modelPricing: fixturePricing })
     ]);
     expect(firstWorker + secondWorker).toBeGreaterThan(0);
     let run = await prisma.buildRun.findUniqueOrThrow({ where: { id: buildRunId } });
@@ -186,7 +186,10 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
     const pricedTraces = traces.filter((trace) => trace.model === 'priced/model');
     expect(pricedTraces.length).toBeGreaterThan(0);
     expect(pricedTraces.every((trace) => (trace.costMicros ?? 0) > 0)).toBe(true);
-    expect(pricedTraces.every((trace) => trace.costMicros === (trace.inputTokens ?? 0) * 2 + (trace.outputTokens ?? 0) * 8)).toBe(true);
+    expect(pricedTraces.filter(trace => trace.status === 'COMPLETED').every((trace) => trace.costMicros === (trace.inputTokens ?? 0) * 2 + (trace.outputTokens ?? 0) * 8)).toBe(true);
+    expect(pricedTraces.some(trace => trace.status === 'FAILED' && trace.error?.includes('Controlled transient failure'))).toBe(true);
+    expect(pricedTraces.find(trace => trace.error?.includes('Controlled transient failure'))?.modelParameters).toMatchObject({ pricing: { chargedReservedCeiling: true } });
+    expect(tasks.find(task => task.type === 'create-character-bibles')?.attempts).toBe(2);
     expect(run.costMicrosUsed).toBe(traces.reduce((sum, trace) => sum + (trace.costMicros ?? 0), 0));
     expect(await resumeRunnableBuilds(prisma, { workerId: `integration-replay:${suffix}`, maxTasksPerSweep: 100, modelExecutor: executor, judgeExecutor, buildRunIds: [buildRunId], modelPricing: fixturePricing })).toBe(0);
   }, 60_000);
@@ -707,6 +710,44 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
     expect(explicit.maxRevisionIterations).toBe(1);
   }, 15_000);
 
+  it('retries internal tool exhaustion without asking the author and stops at the attempt limit', async () => {
+    const fixture = await createIsolatedSceneRun(prisma, projectId, userId, `${suffix}-inspection-budget`);
+    const executor: BuildModelExecutor = async input => {
+      for (let i = 0; i < 2; i++) await invokeWorkerTool(input, 'listBuildArtifacts', { buildRunId: fixture.run.id });
+      await expect(invokeWorkerTool(input, 'listBuildArtifacts', { buildRunId: fixture.run.id })).rejects.toThrow('Inspection budget exhausted');
+      const output = workerSuccess(100, 10);
+      return { ...output, result: { ...output.result, status: 'blocked', unresolvedQuestions: ['Please allocate another execution turn.'] } };
+    };
+    const sweep = () => resumeRunnableBuilds(prisma, { buildRunIds: [fixture.run.id], maxTasksPerSweep: 1, modelExecutor: executor, modelPricing: fixturePricing });
+    await sweep();
+    expect(await prisma.buildRun.findUniqueOrThrow({ where: { id: fixture.run.id } })).toMatchObject({ status: 'DRAFTING' });
+    expect(await prisma.buildTask.findUniqueOrThrow({ where: { id: fixture.task.id } })).toMatchObject({ status: 'READY', attempts: 1, lastError: expect.stringContaining('Internal worker tool budget exhausted') });
+    await sweep();
+    expect(await prisma.buildTask.findUniqueOrThrow({ where: { id: fixture.task.id } })).toMatchObject({ status: 'FAILED', attempts: 2 });
+  });
+
+  it('replaces a restored artifact without reusing invalidated history versions', async () => {
+    const fixture = await createIsolatedSceneRun(prisma, projectId, userId, `${suffix}-restored-artifact`);
+    const content = { code: 'test', severity: 'warning', category: 'continuity', message: 'Original diagnostic', evidence: [] };
+    const original = await prisma.storyArtifact.create({ data: {
+      projectId, buildRunId: fixture.run.id, type: 'REVISION_ISSUE', key: 'history', title: 'Issue',
+      version: 1, schemaVersion: 'story-ir-v1', status: 'VALIDATED', content, contentHash: 'original'
+    } });
+    await prisma.storyArtifact.create({ data: {
+      projectId, buildRunId: fixture.run.id, type: 'REVISION_ISSUE', key: 'history', title: 'Failed edit',
+      version: 2, schemaVersion: 'story-ir-v1', status: 'INVALIDATED', invalidatedAt: new Date(),
+      content, contentHash: 'invalidated', replacesArtifactId: original.id
+    } });
+    const result = await new StoryStateUseCase(prisma).applyArtifactBatch(userId, projectId, fixture.run.id, {
+      idempotencyKey: 'replace-restored-artifact', expectedBuildRevision: fixture.run.revision,
+      operations: [{ op: 'replace', artifactId: original.id, expectedVersion: 1, artifact: {
+        type: 'revision-issue', key: 'history', title: 'Corrected issue', status: 'validated', content: { ...content, message: 'Corrected diagnostic' }
+      } }]
+    });
+    expect(result.artifacts.find(row => row.id !== original.id)?.version).toBe(3);
+    expect(await prisma.storyArtifact.count({ where: { buildRunId: fixture.run.id, key: 'history', status: 'VALIDATED', invalidatedAt: null } })).toBe(1);
+  });
+
   it('reruns an ancestor while fencing a running descendant before reblocking it', async () => {
     const fixture = await createIsolatedSceneRun(prisma, projectId, userId, `${suffix}-active-rerun`);
     const parent = await prisma.buildTask.create({ data: {
@@ -1105,6 +1146,27 @@ function deterministicExecutor(prisma: PrismaClient, buildRunId: string, scale?:
         const results = Array.isArray(batch.results) ? batch.results as Array<Record<string, unknown>> : [];
         artifactIds.push(...results.map((item) => item.id).filter((id): id is string => typeof id === 'string'));
       }
+    }
+
+    if (!scale && taskType === 'create-character-bibles') {
+      const original = planningOperations[0]!;
+      const replace = async (voice: string, key: string) => {
+        const old = artifactIds[0];
+        const batch = await call('applyArtifactBatch', {
+          buildRunId, taskId: input.contract.scope.buildTaskId,
+          idempotencyKey: `${taskKey}:${key}:${attempt}`,
+          operations: [{ ...original, content: { ...(original.content as Record<string, unknown>), voice } }]
+        });
+        const results = batch.results as Array<{ id: string }>;
+        artifactIds[artifactIds.indexOf(old!)] = results[0]!.id;
+      };
+      await replace('Precise, restrained, with sharper imagery.', 'before-heartbeat');
+      // Artifact replacement advances the producer revision. Exercise an actual
+      // heartbeat during slow inference, then another edit before completion.
+      await new Promise(resolve => setTimeout(resolve, 11_000));
+      expect(input.abortSignal.aborted).toBe(false);
+      await replace('Precise and restrained; admits uncertainty directly.', 'after-heartbeat');
+      if (attempt === 1) throw new Error('Controlled transient failure after replacing artifacts; retry must not reuse invalidated version numbers');
     }
 
     if (taskType === 'draft-scene-unit' || roleIsRevision(input)) {

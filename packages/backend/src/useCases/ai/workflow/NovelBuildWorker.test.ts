@@ -95,6 +95,21 @@ describe('durable Novel Build execution contract', () => {
     expect(report).toHaveBeenCalledTimes(2);
   });
 
+  it('prevents inspection from consuming the calls needed to persist outputs', async () => {
+    const read = vi.fn(async () => ({}));
+    const write = vi.fn(async () => ({ saved: true }));
+    const exhausted = vi.fn();
+    const tools = guardWorkerTools({ readBuildArtifact: { execute: read }, applyArtifactBatch: { execute: write }, reportTaskResult: { execute: async () => ({ ok: true }) } } as any, 16, new AbortController().signal, async () => {}, exhausted);
+    const call = (name: string) => (tools[name] as any).execute({});
+    for (let i = 0; i < 10; i++) await call('readBuildArtifact');
+    await expect(call('readBuildArtifact')).rejects.toThrow('reserved for saving outputs');
+    for (let i = 0; i < 4; i++) await call('applyArtifactBatch');
+    await call('reportTaskResult');
+    expect(read).toHaveBeenCalledTimes(10);
+    expect(write).toHaveBeenCalledTimes(4);
+    expect(exhausted).toHaveBeenCalledOnce();
+  });
+
   it('continues after rejected task reports and stops only after a validated receipt', () => {
     expect(hasSuccessfulTaskReport({ steps: [{ toolResults: [] }] })).toBe(false);
     expect(hasSuccessfulTaskReport({ steps: [{ toolResults: [{ toolName: 'reportTaskResult', output: { error: 'Artifact does not exist' } }] }] })).toBe(false);

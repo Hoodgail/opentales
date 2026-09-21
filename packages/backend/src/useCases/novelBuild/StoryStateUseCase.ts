@@ -630,9 +630,12 @@ export class StoryStateUseCase {
       const replacementTaskId = internalTask?.id ?? (allowTaskBinding ? operation.artifact.taskId ?? old.taskId : null);
       await this.assertArtifactTask(tx, buildRunId, replacementTaskId);
       const status = operation.artifact.status ?? 'draft';
+      // Compensation can reactivate an older version while preserving newer
+      // invalidated history. Never reuse a version number from that history.
+      const latest = await tx.storyArtifact.findFirst({ where: { buildRunId, type: old.type, key: old.key }, orderBy: { version: 'desc' }, select: { version: true } });
       const replacement = await tx.storyArtifact.create({ data: {
         projectId, buildRunId, taskId: replacementTaskId, type: old.type, key: old.key,
-        title: required(operation.artifact.title, 'Artifact title', 1_000), version: old.version + 1,
+        title: required(operation.artifact.title, 'Artifact title', 1_000), version: (latest?.version ?? old.version) + 1,
         schemaVersion: operation.artifact.schemaVersion ?? STORY_SCHEMA_VERSION, status: toPrismaArtifactStatus(status),
         content: content as Prisma.InputJsonValue, contentHash: stableHash(content), replacesArtifactId: old.id,
         acceptedAt: status === 'accepted' ? new Date() : null

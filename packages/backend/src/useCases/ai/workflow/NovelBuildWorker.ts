@@ -614,18 +614,29 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const beat = () => {
       if (stopped || controller.signal.aborted || running) return;
       sequence += 1;
-      running = this.builds.heartbeat(requiredUserId(claimed.run), claimed.run.projectId, claimed.run.id, claimed.task.id, {
-        idempotencyKey: `worker-heartbeat:${claimed.task.id}:${claimed.task.revision}:${sequence}`,
-        workerId: this.workerId,
-        leaseToken: claimed.lease.leaseToken,
-        leaseGeneration: claimed.lease.leaseGeneration,
-        runGeneration: claimed.lease.runGeneration,
-        expectedRevision: claimed.task.revision,
-        leaseMs: this.leaseMs,
-        progress: Math.min(90, 5 + sequence)
-      }).then((result) => {
-        claimed.task.revision = result.task.revision;
-      }).catch((error) => {
+      running = (async () => {
+        // Replacing an artifact advances its producer revision without changing
+        // lease ownership. Renew with a fresh CAS token, keeping the lease fence.
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const current = await this.prisma.buildTask.findUniqueOrThrow({ where: { id: claimed.task.id } });
+          try {
+            const result = await this.builds.heartbeat(requiredUserId(claimed.run), claimed.run.projectId, claimed.run.id, claimed.task.id, {
+              idempotencyKey: `worker-heartbeat:${claimed.task.id}:${claimed.task.revision}:${sequence}`,
+              workerId: this.workerId,
+              leaseToken: claimed.lease.leaseToken,
+              leaseGeneration: claimed.lease.leaseGeneration,
+              runGeneration: claimed.lease.runGeneration,
+              expectedRevision: current.revision,
+              leaseMs: this.leaseMs,
+              progress: Math.min(90, 5 + sequence)
+            });
+            claimed.task.revision = result.task.revision;
+            return;
+          } catch (error) {
+            if (attempt === 2 || !(error instanceof Error) || error.message !== 'Build or task revision is stale') throw error;
+          }
+        }
+      })().catch((error) => {
         controller.abort(error);
       }).finally(() => {
         running = null;
@@ -871,11 +882,13 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       }
     );
     assertRequiredTaskCapabilities(tools as Record<string, unknown>, claimed.task);
+    let internalBudgetExhausted = false;
     const guardedTools = guardWorkerTools(
       tools as unknown as ToolSet,
       contract.budget.maxToolCalls,
       abortSignal,
-      () => this.assertCurrentLease(claimed)
+      () => this.assertCurrentLease(claimed),
+      () => { internalBudgetExhausted = true; }
     );
 
     const generation = await this.modelExecutor({
@@ -905,6 +918,9 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       );
     }
     const result = workerResultSchema.parse(generation.result);
+    if (result.status === 'blocked' && internalBudgetExhausted) {
+      throw new Error('Internal worker tool budget exhausted. Retry with bounded retrieval and persist outputs before reporting; this is not a question for the author.');
+    }
     const inputTokens = generation.inputTokens;
     const outputTokens = generation.outputTokens;
     const toolCalls = generation.toolCalls.map(compactToolCall);
@@ -1089,6 +1105,9 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       execution.result.evidence.push({ type: 'build-compilation', id: compilation.id, summary: `Final compilation ${compilation.totalWordCount} words` });
     }
     await stopHeartbeat();
+    // The model may have revised its own artifacts since the last heartbeat.
+    // complete/fail still validate the original lease token and generations.
+    claimed.task.revision = (await this.prisma.buildTask.findUniqueOrThrow({ where: { id: claimed.task.id } })).revision;
     const totalInputTokens = execution.trace.usageByModel.reduce((sum, usage) => sum + usage.inputTokens, 0);
     const totalOutputTokens = execution.trace.usageByModel.reduce((sum, usage) => sum + usage.outputTokens, 0);
     const totalCostMicros = costForMeasuredUsage(this.modelPricing, execution.trace.usageByModel, execution.trace.provider);
@@ -2051,8 +2070,12 @@ export function objectiveForTask(task: BuildTask, buildObjective: string, manife
     });
   return [
     `Complete durable task ${task.key} (${task.type}) for this build objective: ${buildObjective}.`,
+    'Use supplied context first. Retrieve only missing details and persist useful output early; do not spend the entire tool budget inspecting artifacts. Calls are reserved for writes and the final report. Internal tool limits are not questions for the author.',
     typeof target.targetWordCount === 'number'
       ? `Whole-manuscript length target: ${target.targetWordCount} words; minimum ${target.minWordCount ?? 'unspecified'}, maximum ${target.maxWordCount ?? 'unspecified'}. These counts apply to all scenes combined, not each scene. Reviser tasks must compress or expand the saved prose toward this target while preserving the causal ending.`
+      : '',
+    task.type === 'draft-scene-unit' && typeof target.targetWordCount === 'number' && typeof target.targetSceneCount === 'number' && target.targetSceneCount > 0
+      ? `This single scene has an average prose allocation of ${Math.round(target.targetWordCount / target.targetSceneCount)} words. Follow its chapter brief's more specific allocation when available; keep the combined chapter within its target rather than drafting every scene as a full chapter.`
       : '',
     roleForTask(task.assignedAgent ?? '') === 'critic' && task.type !== 'quality-gate'
       ? 'This is a diagnostic review, followed by a reviser. Complete the review with specific evidence and actionable findings even when the manuscript needs editing; score its quality honestly. Do not report blocked merely because edits or length reduction are needed downstream. deterministicValidationRequired checks runStoryLint errors at this stage; final manuscript length is enforced at finalization, after editing. Only a genuine missing input or external blocker prevents completing the review.'
@@ -2277,10 +2300,14 @@ export function guardWorkerTools(
   tools: ToolSet,
   maxToolCalls: number,
   abortSignal: AbortSignal,
-  assertLease: () => Promise<void>
+  assertLease: () => Promise<void>,
+  onBudgetExhausted: () => void = () => {}
 ): ToolSet {
   let calls = 0;
   const reportReserve = tools.reportTaskResult ? (maxToolCalls >= 8 ? 2 : 1) : 0;
+  const writeTools = new Set(['applyArtifactBatch', 'applyBuildUnitPatch', 'commitCanonDelta', 'createCheckpoint', 'linkSetupPayoff']);
+  const writeReserve = Object.keys(tools).some(name => writeTools.has(name)) ? Math.min(4, Math.floor((maxToolCalls - reportReserve) / 2)) : 0;
+  let writeCalls = 0;
   return Object.fromEntries(Object.entries(tools).map(([name, toolDefinition]) => {
     const definition = toolDefinition as typeof toolDefinition & { execute?: (...args: unknown[]) => unknown };
     if (!definition.execute) return [name, definition];
@@ -2290,11 +2317,21 @@ export function guardWorkerTools(
       execute: async (...args: unknown[]) => {
         if (abortSignal.aborted) throw abortSignal.reason ?? new Error('Build task interrupted');
         await assertLease();
-        if (calls >= maxToolCalls) throw new Error(`Task exceeded maxToolCalls=${maxToolCalls}`);
+        if (calls >= maxToolCalls) {
+          onBudgetExhausted();
+          throw new Error(`Task exceeded maxToolCalls=${maxToolCalls}`);
+        }
         if (name !== 'reportTaskResult' && calls >= maxToolCalls - reportReserve) {
+          onBudgetExhausted();
           throw new Error(`Work-tool budget exhausted; ${reportReserve} call(s) are reserved for reportTaskResult within maxToolCalls=${maxToolCalls}. Report the persisted result now, using evidence for unresolved issues.`);
         }
+        const remainingWrites = Math.max(0, writeReserve - writeCalls);
+        if (name !== 'reportTaskResult' && !writeTools.has(name) && calls >= maxToolCalls - reportReserve - remainingWrites) {
+          onBudgetExhausted();
+          throw new Error(`Inspection budget exhausted; ${remainingWrites} calls remain reserved for saving outputs and ${reportReserve} for reporting. Persist with the available write tools now; do not request another author turn.`);
+        }
         calls += 1;
+        if (writeTools.has(name)) writeCalls += 1;
         const result = await execute(...args);
         await assertLease();
         if (abortSignal.aborted) throw abortSignal.reason ?? new Error('Build task interrupted');
@@ -2884,7 +2921,7 @@ function traceModelParameters(task: BuildTask, price: ModelPrice | null, model?:
     fallbackModels: stringArray(policy.fallbackModels),
     retryOn: stringArray(policy.retryOn),
     pricing: price
-      ? { status: 'configured', source: price.source, version: price.version }
+      ? { status: 'configured', source: price.source, version: price.version, chargedReservedCeiling }
       : { status: model ? 'unknown' : 'not-applicable', chargedReservedCeiling }
   }) as JsonValue;
 }

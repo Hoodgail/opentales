@@ -628,8 +628,11 @@ export class NovelBuildUseCase {
     if (!task) throw new HttpError(404, 'Build task not found for attempt compensation');
     const artifacts = await tx.storyArtifact.findMany({ where: { buildRunId, taskId, createdAt: { gte: attemptBoundary }, invalidatedAt: null }, select: { id: true, replacesArtifactId: true } });
     if (artifacts.length) {
+      const attemptArtifactIds = new Set(artifacts.map(artifact => artifact.id));
       await tx.storyArtifact.updateMany({ where: { id: { in: artifacts.map((artifact) => artifact.id) } }, data: { status: 'INVALIDATED', invalidatedAt: new Date() } });
-      for (const replacedId of artifacts.flatMap((artifact) => artifact.replacesArtifactId ? [artifact.replacesArtifactId] : [])) {
+      // Restore only the version before this attempt, never intermediate
+      // replacements from the failed attempt (which would create multiple heads).
+      for (const replacedId of new Set(artifacts.flatMap((artifact) => artifact.replacesArtifactId && !attemptArtifactIds.has(artifact.replacesArtifactId) ? [artifact.replacesArtifactId] : []))) {
         const replaced = await tx.storyArtifact.findUnique({ where: { id: replacedId }, select: { acceptedAt: true } });
         if (replaced) await tx.storyArtifact.update({ where: { id: replacedId }, data: { status: replaced.acceptedAt ? 'ACCEPTED' : 'VALIDATED', invalidatedAt: null } });
       }
