@@ -218,4 +218,6 @@ Large beat plans allocate `beat-1` through `beat-N` before model generation. Sha
 
 Scene dependencies must likewise name scene keys declared in the persisted chapter briefs, including forward references. The write tool rejects undeclared dependencies before they enter the planning corpus.
 
+Chapter briefs are accepted only when their combined scene allocation matches the build's exact scene target, with globally unique scene keys and consecutive chapter numbers. The final brief batch is validated before persistence, completion rechecks the invariant, and scene-shard context rejects older invalid allocations before inference. A 32-chapter plan with three scenes per chapter therefore cannot silently proceed toward a 110-scene build.
+
 The runner uses the same automatic models.dev pricing loader, cache, alias resolution, and optional `AI_MODEL_PRICING_JSON` overrides as production. It no longer injects fixed test prices. Unresolved prices pause a cost-bounded run before inference. Historical validation totals recorded with fixed test rates are not retroactively changed. Run PostgreSQL-backed CI as well: embedded database validation does not prove production concurrency behavior.

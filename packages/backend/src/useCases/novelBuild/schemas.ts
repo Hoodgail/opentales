@@ -14,6 +14,17 @@ import type {
 export const WORKFLOW_VERSION = 'novel-build-v1';
 export const STORY_SCHEMA_VERSION = 'story-ir-v1';
 
+/** Validate the whole allocation before spending tokens on individual scenes. */
+export function validateChapterSceneAllocation(contents: unknown[], chapterCount: number, sceneCount: number): void {
+  const chapters = contents.map(value => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {});
+  if (chapters.length !== chapterCount) throw new Error(`Chapter allocation requires ${chapterCount} briefs; found ${chapters.length}`);
+  const numbers = chapters.map(chapter => Number(chapter.number)).sort((a, b) => a - b);
+  if (numbers.some((number, i) => number !== i + 1) || new Set(chapters.map(chapter => chapter.chapterKey)).size !== chapterCount) throw new Error('Chapter allocation requires unique chapterKeys and consecutive chapter numbers starting at 1');
+  const keys = chapters.flatMap(chapter => Array.isArray(chapter.sceneKeys) ? chapter.sceneKeys : []);
+  if (chapters.some(chapter => !Array.isArray(chapter.sceneKeys) || !chapter.sceneKeys.length) || keys.some(key => typeof key !== 'string' || !key.trim()) || new Set(keys).size !== keys.length) throw new Error('Chapter briefs must declare nonempty, globally unique sceneKeys');
+  if (keys.length !== sceneCount) throw new Error(`Chapter briefs declare ${keys.length} scenes; the build requires exactly ${sceneCount}. Correct the combined scene allocation before scene planning.`);
+}
+
 const trimmedString = (label: string, max = 20_000) =>
   z.string().trim().min(1, `${label} is required`).max(max, `${label} is too long`);
 const stringList = z.array(z.string().trim().min(1).max(2_000)).max(1_000);

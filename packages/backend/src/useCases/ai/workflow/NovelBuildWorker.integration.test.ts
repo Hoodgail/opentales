@@ -1108,6 +1108,14 @@ function deterministicExecutor(prisma: PrismaClient, buildRunId: string, scale?:
       const shard = input.contract.metadata.shard as { startOrdinal: number; count: number };
       expect(input.prompt).toContain(`beat-${shard.startOrdinal} through beat-${shard.startOrdinal + shard.count - 1}`);
     }
+    if (scale && taskType === 'create-chapter-briefs') {
+      const missingScene = planningOperations.map((operation, i) => {
+        const content = operation.content as Record<string, unknown>;
+        return i ? operation : { ...operation, content: { ...content, sceneKeys: (content.sceneKeys as string[]).slice(1) } };
+      });
+      await expect(call('applyArtifactBatch', { buildRunId, taskId: input.contract.scope.buildTaskId, idempotencyKey: `${taskKey}:wrong-total`, operations: missingScene })).rejects.toThrow(`requires exactly ${scale.scenes}`);
+      expect(await prisma.storyArtifact.count({ where: { buildRunId, type: 'CHAPTER_BRIEF', invalidatedAt: null } })).toBe(0);
+    }
     if (scale && taskType === 'create-scene-plan-shard') {
       const chapterNumber = Number((input.contract.metadata.shard as Record<string, unknown>).chapterNumber);
       const briefs = await prisma.storyArtifact.findMany({ where: { buildRunId, type: 'CHAPTER_BRIEF', invalidatedAt: null } });

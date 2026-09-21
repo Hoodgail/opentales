@@ -378,6 +378,41 @@ describeDatabase('durable Novel Build integration', () => {
     await expect(batch('good-timeline', 'timeline', timeline(accepted.artifacts[0]!.id), current.revision)).resolves.toMatchObject({ artifacts: expect.any(Array) });
   });
 
+  it('rebinds blocked and ready consumers after their producer replaces invalidated input versions', async () => {
+    const { NovelBuildRepository } = await import('../../repositories/NovelBuildRepository.js');
+    const created = await builds.create(ownerId, projectId, {
+      idempotencyKey: 'rebind:create', brainstorm: 'A diner crew must solve a mystery before dawn.',
+      objective: 'Finish the story', targetWordCount: 40_000, targetChapterCount: 32, targetSceneCount: 110,
+      autonomyMode: 'autonomous-draft'
+    });
+    await prisma.buildTask.updateMany({ where: { buildRunId: created.id }, data: { status: 'CANCELLED' } });
+    const producer = created.tasks.find(task => task.key === 'chapter-briefs')!;
+    const oldIds: string[] = [], newIds: string[] = [];
+    for (let number = 1; number <= 32; number++) {
+      for (const version of [1, 2]) {
+        const artifact = await prisma.storyArtifact.create({ data: {
+          projectId, buildRunId: created.id, taskId: producer.id, type: 'CHAPTER_BRIEF', key: `chapter-${number}`,
+          title: `Chapter ${number}`, version, schemaVersion: 'story-ir-v1', contentHash: `hash-${number}-${version}`,
+          status: version === 1 ? 'INVALIDATED' : 'VALIDATED', invalidatedAt: version === 1 ? new Date() : null,
+          content: { chapterKey: `chapter-${number}`, number, sceneKeys: Array.from({ length: version === 1 ? 3 : number <= 14 ? 4 : 3 }, (_, i) => `scene-${number}-${i}`) }
+        } });
+        (version === 1 ? oldIds : newIds).push(artifact.id);
+      }
+    }
+    await prisma.buildTask.update({ where: { id: producer.id }, data: { status: 'DONE', outputArtifactIds: newIds } });
+    const shards = created.tasks.filter(task => ['scene-plans:chapter-001', 'scene-plans:chapter-002'].includes(task.key));
+    for (const [i, shard] of shards.entries()) await prisma.buildTask.update({ where: { id: shard.id }, data: {
+      status: i ? 'READY' : 'BLOCKED', dependencyIds: [producer.id], inputArtifactIds: oldIds
+    } });
+    await prisma.$transaction(tx => new NovelBuildRepository(prisma).refreshReadyTasks(tx, created.id));
+    for (const shard of shards) {
+      const updated = await prisma.buildTask.findUniqueOrThrow({ where: { id: shard.id } });
+      expect(updated.status).toBe('READY');
+      expect(updated.inputArtifactIds).toEqual(newIds);
+      expect(updated.executionPolicy).toMatchObject({ count: 4 });
+    }
+  });
+
   it('clears a stale pause error when a build is reauthorized', async () => {
     const run = await builds.create(ownerId, projectId, {
       idempotencyKey: 'integration:reauthorize', brainstorm: 'A keeper restores a lighthouse.', autonomyMode: 'assist'

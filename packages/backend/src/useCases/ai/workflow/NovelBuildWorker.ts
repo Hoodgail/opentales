@@ -11,6 +11,7 @@ import { BuildManuscriptUseCase } from '../../novelBuild/BuildManuscriptUseCase.
 import {
   ARTIFACT_CONTENT_SCHEMAS,
   stableHash,
+  validateChapterSceneAllocation,
   validateArtifactContent
 } from '../../novelBuild/schemas.js';
 import { loadAiSkillCatalog, loadAiSkillReferences, type AiSkillCatalogItem } from '../markdownCatalog.js';
@@ -955,6 +956,17 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const operations = Array.isArray(jsonRecord(input).operations)
       ? jsonRecord(input).operations as unknown[]
       : [];
+    if (claimed.task.type === 'create-chapter-briefs') {
+      const target = jsonRecord(jsonRecord(claimed.run.manifest).target);
+      const current = await this.prisma.storyArtifact.findMany({ where: {
+        buildRunId: claimed.run.id, taskId: claimed.task.id, type: 'CHAPTER_BRIEF', invalidatedAt: null, status: { in: ['DRAFT', 'VALIDATED', 'ACCEPTED'] }
+      }, select: { key: true, content: true } });
+      const combined = new Map<string, unknown>(current.map(artifact => [artifact.key, artifact.content]));
+      for (const operation of operations.map(jsonRecord).filter(op => op.action === 'upsert' && op.type === 'chapter-brief')) combined.set(String(operation.key), operation.content);
+      if (typeof target.targetChapterCount === 'number' && typeof target.targetSceneCount === 'number' && combined.size >= target.targetChapterCount) {
+        validateChapterSceneAllocation([...combined.values()], target.targetChapterCount, target.targetSceneCount);
+      }
+    }
     const proposedBeats = operations.map(jsonRecord)
       .filter(operation => operation.action === 'upsert' && operation.type === 'beat')
       .map(operation => operation.content);
@@ -2116,6 +2128,9 @@ export function objectiveForTask(task: BuildTask, buildObjective: string, manife
       : '',
     task.type === 'create-beat-shard'
       ? `Use identical artifact key and beatKey values beat-${jsonRecord(task.executionPolicy).startOrdinal} through beat-${Number(jsonRecord(task.executionPolicy).startOrdinal) + Number(jsonRecord(task.executionPolicy).count) - 1}. The complete declared corpus is beat-1 through beat-${jsonRecord(task.executionPolicy).total}; forward links may reference only that range. Put meaningful names in title, not in keys.`
+      : '',
+    task.type === 'create-chapter-briefs'
+      ? `Across all ${target.targetChapterCount} briefs, declare exactly ${target.targetSceneCount} globally unique sceneKeys in total. Chapter allocations may be uneven, but their sum must match this exact target. Count the combined allocation before persisting the final batch.`
       : '',
     task.type === 'extract-scene-canon'
       ? 'Read the assigned build unit and copy exact IDs: sourceUnitId and scene references use unit.id; chapter references use unit.parentUnitId; artifact references use unit.planArtifactId, never writingId or branchId. Keys in metadata are not database IDs. On a rejected reference, correct that exact field rather than guessing IDs or dropping all provenance. Query current canon before committing. A subject/predicate pair is one property with one value at a time: use specific predicates (water-level, electrical-condition), never generic has_condition/has_fact for unrelated facts. On re-extraction reuse the exact keys already sourced to this scene, not keys from earlier scenes that merely mention the same entity. Do not create competing keys or move an earlier scene state to the current scene. Entity stateKey is also a single property: use specific keys such as knows-relay-mechanism and knows-shared-loss, never generic knowledge for independent beliefs. Avoid redundant narrative inventory summaries under possession; use specific item properties when a durable state is needed. Validity intervals are inclusive: if a new state starts at order N, the earlier state must end at N-1, not N. Preserve earlier state intervals and model changes with non-overlapping validity intervals. Read diagnostics and resolve canon conflicts before reporting.'

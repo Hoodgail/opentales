@@ -23,6 +23,8 @@ it('preserves every declared scene key from 32 verbose briefs through model-visi
   const shardIndex = chapterAllocationIndex(rows, { metadata: { taskType: 'create-scene-plan-shard', shard: { chapterNumber: 32 } } });
   expect(shardIndex).toContain('chapter-32-scene-3');
   expect(shardIndex).not.toContain('chapter-31');
+  const wrongTotal = rows.map(row => ({ ...row, content: { ...row.content, sceneKeys: row.content.sceneKeys.slice(0, 3) } }));
+  expect(() => chapterAllocationIndex(wrongTotal, { metadata: { taskType: 'create-scene-plan-shard', shard: { chapterNumber: 1, total: 110 } } })).toThrow('declare 96 scenes');
 });
 
 it('fails before inference when required structural inputs are absent or cannot fit', () => {

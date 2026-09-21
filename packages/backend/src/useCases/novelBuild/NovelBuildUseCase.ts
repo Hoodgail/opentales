@@ -51,7 +51,8 @@ import {
   normalizeBuildInput,
   stableHash,
   type TaskTemplate,
-  validateArtifactContent
+  validateArtifactContent,
+  validateChapterSceneAllocation
 } from './schemas.js';
 
 const TERMINAL_RUN_STATUSES = new Set(['COMPLETED', 'CANCELLED']);
@@ -1216,6 +1217,13 @@ export class NovelBuildUseCase {
         const maxCount = explicitMax ?? (aggregateProducer && spec && typeof spec.maxCount === 'number' ? spec.maxCount : 1);
         if (produced.length < minCount || produced.length > maxCount) {
           throw new HttpError(409, `Task produced ${produced.length} ${type} artifacts; required range is ${minCount}-${maxCount}`);
+        }
+        if (type === 'chapter-brief' && task.type === 'create-chapter-briefs') {
+          const target = isJsonObjectValue(manifest.target) ? manifest.target : {};
+          if (typeof target.targetChapterCount === 'number' && typeof target.targetSceneCount === 'number') {
+            try { validateChapterSceneAllocation(produced.map(artifact => artifact.content), target.targetChapterCount, target.targetSceneCount); }
+            catch (error) { throw new HttpError(409, error instanceof Error ? error.message : 'Invalid chapter scene allocation'); }
+          }
         }
       }
     } else if (requiredTypes.length) {

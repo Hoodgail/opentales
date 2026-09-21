@@ -2,6 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import { bodyOf } from '../tools/shared.js';
 import type { TaskContract } from '../runtime/taskContract.js';
 import { serializeUntrustedData } from '../prompts/untrustedData.js';
+import { validateChapterSceneAllocation } from '../../novelBuild/schemas.js';
 
 export type ContextKind =
   | 'story-brief'
@@ -816,6 +817,8 @@ function formatImmutableInputs(rows: Record<string, unknown>[]): string {
 export function chapterAllocationIndex(rows: Record<string, unknown>[], task: Pick<TaskContract, 'metadata'> | null): string {
   if (!['create-scene-plans', 'create-scene-plan-shard'].includes(String(task?.metadata.taskType))) return '';
   const shard = isRecord(task?.metadata.shard) ? task.metadata.shard : {};
+  const allBriefs = rows.filter(row => String(row.type).toLowerCase().replace(/_/g, '-') === 'chapter-brief');
+  if (typeof shard.total === 'number') validateChapterSceneAllocation(allBriefs.map(row => row.content), allBriefs.length, shard.total);
   const chapters = rows.filter(row => String(row.type).toLowerCase().replace(/_/g, '-') === 'chapter-brief')
     .map(row => ({ row, content: isRecord(row.content) ? row.content : {} }))
     .filter(({ content }) => typeof shard.chapterNumber !== 'number' || content.number === shard.chapterNumber)
