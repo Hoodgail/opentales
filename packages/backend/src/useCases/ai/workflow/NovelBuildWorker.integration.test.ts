@@ -359,30 +359,33 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
     } finally { if (priorJudge === undefined) delete process.env.AI_JUDGE_MODEL; else process.env.AI_JUDGE_MODEL = priorJudge; }
   });
 
-  it('accepts the observed reasoning-inclusive timeline output by default while enforcing an explicit lower cap', async () => {
-    for (const explicitCap of [undefined, 48_000]) {
-      const run = await createBudgetRun(prisma, projectId, userId, `${suffix}-timeline-output-${explicitCap}`, 'priced/model', 10_000_000);
-      await prisma.buildRun.update({ where: { id: run.id }, data: { authorizationScope: { artifactTypes: ['timeline'], chapterIds: [], sceneIds: [], allowPlanningArtifacts: true, allowCanonWrites: false, allowChapterWrites: false, allowSceneWrites: false, allowDiagnostics: true, expiresAt: null } } });
+  it.each([
+    { label: 'timeline', taskType: 'create-timeline', agent: 'librarian', skill: 'novel-continuity', version: '1.1.0', prismaType: 'TIMELINE' as const, output: 51_775, cap: 48_000, content: { events: [{ eventKey: 'opening', title: 'Diner opens', chronology: { order: 1 }, dependencyKeys: [], participantRefs: [] }] } },
+    { label: 'setup-payoff-map', taskType: 'create-setup-payoff-map', agent: 'creator', skill: 'novel-setup-payoff', version: '1.0.0', prismaType: 'SETUP_PAYOFF_MAP' as const, output: 35_936, cap: 32_000, content: { links: [] } }
+  ])('accepts observed reasoning-inclusive $label output by default while enforcing an explicit lower cap', async fixture => {
+    for (const explicitCap of [undefined, fixture.cap]) {
+      const run = await createBudgetRun(prisma, projectId, userId, `${suffix}-${fixture.label}-output-${explicitCap}`, 'priced/model', 10_000_000);
+      await prisma.buildRun.update({ where: { id: run.id }, data: { authorizationScope: { artifactTypes: [fixture.label], chapterIds: [], sceneIds: [], allowPlanningArtifacts: true, allowCanonWrites: false, allowChapterWrites: false, allowSceneWrites: false, allowDiagnostics: true, expiresAt: null } } });
       await prisma.buildTask.updateMany({ where: { buildRunId: run.id }, data: {
-        key: 'timeline', type: 'create-timeline', assignedAgent: 'librarian',
-        skillVersions: { 'novel-build': '1.1.0', 'novel-continuity': '1.1.0' },
-        acceptanceCriteria: { requiredArtifactTypes: ['timeline'] },
+        key: fixture.label, type: fixture.taskType, assignedAgent: fixture.agent,
+        skillVersions: { 'novel-build': '1.1.0', [fixture.skill]: fixture.version },
+        acceptanceCriteria: { requiredArtifactTypes: [fixture.label] },
         executionPolicy: { model: 'priced/model', ...(explicitCap ? { maxOutputTokens: explicitCap } : {}) }
       } });
       const executor: BuildModelExecutor = async input => {
         const receipt = await invokeWorkerTool(input, 'applyArtifactBatch', {
           buildRunId: run.id, taskId: input.contract.scope.buildTaskId, idempotencyKey: 'timeline-output',
-          operations: [{ action: 'upsert', type: 'timeline', key: 'timeline', title: 'Opening timeline', status: 'VALIDATED', content: { events: [{ eventKey: 'opening', title: 'Diner opens', chronology: { order: 1 }, dependencyKeys: [], participantRefs: [] }] } }]
+          operations: [{ action: 'upsert', type: fixture.label, key: fixture.label, title: 'Budget boundary fixture', status: 'VALIDATED', content: fixture.content }]
         }) as { results: Array<{ id: string }> };
-        const output = workerSuccess(376_564, 51_775);
+        const output = workerSuccess(376_564, fixture.output);
         return { ...output, result: { ...output.result, artifactIds: receipt.results.map(item => item.id) } };
       };
-      await resumeRunnableBuilds(prisma, { workerId: `timeline-output:${explicitCap}`, buildRunIds: [run.id], maxTasksPerSweep: 1, modelExecutor: executor,
+      await resumeRunnableBuilds(prisma, { workerId: `${fixture.label}-output:${explicitCap}`, buildRunIds: [run.id], maxTasksPerSweep: 1, modelExecutor: executor,
         modelPricing: { 'priced/model': { ...fixturePricing['priced/model'], limits: { context: 1_048_576, output: 65_536 } } } });
       const task = await prisma.buildTask.findFirstOrThrow({ where: { buildRunId: run.id } });
       expect(task.status, task.lastError ?? '').toBe(explicitCap ? 'FAILED' : 'DONE');
-      expect(await prisma.storyArtifact.count({ where: { buildRunId: run.id, type: 'TIMELINE', invalidatedAt: null } })).toBe(explicitCap ? 0 : 1);
-      if (explicitCap) expect(task.lastError).toContain('outputTokens=51775/48000');
+      expect(await prisma.storyArtifact.count({ where: { buildRunId: run.id, type: fixture.prismaType, invalidatedAt: null } })).toBe(explicitCap ? 0 : 1);
+      if (explicitCap) expect(task.lastError).toContain(`outputTokens=${fixture.output}/${fixture.cap}`);
     }
   });
 
@@ -1241,6 +1244,15 @@ function deterministicExecutor(prisma: PrismaClient, buildRunId: string, scale?:
       toolResults.push({ toolCallId, toolName: name, output });
       return output as Record<string, unknown>;
     };
+
+    if (!scale && taskType === 'create-setup-payoff-map') {
+      expect(input.system).toContain('Required setup/payoff references');
+      await expect(call('applyArtifactBatch', {
+        buildRunId, taskId: input.contract.scope.buildTaskId, idempotencyKey: `${taskKey}:incomplete`,
+        operations: [{ action: 'upsert', type: 'setup-payoff-map', key: 'incomplete', title: 'Incomplete map', status: 'VALIDATED', content: { links: [] } }]
+      })).rejects.toThrow('memory-cost');
+      expect(await prisma.storyArtifact.count({ where: { buildRunId, type: 'SETUP_PAYOFF_MAP', invalidatedAt: null } })).toBe(0);
+    }
 
     let planningOperations = scale
       ? productionPlanningArtifactsFor(input.contract.outputs.map((output) => output.type), input.contract.scope.buildTaskId ?? taskKey, input.contract.metadata, scale)

@@ -275,6 +275,10 @@ describe('durable Novel Build execution contract', () => {
     const small = { inputMicrosPerMillion: 1, outputMicrosPerMillion: 1, source: 'test', version: '1', limits: { context: 128000, output: 8192 } };
     expect(taskOutputTokenLimit({}, 32000, [])).toBe(32000);
     expect(taskOutputTokenLimit({}, 32000, [small])).toBe(8192);
+    const large = { ...small, limits: { context: 1048576, output: 65536 } };
+    expect(taskOutputTokenLimit({}, 32000, [large])).toBe(65536);
+    expect(taskOutputTokenLimit({}, 32000, [large, small])).toBe(8192);
+    expect(taskOutputTokenLimit({}, 32000, [large, null])).toBe(32000);
     expect(taskOutputTokenLimit({ maxOutputTokens: 4000 }, 32000, [small])).toBe(4000);
     expect(() => resolveContextWindow([small], taskOutputTokenLimit({ maxOutputTokens: 12000 }, 32000, [small]))).toThrow('output limit');
   });
@@ -379,6 +383,11 @@ describe('durable Novel Build execution contract', () => {
       outputMicrosPerMillion: 0,
       version: 'codex-oauth-v1'
     });
+    const limits = { context: 1_050_000, input: 922_000, output: 128_000 };
+    expect(lookupExecutionModelPrice({ 'openai/gpt-5.6-terra': {
+      inputMicrosPerMillion: 1_000_000, outputMicrosPerMillion: 5_000_000,
+      source: 'catalog', version: '1', limits
+    } }, 'CODEX', 'codex/gpt-5.6-terra')).toMatchObject({ inputMicrosPerMillion: 0, outputMicrosPerMillion: 0, limits });
     expect(lookupExecutionModelPrice({}, 'CODEX', 'gpt-5.5-pro')).toBeNull();
     expect(lookupExecutionModelPrice({}, 'GATEWAY', 'codex/gpt-5.6-terra')).toBeNull();
   });

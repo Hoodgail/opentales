@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { JsonValue } from '@opentales/sdk';
 import type { BuildTaskLease } from '@opentales/sdk';
 import { ProjectExportUseCase } from '../../exportImport/ProjectExportUseCase.js';
-import { NovelBuildUseCase, revisionBudgetIteration } from '../../novelBuild/NovelBuildUseCase.js';
+import { NovelBuildUseCase, revisionBudgetIteration, collectJsonReferences, referenceVariants } from '../../novelBuild/NovelBuildUseCase.js';
 import { StoryStateUseCase } from '../../novelBuild/StoryStateUseCase.js';
 import { BuildManuscriptUseCase } from '../../novelBuild/BuildManuscriptUseCase.js';
 import {
@@ -16,7 +16,7 @@ import {
 } from '../../novelBuild/schemas.js';
 import { loadAiSkillCatalog, loadAiSkillReferences, type AiSkillCatalogItem } from '../markdownCatalog.js';
 import { loadAiModelForProject, providerOptionsForAiModel } from '../aiModel.js';
-import { isCodexModelAllowed } from '../codexModels.js';
+import { bareCodexModelId, isCodexModelAllowed } from '../codexModels.js';
 import { ContextAssembler, estimateTokens } from '../context/ContextAssembler.js';
 import { renderInferenceLayers } from '../prompts/layeredInference.js';
 import { serializeUntrustedData } from '../prompts/untrustedData.js';
@@ -991,6 +991,19 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const operations = Array.isArray(jsonRecord(input).operations)
       ? jsonRecord(input).operations as unknown[]
       : [];
+    const proposedSetupMaps = operations.map(jsonRecord).filter(operation => operation.action === 'upsert' && operation.type === 'setup-payoff-map');
+    if (proposedSetupMaps.length) {
+      const sources = await this.prisma.storyArtifact.findMany({ where: {
+        buildRunId: claimed.run.id, invalidatedAt: null, status: { in: ['DRAFT', 'VALIDATED', 'ACCEPTED'] }
+      }, select: { content: true } });
+      const required = sources.flatMap(source => collectJsonReferences(source.content as JsonValue)).filter(ref => ref.type === 'setup-payoff');
+      for (const operation of proposedSetupMaps) {
+        const links = jsonRecord(operation.content).links;
+        const declared = new Set((Array.isArray(links) ? links : []).flatMap(link => referenceVariants(jsonRecord(link).key)));
+        const missing = uniqueStrings(required.filter(ref => ![ref.id, ref.key].flatMap(referenceVariants).some(key => declared.has(key))).map(ref => ref.id));
+        if (missing.length) throw new Error(`Setup/payoff map omits ${missing.length} referenced key(s): ${missing.slice(0, 30).join(', ')}. Preserve every declared setupPayoffRefs/setupPayoffKeys identifier from the required-reference index and submit the complete map.`);
+      }
+    }
     if (claimed.task.type === 'create-chapter-briefs') {
       const target = jsonRecord(jsonRecord(claimed.run.manifest).target);
       const current = await this.prisma.storyArtifact.findMany({ where: {
@@ -2203,6 +2216,9 @@ export function objectiveForTask(task: BuildTask, buildObjective: string, manife
     task.type === 'extract-scene-canon'
       ? 'Read the assigned build unit and copy exact IDs: sourceUnitId and scene references use unit.id; chapter references use unit.parentUnitId; artifact references use unit.planArtifactId, never writingId or branchId. Keys in metadata are not database IDs. On a rejected reference, correct that exact field rather than guessing IDs or dropping all provenance. Use the current temporally valid canon supplied in context; query only missing or explicitly truncated records. Commit the assigned scene delta atomically with the exact taskId from the task contract. A subject/predicate pair is one property with one value at a time: use specific predicates (water-level, electrical-condition), never generic has_condition/has_fact for unrelated facts. On re-extraction reuse the exact keys already sourced to this scene, not keys from earlier scenes that merely mention the same entity. Do not create competing keys or move an earlier scene state to the current scene. Entity stateKey is also a single property: use specific keys such as knows-relay-mechanism and knows-shared-loss, never generic knowledge for independent beliefs. Avoid redundant narrative inventory summaries under possession; use specific item properties when a durable state is needed. Validity intervals are inclusive: if a new state starts at order N, the earlier state must end at N-1, not N. Preserve earlier state intervals and model changes with non-overlapping validity intervals. Correct any conflicts rejected by commitCanonDelta before reporting. The next deterministic workflow stage runs diagnostics; do not spend another model round trip repeating it here.'
       : '',
+    task.type === 'create-setup-payoff-map'
+      ? 'Cover every identifier in the required setup/payoff reference index, including plain setupPayoffKeys declared by plot threads. Preserve those exact link keys; do not replace them with newly named equivalents. Use the source scene plans to choose setup, reinforcement and payoff references.'
+      : '',
     task.type === 'create-finale-plan'
       ? 'Set mainThreadKey to the main plot-thread content.threadKey; the build validator also accepts that plot-thread artifact\'s exact stable key.'
       : '',
@@ -3090,11 +3106,15 @@ export function lookupExecutionModelPrice(
 ): ModelPrice | null {
   if (provider === 'CODEX') {
     if (!modelId || !isCodexModelAllowed(modelId)) return null;
+    const limits = (lookupModelPrice(pricing, modelId)
+      ?? lookupModelPrice(pricing, `openai/${bareCodexModelId(modelId)}`)
+      ?? lookupModelPrice(pricing, bareCodexModelId(modelId)))?.limits;
     return {
       inputMicrosPerMillion: 0,
       outputMicrosPerMillion: 0,
       source: 'OpenAI ChatGPT subscription through Codex OAuth',
-      version: 'codex-oauth-v1'
+      version: 'codex-oauth-v1',
+      ...(limits ? { limits } : {})
     };
   }
   return lookupModelPrice(pricing, modelId);
@@ -3161,7 +3181,10 @@ function parseModelRouting(value: string | undefined): Partial<Record<'fast' | '
 export function taskOutputTokenLimit(policy: Record<string, unknown>, defaultLimit: number, prices: Array<ModelPrice | null>): number {
   if (typeof policy.maxOutputTokens === 'number') return policy.maxOutputTokens;
   const advertised = prices.flatMap(price => price?.limits?.output ? [price.limits.output] : []);
-  return Math.min(defaultLimit, ...advertised);
+  // Published output limits include reasoning. Do not impose a smaller
+  // arbitrary default on a known route; explicit author caps still win.
+  const ceiling = advertised.length && advertised.length === prices.length ? 250_000 : defaultLimit;
+  return Math.min(ceiling, ...advertised);
 }
 
 /** Shared request window across reachable fallback routes for one executor. */

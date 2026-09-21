@@ -198,7 +198,7 @@ export class ContextAssembler {
         priority: 96,
         maxTokens: 5_000,
         required: true,
-        protectedContent: chapterAllocationIndex(inputArtifacts, input.task)
+        protectedContent: joinUseful(chapterAllocationIndex(inputArtifacts, input.task), setupPayoffReferenceIndex([...artifacts, ...inputArtifacts], input.task))
       },
       {
         kind: 'characters',
@@ -607,6 +607,9 @@ function collectStoryReferences(rows: Record<string, unknown>[]): StoryReference
       const reference = { type: value.type, id: value.id, key: typeof value.key === 'string' ? value.key : undefined };
       references.set(`${reference.type}:${reference.id}:${reference.key ?? ''}`, reference);
     }
+    for (const id of Array.isArray(value.setupPayoffKeys) ? value.setupPayoffKeys : []) {
+      if (typeof id === 'string' && id.trim()) references.set(`setup-payoff:${id}`, { type: 'setup-payoff', id });
+    }
     Object.values(value).forEach(walk);
   };
   rows.forEach((row) => walk(row.content ?? row));
@@ -851,6 +854,19 @@ export function worldLocationIndex(rows: Record<string, unknown>[]): string {
     return Array.isArray(content.geography) ? content.geography.filter(isRecord).map(entry => ({ key: entry.key, name: entry.name })) : [];
   });
   return locations.length ? `Declared world locations (use an exact key as location id/key; a world-bible artifact ID is not a location):\n${JSON.stringify(locations)}` : '';
+}
+
+export function setupPayoffReferenceIndex(rows: Record<string, unknown>[], task: Pick<TaskContract, 'metadata'> | null): string {
+  if (task?.metadata.taskType !== 'create-setup-payoff-map') return '';
+  const required = new Map<string, { id: string; key?: string; sources: string[] }>();
+  for (const row of rows) for (const ref of collectStoryReferences([row]).filter(ref => ref.type === 'setup-payoff')) {
+    const key = `${ref.id}:${ref.key ?? ''}`;
+    const entry = required.get(key) ?? { id: ref.id, ...(ref.key ? { key: ref.key } : {}), sources: [] };
+    const source = String(row.key ?? row.id ?? 'unknown');
+    if (!entry.sources.includes(source)) entry.sources.push(source);
+    required.set(key, entry);
+  }
+  return required.size ? `Required setup/payoff references (preserve every declared identifier as a map link key; sources identify the persisted plans):\n${JSON.stringify([...required.values()])}` : '';
 }
 
 export function chapterAllocationIndex(rows: Record<string, unknown>[], task: Pick<TaskContract, 'metadata'> | null): string {

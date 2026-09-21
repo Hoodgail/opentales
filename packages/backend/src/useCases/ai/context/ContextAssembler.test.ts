@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PrismaClient } from '@prisma/client';
-import { ContextAssembler, characterIdentityIndex, chapterAllocationIndex, worldLocationIndex, estimateTokens, packContextSections, selectTemporalState, type ContextSection } from './ContextAssembler.js';
+import { ContextAssembler, characterIdentityIndex, chapterAllocationIndex, setupPayoffReferenceIndex, worldLocationIndex, estimateTokens, packContextSections, selectTemporalState, type ContextSection } from './ContextAssembler.js';
 
 describe('context packing', () => {
 it('preserves exact geography keys beyond a verbose world-bible excerpt', () => {
@@ -37,6 +37,18 @@ it('preserves every declared scene key from 32 verbose briefs through model-visi
   expect(shardIndex).not.toContain('chapter-31');
   const wrongTotal = rows.map(row => ({ ...row, content: { ...row.content, sceneKeys: row.content.sceneKeys.slice(0, 3) } }));
   expect(() => chapterAllocationIndex(wrongTotal, { metadata: { taskType: 'create-scene-plan-shard', shard: { chapterNumber: 1, total: 110 } } })).toThrow('declare 96 scenes');
+});
+
+it('keeps all required payoff identifiers when verbose scene bodies must be packed', () => {
+  const rows = Array.from({ length: 110 }, (_, index) => ({ id: `plan-${index}`, key: `scene-${index}`, content: {
+    description: 'Long scene description. '.repeat(200), setupPayoffRefs: [{ type: 'setup-payoff', id: `payoff-${index}` }]
+  } }));
+  const thread = { id: 'thread', key: 'thread', content: { setupPayoffKeys: ['thread-only-payoff'] } };
+  const protectedContent = setupPayoffReferenceIndex([...rows, thread], { metadata: { taskType: 'create-setup-payoff-map' } });
+  const pack = packContextSections([{ kind: 'active-task', title: 'Plans', content: JSON.stringify(rows), protectedContent, required: true, identifiers: [], priority: 1, maxTokens: 4000 }], 5000);
+  for (let index = 0; index < 110; index++) expect(pack.text).toContain(`payoff-${index}`);
+  expect(pack.text).toContain('thread-only-payoff');
+  expect(pack.truncated).toBe(true);
 });
 
 it('fails before inference when required structural inputs are absent or cannot fit', () => {

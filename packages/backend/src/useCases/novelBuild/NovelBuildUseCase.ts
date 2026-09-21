@@ -2134,6 +2134,7 @@ export function collectJsonReferences(value: JsonValue): Array<{ type: string; i
       id: node.id,
       ...(typeof node.key === 'string' ? { key: node.key } : {})
     });
+    for (const id of stringArray(node.setupPayoffKeys)) references.push({ type: 'setup-payoff', id });
     for (const field of ['characterPresentIds', 'characterReferencedIds']) {
       for (const id of stringArray(node[field])) references.push({ type: 'character', id });
     }
