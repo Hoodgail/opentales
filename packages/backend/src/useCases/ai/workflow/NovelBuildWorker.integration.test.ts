@@ -683,19 +683,28 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
       taskType: 'extract-scene-canon', assignedAgent: 'librarian', acceptanceCriteria: { canonDeltaRequired: true },
       skillVersions: { 'novel-build': '1.1.0', 'novel-continuity': '1.1.0' }, maxAttempts: 1
     });
+    const priorFact = await prisma.canonFact.create({ data: {
+      projectId, buildRunId: canonFixture.run.id, key: 'existing-fact', subjectType: 'character', subjectId: 'mara',
+      predicate: 'knows-archive', object: false, status: 'CANONICAL', confidence: 1
+    } });
     await resumeRunnableBuilds(prisma, {
       workerId: `canon-compensation:${suffix}`, buildRunIds: [canonFixture.run.id], maxTasksPerSweep: 1, modelPricing: fixturePricing,
       modelExecutor: async (input) => {
-        await invokeWorkerTool(input, 'commitCanonDelta', {
+        for (const [version, value] of [true, false].entries()) await invokeWorkerTool(input, 'commitCanonDelta', {
           buildRunId: canonFixture.run.id, taskId: input.contract.scope.buildTaskId, sourceUnitId: canonFixture.sceneUnit.id,
-          idempotencyKey: `partial-canon:${canonFixture.run.id}`,
-          facts: [{ key: 'partial-fact', subjectType: 'character', subjectId: 'mara', predicate: 'knows', object: true, status: 'CANONICAL', validFromOrder: 1, confidence: 1 }]
+          idempotencyKey: `partial-canon:${canonFixture.run.id}:${version}`,
+          facts: [
+            { key: 'partial-fact', subjectType: 'character', subjectId: 'mara', predicate: 'knows', object: value, status: 'CANONICAL', validFromOrder: 1, confidence: 1 },
+            { key: 'existing-fact', subjectType: 'character', subjectId: 'mara', predicate: 'knows-archive', object: value, status: 'CANONICAL', validFromOrder: 1, confidence: 1 }
+          ]
         });
         throw new Error('Provider failed after canon mutation');
       }
     });
-    expect(await prisma.canonFact.count({ where: { buildRunId: canonFixture.run.id, isCurrent: true, invalidatedAt: null } })).toBe(0);
-    expect(await prisma.canonFact.count({ where: { buildRunId: canonFixture.run.id, status: 'INVALIDATED' } })).toBe(1);
+    const currentFacts = await prisma.canonFact.findMany({ where: { buildRunId: canonFixture.run.id, isCurrent: true, invalidatedAt: null } });
+    expect(currentFacts.map(fact => fact.id)).toEqual([priorFact.id]);
+    expect(currentFacts[0]?.object).toBe(false);
+    expect(await prisma.canonFact.count({ where: { buildRunId: canonFixture.run.id, status: 'INVALIDATED' } })).toBe(4);
   });
 
   it('resets explicit restart allowances while preserving monotonic IDs and bounded automatic revisions', async () => {

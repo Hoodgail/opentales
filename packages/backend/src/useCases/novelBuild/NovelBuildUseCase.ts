@@ -640,26 +640,27 @@ export class NovelBuildUseCase {
     }
     const restorePrevious = async <T extends { id: string; supersedesId: string | null }>(rows: T[], invalidate: (ids: string[]) => Promise<unknown>, restore: (ids: string[]) => Promise<unknown>) => {
       if (!rows.length) return;
+      const attemptIds = new Set(rows.map(row => row.id));
       await invalidate(rows.map((row) => row.id));
-      const previous = [...new Set(rows.flatMap((row) => row.supersedesId ? [row.supersedesId] : []))];
+      const previous = [...new Set(rows.flatMap((row) => row.supersedesId && !attemptIds.has(row.supersedesId) ? [row.supersedesId] : []))];
       if (previous.length) await restore(previous);
     };
-    await restorePrevious((await tx.canonFact.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary }, isCurrent: true }, select: { id: true, supersedesFactId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesFactId })),
+    await restorePrevious((await tx.canonFact.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary } }, select: { id: true, supersedesFactId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesFactId })),
       (ids) => tx.canonFact.updateMany({ where: { id: { in: ids } }, data: { isCurrent: false, status: 'INVALIDATED', invalidatedAt: new Date() } }),
       (ids) => tx.canonFact.updateMany({ where: { id: { in: ids }, invalidatedAt: null }, data: { isCurrent: true } }));
-    await restorePrevious((await tx.entityState.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary }, isCurrent: true }, select: { id: true, supersedesStateId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesStateId })),
+    await restorePrevious((await tx.entityState.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary } }, select: { id: true, supersedesStateId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesStateId })),
       (ids) => tx.entityState.updateMany({ where: { id: { in: ids } }, data: { isCurrent: false, status: 'INVALIDATED', invalidatedAt: new Date() } }),
       (ids) => tx.entityState.updateMany({ where: { id: { in: ids }, invalidatedAt: null }, data: { isCurrent: true } }));
-    await restorePrevious((await tx.timelineEvent.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary }, isCurrent: true }, select: { id: true, supersedesEventId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesEventId })),
+    await restorePrevious((await tx.timelineEvent.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary } }, select: { id: true, supersedesEventId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesEventId })),
       (ids) => tx.timelineEvent.updateMany({ where: { id: { in: ids } }, data: { isCurrent: false, invalidatedAt: new Date() } }),
       (ids) => tx.timelineEvent.updateMany({ where: { id: { in: ids }, invalidatedAt: null }, data: { isCurrent: true } }));
-    await restorePrevious((await tx.openLoop.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary }, isCurrent: true }, select: { id: true, supersedesLoopId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesLoopId })),
+    await restorePrevious((await tx.openLoop.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary } }, select: { id: true, supersedesLoopId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesLoopId })),
       (ids) => tx.openLoop.updateMany({ where: { id: { in: ids } }, data: { isCurrent: false, status: 'INVALIDATED', invalidatedAt: new Date() } }),
       (ids) => tx.openLoop.updateMany({ where: { id: { in: ids }, invalidatedAt: null }, data: { isCurrent: true } }));
-    await restorePrevious((await tx.setupPayoffLink.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary }, isCurrent: true }, select: { id: true, supersedesLinkId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesLinkId })),
+    await restorePrevious((await tx.setupPayoffLink.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary } }, select: { id: true, supersedesLinkId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesLinkId })),
       (ids) => tx.setupPayoffLink.updateMany({ where: { id: { in: ids } }, data: { isCurrent: false, status: 'INVALIDATED', invalidatedAt: new Date() } }),
       (ids) => tx.setupPayoffLink.updateMany({ where: { id: { in: ids }, invalidatedAt: null }, data: { isCurrent: true } }));
-    await restorePrevious((await tx.plotThread.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary }, isCurrent: true }, select: { id: true, supersedesThreadId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesThreadId })),
+    await restorePrevious((await tx.plotThread.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary } }, select: { id: true, supersedesThreadId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesThreadId })),
       (ids) => tx.plotThread.updateMany({ where: { id: { in: ids } }, data: { isCurrent: false, status: 'INVALIDATED', invalidatedAt: new Date() } }),
       (ids) => tx.plotThread.updateMany({ where: { id: { in: ids }, invalidatedAt: null }, data: { isCurrent: true } }));
     if (task.scopeUnitIds.length) {
