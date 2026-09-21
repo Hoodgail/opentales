@@ -467,7 +467,7 @@ export function createPlanningTaskTemplates(targetChapterCount: number, targetSc
   const beatShardSize = 20;
   const beatShards = Array.from({ length: Math.ceil(targetSceneCount / beatShardSize) }, (_, index) => {
     const count = Math.min(beatShardSize, targetSceneCount - index * beatShardSize);
-    return { ...planningTask(`beats:${String(index + 1).padStart(3, '0')}`, 'create-beat-shard', ['plot-threads'], 'creator', ['beat'], 68 - index),
+    return { ...planningTask(`beats:${String(index + 1).padStart(3, '0')}`, 'create-beat-shard', ['plot-threads', ...(index ? [`beats:${String(index).padStart(3, '0')}`] : [])], 'creator', ['beat'], 68 - index),
       acceptanceCriteria: { requiredArtifactTypes: ['beat'], minOutputCount: count, maxOutputCount: count },
       executionPolicy: { shardIndex: index, startOrdinal: index * beatShardSize + 1, count, total: targetSceneCount, exactPlanningReferencesRequired: true }
     };

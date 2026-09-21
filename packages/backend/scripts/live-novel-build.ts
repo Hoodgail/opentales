@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { PrismaClient } from '@prisma/client';
 import { NovelBuildUseCase } from '../src/useCases/novelBuild/NovelBuildUseCase.js';
 import { ARTIFACT_TYPES } from '../src/useCases/novelBuild/schemas.js';
@@ -67,9 +67,9 @@ try {
       authorizationScope: current.authorizationScope, maxTokens
     });
   }
-  if (process.env.LIVE_RERUN_TASK) {
+  for (const taskKey of (process.env.LIVE_RERUN_TASK ?? '').split(',').map(key => key.trim()).filter(Boolean)) {
     const run = await prisma.buildRun.findUniqueOrThrow({ where: { id: buildRunId } });
-    const task = await prisma.buildTask.findFirstOrThrow({ where: { buildRunId, key: process.env.LIVE_RERUN_TASK } });
+    const task = await prisma.buildTask.findFirstOrThrow({ where: { buildRunId, key: taskKey } });
     await new NovelBuildUseCase(prisma).rerun(run.authorizedById ?? run.createdById!, run.projectId, run.id, task.id, {
       idempotencyKey: randomUUID(), expectedRevision: run.revision,
       reason: 'Explicit live validation rerun after correcting the implementation; invalidate dependent outputs.'
@@ -77,11 +77,15 @@ try {
   }
   let completed = false;
   for (let sweep = 0; sweep < integerSetting('LIVE_MAX_SWEEPS', 10000); sweep++) {
+    if (process.env.LIVE_STOP_FILE && await access(process.env.LIVE_STOP_FILE).then(() => true, () => false)) {
+      console.log(JSON.stringify({ buildRunId, stoppedAtTaskBoundary: true }));
+      break;
+    }
     const count = await resumeRunnableBuilds(prisma, { buildRunIds: [buildRunId], maxTasksPerSweep: 1 });
     const run = await prisma.buildRun.findUniqueOrThrow({ where: { id: buildRunId } });
     const tasks = await prisma.buildTask.findMany({ where: { buildRunId }, orderBy: { createdAt: 'asc' }, select: { key: true, status: true, attempts: true, lastError: true } });
     console.log(JSON.stringify({ status: run.status, phase: run.currentPhase, done: tasks.filter(t => t.status === 'DONE').length, total: tasks.length, errors: tasks.filter(t => t.lastError).map(t => ({ key: t.key, error: t.lastError })), lastError: run.lastError }));
-    await writeFile(`${output}/report.json`, JSON.stringify({ buildRunId, model, status: run.status, phase: run.currentPhase, lastError: run.lastError, tasks }, null, 2));
+    await writeFile(`${output}/report.json`, JSON.stringify({ buildRunId, model, status: run.status, phase: run.currentPhase, lastError: run.lastError, tokensUsed: run.tokensUsed, maxTokens: run.maxTokens, accountingCostMicros: run.costMicrosUsed, tasks }, null, 2));
     if (['COMPLETED', 'FAILED', 'PAUSED', 'CANCELLED'].includes(run.status)) {
       const units = await prisma.buildManuscriptUnit.findMany({ where: { buildRunId }, orderBy: { order: 'asc' }, include: { branch: { include: { headVersion: true } } } });
       const chapterOrder = new Map(units.filter(unit => unit.kind === 'CHAPTER').map(unit => [unit.id, unit.chapterNumber ?? unit.order]));

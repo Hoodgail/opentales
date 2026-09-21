@@ -28,6 +28,7 @@ const {
   hasCurrentUnitRead,
   hasSuccessfulTaskReport,
   guardWorkerTools,
+  validateBeatShardOperations,
   validateBeatReferences,
   judgeEvidenceCharacterBudget,
   lookupExecutionModelPrice,
@@ -124,8 +125,18 @@ describe('durable Novel Build execution contract', () => {
       { beatKey: 'choice', causeKeys: ['arrival'], consequenceKeys: [] }
     ], [])).not.toThrow();
     expect(() => validateBeatReferences([{ beatKey: 'choice', causeKeys: ['arrival'], consequenceKeys: [] }], ['arrival'])).not.toThrow();
-    expect(() => validateBeatReferences([{ beatKey: 'beat-20', causeKeys: [], consequenceKeys: ['beat-21'] }], [], true)).not.toThrow();
-    expect(() => validateBeatReferences([{ beatKey: 'beat-20', causeKeys: ['A backstory sentence'], consequenceKeys: [] }], [], true)).toThrow('must contain exact beatKey');
+    expect(() => validateBeatReferences([{ beatKey: 'beat-20', causeKeys: [], consequenceKeys: ['beat-21'] }], [], ['beat-21'])).not.toThrow();
+    expect(() => validateBeatReferences([{ beatKey: 'beat-20', causeKeys: ['A backstory sentence'], consequenceKeys: [] }], [], ['beat-21'])).toThrow('must contain exact beatKey');
+    expect(() => validateBeatReferences([{ beatKey: 'beat-20', causeKeys: [], consequenceKeys: ['guessed-future-beat'] }], [], ['beat-21'])).toThrow('missing beat');
+  });
+
+  it('assigns disjoint stable beat keys before independent model generation', () => {
+    const keys = validateBeatShardOperations([{ type: 'beat', key: 'beat-21', content: { beatKey: 'beat-21' } }], { startOrdinal: 21, count: 20, total: 110 });
+    expect(keys).toHaveLength(110);
+    expect(keys.at(-1)).toBe('beat-110');
+    for (const [key, beatKey] of [['beat-20', 'beat-20'], ['another-key', 'beat-21'], ['invented', 'invented']]) {
+      expect(() => validateBeatShardOperations([{ type: 'beat', key, content: { beatKey } }], { startOrdinal: 21, count: 20, total: 110 })).toThrow('allocation');
+    }
   });
 
   it('waits for an in-flight heartbeat before recording a failed attempt', async () => {

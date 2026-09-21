@@ -959,11 +959,14 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       .filter(operation => operation.action === 'upsert' && operation.type === 'beat')
       .map(operation => operation.content);
     if (proposedBeats.length) {
+      const declaredKeys = claimed.task.type === 'create-beat-shard'
+        ? validateBeatShardOperations(operations, jsonRecord(claimed.task.executionPolicy))
+        : [];
       const existing = await this.prisma.storyArtifact.findMany({
         where: { buildRunId: claimed.run.id, type: 'BEAT', invalidatedAt: null, status: { in: ['DRAFT', 'VALIDATED', 'ACCEPTED'] } },
         select: { content: true }
       });
-      validateBeatReferences(proposedBeats, existing.map(artifact => String(jsonRecord(artifact.content).beatKey ?? '')), claimed.task.type === 'create-beat-shard');
+      validateBeatReferences(proposedBeats, existing.map(artifact => String(jsonRecord(artifact.content).beatKey ?? '')), declaredKeys);
     }
     if (['create-scene-plans', 'create-scene-plan-shard'].includes(claimed.task.type)
       && jsonRecord(claimed.task.acceptanceCriteria).exactChapterSceneKeysRequired === true) {
@@ -1783,11 +1786,12 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       where: { buildRunId: claimed.run.id, type: artifactType, status: { in: ['VALIDATED', 'ACCEPTED'] }, invalidatedAt: null },
       select: { key: true, content: true }
     });
-    if (expected !== null && artifacts.length !== expected) return false;
+    if (expected !== null && artifacts.length !== expected) throw new Error(`${claimed.task.key} requires exactly ${expected} active ${artifactType} artifacts; found ${artifacts.length}. Repair the producing shards before aggregation.`);
     if (claimed.task.type === 'aggregate-beats') validateBeatReferences(artifacts.map(artifact => artifact.content), []);
     const contentKey = claimed.task.type === 'aggregate-beats' ? 'beatKey' : 'sceneKey';
     const keys = artifacts.map((artifact) => jsonRecord(artifact.content)[contentKey]);
-    return keys.every((key): key is string => typeof key === 'string' && key.length > 0) && new Set(keys).size === keys.length;
+    if (!keys.every((key): key is string => typeof key === 'string' && key.length > 0) || new Set(keys).size !== keys.length) throw new Error(`${claimed.task.key} contains missing or duplicate ${contentKey} values. Each shard must use its declared keys.`);
+    return true;
   }
 
   private async startTrace(claimed: ClaimedTask, provider: string | null, model: string | null, retrievedArtifactIds: string[], contextTokenCount: number): Promise<PendingTrace> {
@@ -2044,12 +2048,26 @@ function roleForTask(assignedAgent: string): RuntimeRole {
   return 'creator';
 }
 
-export function validateBeatReferences(proposed: unknown[], existingKeys: string[], allowForwardShardReferences = false): void {
+export function validateBeatShardOperations(operations: unknown[], policy: Record<string, unknown>): string[] {
+  const start = Number(policy.startOrdinal);
+  const count = Number(policy.count);
+  const total = Number(policy.total);
+  if (![start, count, total].every(Number.isSafeInteger) || start < 1 || count < 1 || total > 5000 || start + count - 1 > total) throw new Error('Beat shard has an invalid declared allocation');
+  const allKeys = Array.from({ length: total }, (_, i) => `beat-${i + 1}`);
+  const assigned = new Set(allKeys.slice(start - 1, start - 1 + count));
+  for (const operation of operations.map(jsonRecord).filter(op => op.type === 'beat')) {
+    const content = jsonRecord(operation.content);
+    if (!assigned.has(String(content.beatKey)) || operation.key !== content.beatKey) throw new Error(`Beat shard must use identical artifact key and beatKey from its allocation: ${[...assigned].join(', ')}. Put descriptive names in title.`);
+  }
+  return allKeys;
+}
+
+export function validateBeatReferences(proposed: unknown[], existingKeys: string[], declaredFutureKeys: string[] = []): void {
   const beats = proposed.map(jsonRecord);
-  const keys = new Set([...existingKeys, ...beats.map(beat => String(beat.beatKey ?? ''))]);
+  const keys = new Set([...existingKeys, ...declaredFutureKeys, ...beats.map(beat => String(beat.beatKey ?? ''))]);
   for (const beat of beats) {
     for (const linked of [...stringArray(beat.causeKeys), ...stringArray(beat.consequenceKeys)]) {
-      if (!keys.has(linked) && !(allowForwardShardReferences && /^[^\s]{1,500}$/u.test(linked))) throw new Error(
+      if (!keys.has(linked)) throw new Error(
         `Beat '${String(beat.beatKey)}' references missing beat '${linked}'. causeKeys and consequenceKeys must contain exact beatKey values from existing beats or this batch, not prose. Put backstory in function and use [] for no linked beat. Submit linked new beats together.`
       );
     }
@@ -2090,7 +2108,10 @@ export function objectiveForTask(task: BuildTask, buildObjective: string, manife
       ? 'Persist every required structured artifact with status VALIDATED using scoped tools before reporting its ID.'
       : 'This task requires no artifact output: report artifactIds as []. Canon fact/state/event/loop IDs and manuscript unit/version IDs belong in evidence, never artifactIds. Report observable checks and evaluation evidence directly.',
     ['create-beats', 'create-beat-shard'].includes(task.type)
-      ? 'causeKeys and consequenceKeys contain only exact beatKey values, never prose, names, or historical events. Use [] for absent links and describe backstory in function. Submit connected new beats in one batch. Sharded tasks may use stable single-token keys for later shards; all references must resolve when the beat corpus is complete.'
+      ? 'causeKeys and consequenceKeys contain only exact declared beatKey values, never guessed future names, prose, or historical events. Use [] for absent links and describe backstory in function. Submit connected new beats in one batch.'
+      : '',
+    task.type === 'create-beat-shard'
+      ? `Use identical artifact key and beatKey values beat-${jsonRecord(task.executionPolicy).startOrdinal} through beat-${Number(jsonRecord(task.executionPolicy).startOrdinal) + Number(jsonRecord(task.executionPolicy).count) - 1}. The complete declared corpus is beat-1 through beat-${jsonRecord(task.executionPolicy).total}; forward links may reference only that range. Put meaningful names in title, not in keys.`
       : '',
     task.type === 'extract-scene-canon'
       ? 'Read the assigned build unit and copy exact IDs: sourceUnitId and scene references use unit.id; chapter references use unit.parentUnitId; artifact references use unit.planArtifactId, never writingId or branchId. Keys in metadata are not database IDs. On a rejected reference, correct that exact field rather than guessing IDs or dropping all provenance. Query current canon before committing. A subject/predicate pair is one property with one value at a time: use specific predicates (water-level, electrical-condition), never generic has_condition/has_fact for unrelated facts. On re-extraction reuse the exact keys already sourced to this scene, not keys from earlier scenes that merely mention the same entity. Do not create competing keys or move an earlier scene state to the current scene. Entity stateKey is also a single property: use specific keys such as knows-relay-mechanism and knows-shared-loss, never generic knowledge for independent beliefs. Avoid redundant narrative inventory summaries under possession; use specific item properties when a durable state is needed. Validity intervals are inclusive: if a new state starts at order N, the earlier state must end at N-1, not N. Preserve earlier state intervals and model changes with non-overlapping validity intervals. Read diagnostics and resolve canon conflicts before reporting.'

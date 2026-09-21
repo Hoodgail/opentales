@@ -242,6 +242,11 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
     expect(units.filter((unit) => unit.kind === 'CHAPTER')).toHaveLength(32);
     expect(units.filter((unit) => unit.kind === 'SCENE')).toHaveLength(104);
     expect(planningTasks.filter((task) => task.type === 'create-beat-shard').length).toBeGreaterThan(1);
+    const beatShards = planningTasks.filter(task => task.type === 'create-beat-shard').sort((a, b) => a.key.localeCompare(b.key));
+    for (let i = 1; i < beatShards.length; i++) {
+      expect(beatShards[i]!.dependencyIds).toContain(beatShards[i - 1]!.id);
+      expect(beatShards[i]!.inputArtifactIds).toEqual(expect.arrayContaining(beatShards[i - 1]!.outputArtifactIds));
+    }
     expect(planningTasks.filter((task) => task.type === 'create-scene-plan-shard')).toHaveLength(32);
     expect(planningTasks.find((task) => task.type === 'aggregate-beats')?.status).toBe('DONE');
     expect(planningTasks.find((task) => task.type === 'aggregate-scene-plans')?.status).toBe('DONE');
@@ -1099,6 +1104,10 @@ function deterministicExecutor(prisma: PrismaClient, buildRunId: string, scale?:
     let planningOperations = scale
       ? productionPlanningArtifactsFor(input.contract.outputs.map((output) => output.type), input.contract.scope.buildTaskId ?? taskKey, input.contract.metadata, scale)
       : planningArtifactsFor(input.contract.outputs.map((output) => output.type), input.contract.scope.buildTaskId ?? taskKey);
+    if (scale && taskType === 'create-beat-shard') {
+      const shard = input.contract.metadata.shard as { startOrdinal: number; count: number };
+      expect(input.prompt).toContain(`beat-${shard.startOrdinal} through beat-${shard.startOrdinal + shard.count - 1}`);
+    }
     if (scale && taskType === 'create-scene-plan-shard') {
       const chapterNumber = Number((input.contract.metadata.shard as Record<string, unknown>).chapterNumber);
       const briefs = await prisma.storyArtifact.findMany({ where: { buildRunId, type: 'CHAPTER_BRIEF', invalidatedAt: null } });
