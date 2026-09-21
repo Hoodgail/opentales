@@ -1269,7 +1269,7 @@ function deterministicExecutor(prisma: PrismaClient, buildRunId: string, scale?:
       },
       // Reproduce the live chapter-shard conversation that grew past 96k.
       inputTokens: scale && taskType === 'create-scene-plan-shard' ? 100_881 : 100,
-      outputTokens: 50,
+      outputTokens: scale && taskType === 'create-timeline' ? 19_086 : 50,
       toolCalls,
       toolResults,
       modelId: 'priced/model'

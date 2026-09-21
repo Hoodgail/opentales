@@ -225,3 +225,5 @@ The runner uses the same automatic models.dev pricing loader, cache, alias resol
 Chapter-scoped scene planning allows up to 128,000 input tokens per model invocation to accommodate bounded inspection history; whole-build token and cost limits still apply. Provider-limit failures retain tool-call evidence and roll back attempt writes. The live regression uses the observed 100,881-token conversation rather than only tiny synthetic usage.
 
 Failed-attempt recovery also invalidates every ledger version created by that attempt, including versions already superseded within it. It restores only pre-attempt predecessors, so repeated canon/state/timeline/loop/thread updates cannot leave intermediate failed values active. The regression covers both a newly introduced fact and replacement of an existing fact.
+
+Whole-book timeline generation uses the aggregate artifact budget (256,000 input / 48,000 output tokens per invocation), rather than the small-task output ceiling. Its regression includes the observed 19,086-token output, and its prompt keeps individual timeline entries concise.

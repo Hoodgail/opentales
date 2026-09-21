@@ -59,7 +59,8 @@ const AGGREGATE_ARTIFACT_TASK_TYPES = new Set([
   'create-plot-threads',
   'create-beats',
   'create-chapter-briefs',
-  'create-scene-plans'
+  'create-scene-plans',
+  'create-timeline'
 ]);
 
 type WorkerResult = z.infer<typeof workerResultSchema>;
@@ -2139,6 +2140,9 @@ export function objectiveForTask(task: BuildTask, buildObjective: string, manife
       : '',
     task.type === 'create-chapter-briefs'
       ? `Across all ${target.targetChapterCount} briefs, declare exactly ${target.targetSceneCount} globally unique sceneKeys in total. Chapter allocations may be uneven, but their sum must match this exact target. Count the combined allocation before persisting the final batch.`
+      : '',
+    task.type === 'create-timeline'
+      ? 'Keep timeline events concise: use ordered timestamps or relative markers, exact scene references, and causal dependencies. Do not repeat full scene prose or chapter synopses inside chronology fields.'
       : '',
     task.type === 'extract-scene-canon'
       ? 'Read the assigned build unit and copy exact IDs: sourceUnitId and scene references use unit.id; chapter references use unit.parentUnitId; artifact references use unit.planArtifactId, never writingId or branchId. Keys in metadata are not database IDs. On a rejected reference, correct that exact field rather than guessing IDs or dropping all provenance. Query current canon before committing. A subject/predicate pair is one property with one value at a time: use specific predicates (water-level, electrical-condition), never generic has_condition/has_fact for unrelated facts. On re-extraction reuse the exact keys already sourced to this scene, not keys from earlier scenes that merely mention the same entity. Do not create competing keys or move an earlier scene state to the current scene. Entity stateKey is also a single property: use specific keys such as knows-relay-mechanism and knows-shared-loss, never generic knowledge for independent beliefs. Avoid redundant narrative inventory summaries under possession; use specific item properties when a durable state is needed. Validity intervals are inclusive: if a new state starts at order N, the earlier state must end at N-1, not N. Preserve earlier state intervals and model changes with non-overlapping validity intervals. Read diagnostics and resolve canon conflicts before reporting.'
