@@ -141,6 +141,9 @@ export function storyIntelligenceTools(
   taskContract: TaskContract | null,
   executionLease: BuildTaskLeaseInput | null
 ) {
+  const scopedCanonDeltaSchema = taskContract?.scope.buildTaskId
+    ? canonDeltaInputSchema.safeExtend({ taskId: z.literal(taskContract.scope.buildTaskId) })
+    : canonDeltaInputSchema;
   return {
     searchStory: tool({
       description: 'Bounded hybrid story search across manuscript, docs, entities, artifacts, canon, timeline, threads, and open loops. Returns stable identifiers for follow-up reads.',
@@ -274,9 +277,9 @@ export function storyIntelligenceTools(
     }),
     commitCanonDelta: tool({
       description: 'Atomically commit a validated post-scene delta: canon facts, entity states, timeline events, and open loops. This is approval-gated outside an authorized build scope.',
-      inputSchema: canonDeltaInputSchema,
+      inputSchema: scopedCanonDeltaSchema,
       execute: async (input, options?: AgentToolInvocationContext) => {
-        const validated = canonDeltaInputSchema.parse(input);
+        const validated = scopedCanonDeltaSchema.parse(input);
         return approval.handleApproval('commitCanonDelta', validated, () => commitCanonDelta(prisma, context.projectId, validated, executionLease), invocationToolCallId(options), options?.abortSignal);
       }
     }),

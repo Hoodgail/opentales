@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { asSchema } from 'ai';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -194,8 +195,9 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
     expect(await resumeRunnableBuilds(prisma, { workerId: `integration-replay:${suffix}`, maxTasksPerSweep: 100, modelExecutor: executor, judgeExecutor, buildRunIds: [buildRunId], modelPricing: fixturePricing })).toBe(0);
   }, 60_000);
 
-  it('runs a production 85k/32-chapter/104-scene plan through persisted shards and a representative compiled/exported chapter', async () => {
+  it('runs a production 85k/32-chapter/104-scene novel through every scene, revision, compilation and verified export', async () => {
     const builds = new NovelBuildUseCase(prisma);
+    const productionPricing = { 'priced/model': { ...fixturePricing['priced/model'], limits: { context: 1048576, output: 65536 } } };
     const scope: BuildAuthorizationScope = {
       artifactTypes: ['story-brief', 'narrative-contract', 'character-bible', 'relationship-graph', 'world-bible', 'plot-thread', 'act-architecture', 'chapter-brief', 'scene-plan', 'timeline', 'setup-payoff-map', 'research-questions', 'open-questions', 'beat', 'chapter-draft', 'revision-issue', 'finale-plan', 'export-manifest'],
       chapterIds: [], sceneIds: [], allowPlanningArtifacts: true, allowCanonWrites: true,
@@ -215,14 +217,14 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
     expect(planningTaskCount).toBeGreaterThan(20);
     let plannedExecutions = await resumeRunnableBuilds(prisma, {
       workerId: `production-plan:${suffix}`, buildRunIds: [run.id], maxTasksPerSweep: planningTaskCount,
-      modelExecutor: executor, judgeExecutor: deterministicJudgeExecutor(), modelPricing: fixturePricing
+      modelExecutor: executor, judgeExecutor: deterministicJudgeExecutor(), modelPricing: productionPricing
     });
     for (let continuation = 0; continuation < 10; continuation += 1) {
       const checkpoint = await prisma.buildTask.findUniqueOrThrow({ where: { buildRunId_key: { buildRunId: run.id, key: 'planning-checkpoint' } } });
       if (checkpoint.status === 'DONE') break;
       plannedExecutions += await resumeRunnableBuilds(prisma, {
         workerId: `production-plan-continuation:${suffix}:${continuation}`, buildRunIds: [run.id], maxTasksPerSweep: 1,
-        modelExecutor: executor, judgeExecutor: deterministicJudgeExecutor(), modelPricing: fixturePricing
+        modelExecutor: executor, judgeExecutor: deterministicJudgeExecutor(), modelPricing: productionPricing
       });
     }
     const planningRun = await prisma.buildRun.findUniqueOrThrow({ where: { id: run.id } });
@@ -259,6 +261,13 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
     expect(planningTasks.find((task) => task.type === 'aggregate-scene-plans')?.status).toBe('DONE');
     expect(allTasks.some((task) => task.key === 'scene:scene-104:checkpoint')).toBe(true);
     const storyState = new StoryStateUseCase(prisma);
+    const isolatedScene = units.find(unit => unit.kind === 'SCENE')!;
+    expect(isolatedScene.povCharacterId).toBeNull();
+    await prisma.buildManuscriptUnit.update({ where: { id: isolatedScene.id }, data: {
+      metadata: { ...(isolatedScene.metadata as Prisma.JsonObject), povRef: { type: 'character', id: 'missing-pov-character' } }
+    } });
+    expect((await storyState.diagnostics(userId, projectId, run.id)).diagnostics.some(item => item.code === 'unknown-character-reference')).toBe(true);
+    await prisma.buildManuscriptUnit.update({ where: { id: isolatedScene.id }, data: { metadata: isolatedScene.metadata as Prisma.InputJsonValue } });
     const [scenePageOne, scenePageTwo] = await Promise.all([
       storyState.listArtifacts(userId, projectId, run.id, { types: ['scene-plan'], limit: 60, offset: 0 }),
       storyState.listArtifacts(userId, projectId, run.id, { types: ['scene-plan'], limit: 60, offset: 60 })
@@ -274,7 +283,7 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
     const representativeTaskCount = 46;
     const representativeExecutions = await resumeRunnableBuilds(prisma, {
       workerId: `production-chapter:${suffix}`, buildRunIds: [run.id], maxTasksPerSweep: representativeTaskCount,
-      modelExecutor: executor, judgeExecutor: deterministicJudgeExecutor(), modelPricing: fixturePricing
+      modelExecutor: executor, judgeExecutor: deterministicJudgeExecutor(), modelPricing: productionPricing
     });
     const representativeRun = await prisma.buildRun.findUniqueOrThrow({ where: { id: run.id } });
     const representativeFailures = await prisma.buildTask.findMany({ where: { buildRunId: run.id, status: 'FAILED' }, select: { key: true, lastError: true } });
@@ -294,9 +303,35 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
     expect(generated.assetId).toBeTruthy();
     expect(await prisma.storyArtifact.count({ where: { buildRunId: run.id, type: 'EXPORT_MANIFEST', invalidatedAt: null } })).toBe(1);
     await exports.delete(userId, projectId, generated.id);
-  }, 120_000);
+    await resumeRunnableBuilds(prisma, {
+      workerId: `production-finish:${suffix}`, buildRunIds: [run.id], maxTasksPerSweep: 2000,
+      modelExecutor: executor, judgeExecutor: deterministicJudgeExecutor(), modelPricing: productionPricing
+    });
+    const finished = await prisma.buildRun.findUniqueOrThrow({ where: { id: run.id } });
+    const unfinished = await prisma.buildTask.findMany({ where: { buildRunId: run.id, status: { not: 'DONE' } }, select: { key: true, status: true, lastError: true } });
+    expect(finished.status, JSON.stringify({ lastError: finished.lastError, unfinished })).toBe('COMPLETED');
+    expect(unfinished).toHaveLength(0);
+    const finalScenes = await prisma.buildManuscriptUnit.findMany({ where: { buildRunId: run.id, kind: 'SCENE', invalidatedAt: null }, include: { branch: { include: { headVersion: true } } } });
+    expect(finalScenes).toHaveLength(104);
+    expect(finalScenes.every(scene => (scene.branch.headVersion?.wordCount ?? 0) > 0)).toBe(true);
+    const totalWords = finalScenes.reduce((sum, scene) => sum + (scene.branch.headVersion?.wordCount ?? 0), 0);
+    expect(totalWords).toBeGreaterThanOrEqual(76500);
+    expect(totalWords).toBeLessThanOrEqual(93500);
+    const finalCompilation = await prisma.buildCompilation.findFirstOrThrow({ where: { buildRunId: run.id }, orderBy: { createdAt: 'desc' }, include: { units: true } });
+    expect(finalCompilation.totalWordCount).toBe(totalWords);
+    for (const scene of finalScenes) expect(finalCompilation.units.find(unit => unit.unitId === scene.id)?.writingVersionId).toBe(scene.branch.headVersionId);
+    const finalExport = await prisma.projectExport.findFirstOrThrow({ where: { buildRunId: run.id, compilationId: finalCompilation.id, status: 'READY', deletedAt: null } });
+    generatedExportIds.push(finalExport.id);
+    const download = await exports.download(userId, projectId, finalExport.id);
+    const chunks: Buffer[] = [];
+    for await (const chunk of download.stream) chunks.push(Buffer.from(chunk));
+    expect(createHash('sha256').update(Buffer.concat(chunks)).digest('hex')).toBe(download.checksum);
+  }, 2_400_000);
 
   it('uses a catalog-sized request window at the model boundary and honors an explicit input cap', async () => {
+    const priorJudge = process.env.AI_JUDGE_MODEL;
+    process.env.AI_JUDGE_MODEL = 'small-judge';
+    try {
     for (const explicitCap of [undefined, 64000]) {
       const run = await createBudgetRun(prisma, projectId, userId, `${suffix}-window-${explicitCap}`, 'priced/model', 10000000);
       const brainstorm = explicitCap ? 'Brief context.' : 'Remember the established diner names. '.repeat(16000) + 'FINAL-BRAINSTORM-DETAIL';
@@ -315,12 +350,13 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
       });
       await resumeRunnableBuilds(prisma, {
         workerId: `window:${explicitCap}`, buildRunIds: [run.id], maxTasksPerSweep: 1, modelExecutor: executor,
-        modelPricing: { 'priced/model': { inputMicrosPerMillion: 1000, outputMicrosPerMillion: 1000, source: 'catalog fixture', version: '1', limits: { context: 1048576, output: 65536 } } }
+        modelPricing: { 'small-judge': { ...fixturePricing['priced/model'], limits: { context: 128000, output: 8192 } }, 'priced/model': { inputMicrosPerMillion: 1000, outputMicrosPerMillion: 1000, source: 'catalog fixture', version: '1', limits: { context: 1048576, output: 65536 } } }
       });
       expect(executor).toHaveBeenCalledTimes(1);
       const trace = await prisma.buildTrace.findFirstOrThrow({ where: { buildRunId: run.id } });
       expect((trace.inputs as { contextCoverage: { requestInputTokens: number } }).contextCoverage.requestInputTokens).toBe(explicitCap ?? 1036576);
     }
+    } finally { if (priorJudge === undefined) delete process.env.AI_JUDGE_MODEL; else process.env.AI_JUDGE_MODEL = priorJudge; }
   });
 
   it('pauses before a priced task can exceed the authorized cost ceiling', async () => {
@@ -617,6 +653,34 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
     expect(trace.toolCalls).toEqual(expect.arrayContaining([expect.objectContaining({ toolName: 'applyBuildUnitPatch' })]));
     expect(trace.toolResults).toEqual(expect.arrayContaining([expect.objectContaining({ toolName: 'applyBuildUnitPatch' })]));
     expect(unitAfter.branch.headVersion?.body).toBe(fixture.initialBody);
+  }, 15_000);
+
+  it('persists a provider cooldown without burning retries or charging rejected requests', async () => {
+    const fixture = await createIsolatedSceneRun(prisma, projectId, userId, `${suffix}-cooldown`);
+    await prisma.buildTask.update({ where: { id: fixture.task.id }, data: { maxAttempts: 3 } });
+    let calls = 0;
+    const options = { workerId: `cooldown:${suffix}`, buildRunIds: [fixture.run.id], maxTasksPerSweep: 10,
+      modelPricing: fixturePricing, modelExecutor: async () => {
+        calls++;
+        throw Object.assign(new Error('Rate limited'), { statusCode: 429, responseHeaders: { 'retry-after': '60' } });
+      } };
+    await resumeRunnableBuilds(prisma, options);
+    await resumeRunnableBuilds(prisma, options);
+    expect(calls).toBe(1);
+    const task = await prisma.buildTask.findUniqueOrThrow({ where: { id: fixture.task.id } });
+    expect(task.status).toBe('READY');
+    expect(task.attempts).toBe(1);
+    expect(task.retryAfterAt!.getTime()).toBeGreaterThan(Date.now());
+    const run = await prisma.buildRun.findUniqueOrThrow({ where: { id: fixture.run.id } });
+    expect(run.tokensUsed).toBe(0);
+    expect(run.costMicrosUsed).toBe(0);
+    // The public claim boundary must enforce the same cooldown as the worker.
+    expect(await new NovelBuildUseCase(prisma).claim(userId, projectId, run.id, {
+      idempotencyKey: `cooldown-claim:${suffix}`, workerId: 'early-claimer'
+    })).toBeNull();
+    await prisma.buildTask.update({ where: { id: task.id }, data: { retryAfterAt: new Date(Date.now() - 1) } });
+    await resumeRunnableBuilds(prisma, options);
+    expect(calls).toBe(2);
   }, 15_000);
 
   it('hard-times out executors and judges that ignore AbortSignal without hanging runNow', async () => {
@@ -1257,10 +1321,12 @@ function deterministicExecutor(prisma: PrismaClient, buildRunId: string, scale?:
 
     if (taskType === 'draft-scene-unit' || roleIsRevision(input)) {
       for (const unitId of input.contract.scope.manuscriptUnitIds) {
+        // Exercise the same current-head read every real editor needs before a patch.
+        await call('readBuildUnit', { buildRunId, unitId });
         const unit = await prisma.buildManuscriptUnit.findUniqueOrThrow({ where: { id: unitId }, include: { branch: { include: { headVersion: true } } } });
         const currentBody = unit.branch.headVersion?.body ?? '';
         const draftedBody = taskType === 'draft-scene-unit'
-          ? sceneBody(unit.key)
+          ? sceneBody(unit.key, scale ? Math.ceil(scale.targetWords / scale.scenes) : undefined)
           : `${currentBody}\n\nRevision completed.`;
         await call('applyBuildUnitPatch', {
           buildRunId,
@@ -1277,6 +1343,9 @@ function deterministicExecutor(prisma: PrismaClient, buildRunId: string, scale?:
     }
 
     if (taskType === 'extract-scene-canon') {
+      const schema = await asSchema(input.tools.commitCanonDelta!.inputSchema).jsonSchema;
+      expect(schema.required).toContain('taskId');
+      expect(schema.properties?.taskId).toMatchObject({ const: input.contract.scope.buildTaskId });
       const sourceUnitId = input.contract.scope.manuscriptUnitIds[0];
       const [unit, characterArtifact] = await Promise.all([
         prisma.buildManuscriptUnit.findUniqueOrThrow({ where: { id: sourceUnitId }, include: { parentUnit: { select: { order: true } } } }),
@@ -1424,11 +1493,11 @@ function chunkValues<T>(values: T[], size: number): T[][] {
   return chunks;
 }
 
-function sceneBody(sceneKey: string): string {
+function sceneBody(sceneKey: string, targetWords?: number): string {
   const sentence = sceneKey === 'scene-1'
     ? 'Mara drew the vanished street while the map lifted one bright memory from her mind.'
     : 'Mara completed the district and accepted that the living city would remember what her lover could not.';
-  return Array.from({ length: 35 }, () => sentence).join(' ');
+  return Array.from({ length: targetWords ? Math.ceil(targetWords / sentence.split(' ').length) : 35 }, () => sentence).join(' ');
 }
 
 function deterministicJudgeExecutor(): BuildJudgeExecutor {

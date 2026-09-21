@@ -222,7 +222,7 @@ Chapter briefs are accepted only when their combined scene allocation matches th
 
 The runner uses the same automatic models.dev pricing loader, cache, alias resolution, and optional `AI_MODEL_PRICING_JSON` overrides as production. It no longer injects fixed test prices. Unresolved prices pause a cost-bounded run before inference. Historical validation totals recorded with fixed test rates are not retroactively changed. Run PostgreSQL-backed CI as well: embedded database validation does not prove production concurrency behavior.
 
-Chapter-scoped scene planning allows up to 128,000 input tokens per model invocation to accommodate bounded inspection history; whole-build token and cost limits still apply. Provider-limit failures retain tool-call evidence and roll back attempt writes. The live regression uses the observed 100,881-token conversation rather than only tiny synthetic usage.
+Chapter-scoped scene planning falls back to a 128,000-token input allowance when model limits are unknown; catalog-sized windows supersede that fallback and explicit user caps remain authoritative. It reserves 32,000 output tokens for structured multi-scene writes and reasoning; whole-build token and cost limits still apply. Provider-limit failures retain tool-call evidence and roll back attempt writes. The live regression uses the observed 100,881-token conversation rather than only tiny synthetic usage.
 
 Failed-attempt recovery also invalidates every ledger version created by that attempt, including versions already superseded within it. It restores only pre-attempt predecessors, so repeated canon/state/timeline/loop/thread updates cannot leave intermediate failed values active. The regression covers both a newly introduced fact and replacement of an existing fact.
 
@@ -247,3 +247,13 @@ During selective replanning, a surviving scene may temporarily refer to an inval
 Artifact edits defer graph materialization while accepted dependencies are incomplete. This also covers repair after a previous planning gate accepted the whole plan; validated replacements can be saved without prematurely creating a partial graph. Explicit graph materialization and plan acceptance still reject missing accepted dependencies.
 
 Authorized durable workers receive AUTO execution instructions. Their mutations remain fenced by the task's scope, current lease, authorization and budgets; interactive inference still defaults to manual approval.
+
+Provider HTTP 429 responses persist a `retryAfterAt` deadline instead of immediately consuming every task attempt. Workers and the public claim boundary both honor it. `Retry-After` is preferred; explicit quota-reset durations are recognized, with a one-minute fallback. Retry counts remain bounded. Rejected HTTP requests do not incur a fabricated inference reservation charge; completed earlier tool-loop requests still count. A missing-usage disconnect remains conservatively accounted. Apply the `20260921000000_build_retry_cooldown` migration before deploying this version.
+
+The writer and independent judge each use their own model window. A smaller judge no longer compresses the writer's evidence; the judge's own input/output and remaining-run budget are checked separately. Provider stream errors and completed usage remain available even when the SDK's text promise rejects with a generic no-output error.
+
+Some OpenAI-compatible relays report reasoning separately: `total_tokens = prompt_tokens + completion_tokens + reasoning_tokens`. This exact convention is normalized before the SDK discards the provider total. Standard totals that already include reasoning remain unchanged. Streaming and non-streaming SDK-boundary tests prevent both omitted reasoning and double counting.
+
+The production-size database test executes all 32 chapters and 104 scenes through the real worker, revisions, current-head compilation and checksum-verified export using deterministic model responses. This validates workflow mechanics, not the literary quality or availability of a real provider. The independent live-provider builds remain a separate requirement.
+
+Default worker output allowances reserve 32,000 tokens (including reasoning), clamped to the selected routes’ advertised output limits. Explicit policy limits remain authoritative. Manuscript-wide revisers budget a read and a write per scoped unit plus reporting/repair calls, and inspection cannot consume the calls reserved for persisting those units.

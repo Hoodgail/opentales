@@ -544,7 +544,11 @@ export class StoryStateUseCase {
             order: scene.order,
             title: scene.title,
             status: scene.status === 'ACCEPTED' ? 'final' : scene.status === 'REVIEW' ? 'review' : scene.status === 'DRAFTING' ? 'in-progress' : 'planned',
-            povCharacterId: scene.povCharacterId,
+            // Isolated builds reference character bibles before canonical
+            // Character rows exist. Keep those identities in diagnostics
+            // without writing artifact IDs into canonical foreign keys.
+            povCharacterId: scene.povCharacterId ?? (isObject(metadata.povRef)
+              ? stringValue(metadata.povRef.id) ?? stringValue(metadata.povRef.key) : null),
             locationId: scene.locationId,
             storyDate: scene.storyDate,
             storyTime: scene.storyTime,

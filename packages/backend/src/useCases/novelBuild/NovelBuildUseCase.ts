@@ -346,6 +346,7 @@ export class NovelBuildUseCase {
         where: {
           buildRunId,
           status: 'READY',
+          OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: new Date() } }],
           ...(input.taskTypes?.length ? { type: { in: input.taskTypes } } : {})
         },
         orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }]
@@ -569,6 +570,7 @@ export class NovelBuildUseCase {
   ): Promise<BuildTaskActionResult> {
     await this.access.assertPermission(userId, projectId, 'project:write');
     validateWorker(input.workerId);
+    if (input.retryAfterMs !== undefined && (!Number.isSafeInteger(input.retryAfterMs) || input.retryAfterMs < 0 || input.retryAfterMs > 86_400_000)) throw new HttpError(400, 'retryAfterMs must be an integer from 0 to 86400000');
     const result = await this.repository.transaction(async (tx) => {
       await this.repository.lockRun(tx, projectId, buildRunId);
       const replay = await tx.buildTaskTransition.findUnique({ where: { taskId_idempotencyKey: { taskId, idempotencyKey: input.idempotencyKey } } });
@@ -600,6 +602,7 @@ export class NovelBuildUseCase {
           reservedTokens: 0,
           reservedCostMicros: 0,
           failedAt: retryable ? null : new Date(),
+          retryAfterAt: retryable && input.retryAfterMs ? new Date(Date.now() + input.retryAfterMs) : null,
           lastError: input.error
         }
       });
@@ -789,6 +792,7 @@ export class NovelBuildUseCase {
             failedAt: null,
             cancelledAt: null,
             invalidatedAt: now,
+            retryAfterAt: null,
             lastError: null
           }
         });
@@ -943,6 +947,7 @@ export class NovelBuildUseCase {
             failedAt: null,
             cancelledAt: null,
             invalidatedAt: now,
+            retryAfterAt: null,
             lastError: null
           }
         });

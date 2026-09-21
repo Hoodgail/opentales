@@ -357,7 +357,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
 
   private async claimNextTask(): Promise<ClaimedTask | null> {
     const candidates = await this.prisma.buildRun.findMany({
-      where: { status: { in: ['PLANNING', 'DRAFTING', 'REVISING'] }, authorizedAt: { not: null }, tasks: { some: { status: 'READY' } }, ...(this.buildRunIds ? { id: { in: [...this.buildRunIds] } } : {}) },
+      where: { status: { in: ['PLANNING', 'DRAFTING', 'REVISING'] }, authorizedAt: { not: null }, tasks: { some: { status: 'READY', OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: new Date() } }] } }, ...(this.buildRunIds ? { id: { in: [...this.buildRunIds] } } : {}) },
       orderBy: { updatedAt: 'asc' },
       take: 20
     });
@@ -368,7 +368,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       if (run.autonomyMode === 'ASSIST') continue;
       const userId = run.authorizedById ?? run.createdById;
       if (!userId) continue;
-      let nextTask = await this.prisma.buildTask.findFirst({ where: { buildRunId: run.id, status: 'READY' }, orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }] });
+      let nextTask = await this.prisma.buildTask.findFirst({ where: { buildRunId: run.id, status: 'READY', OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: new Date() } }] }, orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }] });
       if (!nextTask) continue;
       nextTask = await this.pinTaskSkillProvenance(run, nextTask);
       if (!nextTask) continue;
@@ -535,19 +535,20 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const policy = jsonRecord(task.executionPolicy);
     const defaults = defaultTaskBudget(task);
     const judgeRequired = typeof jsonRecord(task.acceptanceCriteria).rubric === 'string' || task.qualityThreshold !== null || allowsUnchangedReview(task);
-    const outputTokens = numeric(policy.maxOutputTokens, defaults.maxOutputTokens);
-    const judgeOutputTokens = judgeRequired ? Math.min(4_000, numeric(policy.maxOutputTokens, defaults.maxOutputTokens)) : 0;
     const settings = await this.prisma.projectAiSettings.findUnique({ where: { projectId: run.projectId }, select: { model: true, providerKind: true } });
     const route = this.modelRoute(task);
     const modelId = route.preferred ?? settings?.model ?? null;
     const executionModels = uniqueStrings([...(modelId ? [modelId] : []), ...route.fallbacks]);
     const modelAttempts = Math.min(clamp(numeric(policy.modelMaxAttempts, task.maxAttempts), 1, task.maxAttempts), executionModels.length);
     const executionPrices = executionModels.slice(0, modelAttempts).map((candidate) => lookupExecutionModelPrice(this.modelPricing, settings?.providerKind, candidate)).filter((price): price is ModelPrice => Boolean(price));
+    const outputTokens = taskOutputTokenLimit(policy, defaults.maxOutputTokens, executionPrices);
     const judgeModelId = judgeRequired ? process.env.AI_JUDGE_MODEL?.trim() || modelId : null;
     const judgePrice = judgeRequired ? lookupExecutionModelPrice(this.modelPricing, settings?.providerKind, judgeModelId) : null;
-    const window = resolveContextWindow([...executionPrices, ...(judgeRequired ? [judgePrice] : [])], outputTokens);
+    const judgeOutputTokens = judgeRequired ? Math.min(outputTokens, judgePrice?.limits?.output ?? outputTokens) : 0;
+    const window = resolveContextWindow(executionPrices, outputTokens);
     const inputTokens = Math.min(numeric(policy.maxInputTokens, window?.inputTokens ?? defaults.maxInputTokens), window?.inputTokens ?? Number.MAX_SAFE_INTEGER);
-    const judgeInputTokens = judgeRequired ? inputTokens : 0;
+    const judgeWindow = judgeRequired ? resolveContextWindow([judgePrice], judgeOutputTokens) : null;
+    const judgeInputTokens = judgeRequired ? Math.min(numeric(policy.maxInputTokens, judgeWindow?.inputTokens ?? defaults.maxInputTokens), judgeWindow?.inputTokens ?? Number.MAX_SAFE_INTEGER) : 0;
     return {
       tokens: (inputTokens + outputTokens) * Math.max(1, modelAttempts) + judgeInputTokens + judgeOutputTokens,
       costMicros: executionPrices.reduce((sum, price) => sum + calculateModelCostMicros(price, inputTokens, outputTokens), 0)
@@ -884,7 +885,12 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         task: contract,
         activeSkills: activeSkills.map((skill) => ({ manifest: skill.manifest, content: skill.content, references: loadAiSkillReferences(skill) })),
         contextPack: inferencePack,
-        runtimeInstructions: 'You are a scoped creative worker inside the OpenTales durable Novel Build workflow.',
+        runtimeInstructions: [
+          'You are a scoped creative worker inside the OpenTales durable Novel Build workflow.',
+          pack.truncated
+            ? 'Some selected context is truncated; use retained identifiers to retrieve missing details.'
+            : 'Selected story context is complete within its declared surfaces. Reuse supplied records and exact identifiers; do not refetch them merely to confirm the same data. Read current manuscript units when write preconditions or current-head receipts require it.'
+        ].join(' '),
         userAuthority: ownerAuthority
       })
     ].join('\n\n');
@@ -903,7 +909,8 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       contract.budget.maxToolCalls,
       abortSignal,
       () => this.assertCurrentLease(claimed),
-      () => { internalBudgetExhausted = true; }
+      () => { internalBudgetExhausted = true; },
+      ['drafter', 'reviser'].includes(role) ? claimed.scopeUnitIds.length : 0
     );
 
     const generation = await this.modelExecutor({
@@ -1286,6 +1293,16 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     execution.trace.provider ??= settings?.providerKind ?? null;
     execution.trace.model ??= judgeModelId;
     execution.trace.price ??= configuredJudgePrice;
+    contract.budget.maxOutputTokens = Math.min(contract.budget.maxOutputTokens, configuredJudgePrice.limits?.output ?? contract.budget.maxOutputTokens);
+    const judgeWindow = resolveContextWindow([configuredJudgePrice], contract.budget.maxOutputTokens);
+    contract.budget.maxInputTokens = Math.min(numeric(jsonRecord(claimed.task.executionPolicy).maxInputTokens, judgeWindow?.inputTokens ?? defaultTaskBudget(claimed.task).maxInputTokens), judgeWindow?.inputTokens ?? Number.MAX_SAFE_INTEGER);
+    contract.modelPolicy.preferred = judgeModelId;
+    contract.modelPolicy.fallbacks = [];
+    contract.metadata.contextWindow = judgeWindow;
+    const usedTokens = execution.trace.usageByModel.reduce((sum, usage) => sum + usage.inputTokens + usage.outputTokens, 0);
+    contract.metadata.remainingRunTokens = claimed.run.maxTokens === null ? null : Math.max(0, claimed.run.maxTokens - claimed.run.tokensUsed - usedTokens);
+    contract.metadata.remainingRunCostMicros = claimed.run.maxCostMicros === null ? null : Math.max(0, claimed.run.maxCostMicros - claimed.run.costMicrosUsed - costForMeasuredUsage(this.modelPricing, execution.trace.usageByModel, settings?.providerKind));
+    contract.metadata.judgePrice = configuredJudgePrice;
     const evidencePack = await this.buildJudgeEvidencePack(claimed, execution, Math.min(contract.budget.maxInputTokens, numeric(jsonRecord(contract.metadata.contextWindow).inputTokens, contract.budget.maxInputTokens)));
     let judged: BuildJudgeExecutorOutput;
     try {
@@ -1461,6 +1478,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       runGeneration: claimed.lease.runGeneration,
       expectedRevision: current.revision,
       error: message,
+      retryAfterMs: failure.retryAfterMs,
       retryable: failure.retryable && current.attempts < current.maxAttempts
     }).catch((failure) => {
       if (!isBuildGoneOrTerminal(failure)) throw failure;
@@ -1522,13 +1540,13 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const defaults = defaultTaskBudget(claimed.task);
     const maxToolCalls = numeric(
       policy.maxToolCalls,
-      scopedContinuationRole ? Math.min(1_000, claimed.scopeUnitIds.length + 32) : defaults.maxToolCalls
+      scopedContinuationRole ? Math.min(1_000, claimed.scopeUnitIds.length * (role === 'reviser' ? 2 : 1) + 32) : defaults.maxToolCalls
     );
-    const contextWindow = resolveContextWindow(
-      [preferredModel ?? configuredModel?.model, ...modelRoute.fallbacks, process.env.AI_JUDGE_MODEL?.trim()].filter((id): id is string => Boolean(id))
-        .map(id => lookupExecutionModelPrice(this.modelPricing, configuredModel?.providerKind, id)),
-      numeric(policy.maxOutputTokens, defaults.maxOutputTokens)
-    );
+    const executionPrices = [preferredModel ?? configuredModel?.model, ...modelRoute.fallbacks]
+      .filter((id): id is string => Boolean(id))
+      .map(id => lookupExecutionModelPrice(this.modelPricing, configuredModel?.providerKind, id));
+    const maxOutputTokens = taskOutputTokenLimit(policy, defaults.maxOutputTokens, executionPrices);
+    const contextWindow = resolveContextWindow(executionPrices, maxOutputTokens);
     return taskContractSchema.parse({
       objective: typeof policy.objective === 'string'
         ? policy.objective
@@ -1543,7 +1561,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         : [{ id: 'task-complete', description: `${claimed.task.type} completes with persisted evidence.` }],
       budget: {
         maxInputTokens: numeric(policy.maxInputTokens, contextWindow?.inputTokens ?? defaults.maxInputTokens),
-        maxOutputTokens: numeric(policy.maxOutputTokens, defaults.maxOutputTokens),
+        maxOutputTokens,
         maxToolCalls,
         maxDurationMs: numeric(policy.maxDurationMs, defaults.maxDurationMs),
         maxCostUsd: typeof policy.maxCostMicros === 'number' ? policy.maxCostMicros / 1_000_000 : undefined
@@ -2057,7 +2075,7 @@ export function defaultTaskBudget(task: BuildTask): {
 } {
   if (task.key === 'planning-quality-gate') {
     // Its independent judge receives the complete planning corpus, not a shard.
-    return { maxInputTokens: 256_000, maxOutputTokens: 12_000, maxToolCalls: 16, maxDurationMs: 15 * 60_000 };
+    return { maxInputTokens: 256_000, maxOutputTokens: 32_000, maxToolCalls: 16, maxDurationMs: 15 * 60_000 };
   }
   if (AGGREGATE_ARTIFACT_TASK_TYPES.has(task.type)) {
     return {
@@ -2083,7 +2101,7 @@ export function defaultTaskBudget(task: BuildTask): {
   }
   return {
     maxInputTokens: 96_000,
-    maxOutputTokens: 12_000,
+    maxOutputTokens: 32_000,
     maxToolCalls: 16,
     maxDurationMs: 15 * 60_000
   };
@@ -2172,7 +2190,7 @@ export function objectiveForTask(task: BuildTask, buildObjective: string, manife
       ? 'Keep timeline events concise: use ordered timestamps or relative markers, exact scene references, and causal dependencies. Do not repeat full scene prose or chapter synopses inside chronology fields.'
       : '',
     task.type === 'extract-scene-canon'
-      ? 'Read the assigned build unit and copy exact IDs: sourceUnitId and scene references use unit.id; chapter references use unit.parentUnitId; artifact references use unit.planArtifactId, never writingId or branchId. Keys in metadata are not database IDs. On a rejected reference, correct that exact field rather than guessing IDs or dropping all provenance. Query current canon before committing. A subject/predicate pair is one property with one value at a time: use specific predicates (water-level, electrical-condition), never generic has_condition/has_fact for unrelated facts. On re-extraction reuse the exact keys already sourced to this scene, not keys from earlier scenes that merely mention the same entity. Do not create competing keys or move an earlier scene state to the current scene. Entity stateKey is also a single property: use specific keys such as knows-relay-mechanism and knows-shared-loss, never generic knowledge for independent beliefs. Avoid redundant narrative inventory summaries under possession; use specific item properties when a durable state is needed. Validity intervals are inclusive: if a new state starts at order N, the earlier state must end at N-1, not N. Preserve earlier state intervals and model changes with non-overlapping validity intervals. Read diagnostics and resolve canon conflicts before reporting.'
+      ? 'Read the assigned build unit and copy exact IDs: sourceUnitId and scene references use unit.id; chapter references use unit.parentUnitId; artifact references use unit.planArtifactId, never writingId or branchId. Keys in metadata are not database IDs. On a rejected reference, correct that exact field rather than guessing IDs or dropping all provenance. Use the current temporally valid canon supplied in context; query only missing or explicitly truncated records. Commit the assigned scene delta atomically with the exact taskId from the task contract. A subject/predicate pair is one property with one value at a time: use specific predicates (water-level, electrical-condition), never generic has_condition/has_fact for unrelated facts. On re-extraction reuse the exact keys already sourced to this scene, not keys from earlier scenes that merely mention the same entity. Do not create competing keys or move an earlier scene state to the current scene. Entity stateKey is also a single property: use specific keys such as knows-relay-mechanism and knows-shared-loss, never generic knowledge for independent beliefs. Avoid redundant narrative inventory summaries under possession; use specific item properties when a durable state is needed. Validity intervals are inclusive: if a new state starts at order N, the earlier state must end at N-1, not N. Preserve earlier state intervals and model changes with non-overlapping validity intervals. Correct any conflicts rejected by commitCanonDelta before reporting. The next deterministic workflow stage runs diagnostics; do not spend another model round trip repeating it here.'
       : '',
     task.type === 'create-finale-plan'
       ? 'Set mainThreadKey to the main plot-thread content.threadKey; the build validator also accepts that plot-thread artifact\'s exact stable key.'
@@ -2380,12 +2398,15 @@ export function guardWorkerTools(
   maxToolCalls: number,
   abortSignal: AbortSignal,
   assertLease: () => Promise<void>,
-  onBudgetExhausted: () => void = () => {}
+  onBudgetExhausted: () => void = () => {},
+  minimumWriteCalls = 0
 ): ToolSet {
   let calls = 0;
   const reportReserve = tools.reportTaskResult ? (maxToolCalls >= 8 ? 2 : 1) : 0;
   const writeTools = new Set(['applyArtifactBatch', 'applyBuildUnitPatch', 'commitCanonDelta', 'createCheckpoint', 'linkSetupPayoff']);
-  const writeReserve = Object.keys(tools).some(name => writeTools.has(name)) ? Math.min(4, Math.floor((maxToolCalls - reportReserve) / 2)) : 0;
+  const writeReserve = Object.keys(tools).some(name => writeTools.has(name))
+    ? Math.min(Math.max(0, maxToolCalls - reportReserve), Math.max(minimumWriteCalls, Math.min(4, Math.floor((maxToolCalls - reportReserve) / 2))))
+    : 0;
   let writeCalls = 0;
   return Object.fromEntries(Object.entries(tools).map(([name, toolDefinition]) => {
     const definition = toolDefinition as typeof toolDefinition & { execute?: (...args: unknown[]) => unknown };
@@ -2457,6 +2478,7 @@ export async function defaultModelExecutor(input: BuildModelExecutorInput): Prom
         stopWhen: [hasSuccessfulTaskReport, stepCountIs(input.stepLimit)],
         abortSignal: input.abortSignal,
         maxOutputTokens: input.contract.budget.maxOutputTokens,
+        maxRetries: 0,
         providerOptions: providerOptionsForAiModel(
           model,
           input.contract.metadata.taskType === 'create-story-brief'
@@ -2469,7 +2491,7 @@ export async function defaultModelExecutor(input: BuildModelExecutorInput): Prom
           const usedTokens = cumulativeInputTokens + cumulativeOutputTokens + steps.reduce((sum, step) => sum + (step.usage.inputTokens ?? 0) + (step.usage.outputTokens ?? 0), 0);
           const remainingRunTokens = input.contract.metadata.remainingRunTokens;
           if (typeof remainingRunTokens === 'number' && usedTokens + estimate + input.contract.budget.maxOutputTokens > remainingRunTokens) {
-            throw new Error(`Token budget exhausted before the next model request: ${remainingRunTokens - usedTokens} tokens remain, but approximately ${estimate + input.contract.budget.maxOutputTokens} are needed. Increase the build budget or split the task.`);
+            throw Object.assign(new Error(`Token budget exhausted before the next model request: ${remainingRunTokens - usedTokens} tokens remain, but approximately ${estimate + input.contract.budget.maxOutputTokens} are needed. Increase the build budget or split the task.`), { providerUsageComplete: true });
           }
           const price = modelPriceSchema.safeParse(jsonRecord(input.contract.metadata.routePrices)[actualModelId ?? '']);
           const remainingRunCost = input.contract.metadata.remainingRunCostMicros;
@@ -2479,10 +2501,10 @@ export async function defaultModelExecutor(input: BuildModelExecutorInput): Prom
               return sum + (previousPrice.success ? calculateModelCostMicros(previousPrice.data, usage.inputTokens, usage.outputTokens) : 0);
             }, 0);
             const stepCost = steps.reduce((sum, step) => sum + calculateModelCostMicros(price.data, step.usage.inputTokens ?? 0, step.usage.outputTokens ?? 0), 0);
-            if (previousCost + stepCost + calculateModelCostMicros(price.data, estimate, input.contract.budget.maxOutputTokens) > remainingRunCost) throw new Error('Cost budget exhausted before the next model request; increase the build cost budget or split the task.');
+            if (previousCost + stepCost + calculateModelCostMicros(price.data, estimate, input.contract.budget.maxOutputTokens) > remainingRunCost) throw Object.assign(new Error('Cost budget exhausted before the next model request; increase the build cost budget or split the task.'), { providerUsageComplete: true });
           }
           if (typeof requestLimit === 'number') {
-            if (estimate > requestLimit) throw new Error(`Model context window exhausted by tool history (${estimate} estimated tokens; ${requestLimit} available). Split this task or retrieve smaller records; no story context was silently removed.`);
+            if (estimate > requestLimit) throw Object.assign(new Error(`Model context window exhausted by tool history (${estimate} estimated tokens; ${requestLimit} available). Split this task or retrieve smaller records; no story context was silently removed.`), { providerUsageComplete: true });
           }
           return input.contract.metadata.taskType === 'create-story-brief' ? prepareStoryBriefStep(steps) : {};
         },
@@ -2500,18 +2522,14 @@ export async function defaultModelExecutor(input: BuildModelExecutorInput): Prom
       // the original stream error and any completed steps/usage instead.
       streamError ??= settled.find(result => result.status === 'rejected')?.reason;
       if (streamError) {
-        const partialUsage = actualModelId
-          ? measuredInvocationUsage(
-            steps,
-            actualModelId,
-            usage?.inputTokens ?? 0,
-            usage?.outputTokens ?? 0
-          )
-          : [];
+        // totalUsage can resolve to zero (or reject) after an interrupted
+        // stream even when completed steps retain authoritative usage.
+        // Preserve those steps without masking the original provider error.
+        const partialUsage = actualModelId ? partialInvocationUsage(steps, actualModelId, usage) : [];
         throw Object.assign(attachExecutionUsage(
           streamError,
-          usage?.inputTokens ?? 0,
-          usage?.outputTokens ?? 0,
+          partialUsage.reduce((sum, item) => sum + item.inputTokens, 0),
+          partialUsage.reduce((sum, item) => sum + item.outputTokens, 0),
           actualModelId,
           partialUsage
         ), {
@@ -2583,7 +2601,7 @@ export function prepareStoryBriefStep(steps: Array<{ toolResults?: unknown[] }>)
   };
 }
 
-async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Promise<BuildJudgeExecutorOutput> {
+export async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Promise<BuildJudgeExecutorOutput> {
   const modelId = process.env.AI_JUDGE_MODEL?.trim() || input.contract.modelPolicy.preferred || null;
   const model = await input.resolveModel(modelId);
   let streamError: unknown;
@@ -2603,9 +2621,7 @@ async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Promise<Bui
     }),
     execute: async (value) => value
   });
-  const generation = streamText({
-    model,
-    system: [
+  const system = [
       'You are an independent fiction-quality evaluator. You have diagnostics-only authority and cannot mutate or self-certify the candidate.',
       'Score only the supplied rubric and observable evidence. Check prose tense, POV, character identities, and world rules against the supplied story brief and narrative contract. Do not expose hidden reasoning.',
       'A bounded artifact body may be truncated for transport; use artifactCoverage to determine whether the required corpus is complete and do not fail solely because individual bodies are bounded.',
@@ -2613,22 +2629,40 @@ async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Promise<Bui
       'A runStoryLint call with buildRunId and omitted or empty chapterIds is build-wide.',
       'You are producing the required independent evaluation now; never require a pre-existing MODEL evaluation.',
       'Call reportJudgeResult exactly once with every required score dimension, concise feedback, and observable evidence.'
-    ].join('\n'),
-    prompt: renderJudgePrompt(input),
+    ].join('\n');
+  const prompt = renderJudgePrompt(input);
+  const maxOutputTokens = Math.min(4_000, input.contract.budget.maxOutputTokens);
+  const estimate = estimateTokens(system) + estimateTokens(prompt) + estimateTokens(JSON.stringify(await asSchema(reportJudgeResult.inputSchema).jsonSchema)) + 1_000;
+  if (estimate > input.contract.budget.maxInputTokens) throw Object.assign(new Error('Independent judge evidence exceeds its model context window; use a larger judge model or split the review.'), { providerUsageComplete: true });
+  const remainingTokens = input.contract.metadata.remainingRunTokens;
+  if (typeof remainingTokens === 'number' && estimate + input.contract.budget.maxOutputTokens > remainingTokens) throw Object.assign(new Error('Token budget exhausted before independent evaluation'), { providerUsageComplete: true });
+  const price = modelPriceSchema.safeParse(input.contract.metadata.judgePrice);
+  const remainingCost = input.contract.metadata.remainingRunCostMicros;
+  if (price.success && typeof remainingCost === 'number' && calculateModelCostMicros(price.data, estimate, input.contract.budget.maxOutputTokens) > remainingCost) throw Object.assign(new Error('Cost budget exhausted before independent evaluation'), { providerUsageComplete: true });
+  const generation = streamText({
+    model,
+    system,
+    prompt,
     tools: { reportJudgeResult },
     toolChoice: { type: 'tool', toolName: 'reportJudgeResult' },
     stopWhen: hasToolCall('reportJudgeResult'),
     abortSignal: input.abortSignal,
-    maxOutputTokens: Math.min(4_000, input.contract.budget.maxOutputTokens),
+    maxOutputTokens,
+    maxRetries: 0,
     providerOptions: providerOptionsForAiModel(model, { reasoningEffort: 'low', textVerbosity: 'low' }),
     onError: ({ error }) => { streamError ??= error; }
   });
-  const [usage, text, steps, finishReason] = await Promise.all([
+  const settled = await Promise.allSettled([
     generation.totalUsage,
     generation.text,
     generation.steps,
     generation.finishReason
   ]);
+  const usage = settled[0].status === 'fulfilled' ? settled[0].value : undefined;
+  const text = settled[1].status === 'fulfilled' ? settled[1].value : '';
+  const steps = settled[2].status === 'fulfilled' ? settled[2].value : [];
+  const finishReason = settled[3].status === 'fulfilled' ? settled[3].value : 'error';
+  streamError ??= settled.find(result => result.status === 'rejected')?.reason;
   if (streamError) {
     throw attachExecutionUsage(
       streamError,
@@ -2787,11 +2821,12 @@ export function executionFailureDisposition(error: unknown): {
   message: string;
   retryable: boolean;
   mayHaveUnreportedUsage: boolean;
+  retryAfterMs?: number;
 } {
   const value = jsonRecord(error);
   const cause = jsonRecord(value.cause);
   const statusCode = numericStatus(value.statusCode) ?? numericStatus(cause.statusCode);
-  const rejectedBeforeExecution = statusCode !== null
+  const permanentRejection = statusCode !== null
     && statusCode >= 400
     && statusCode < 500
     && ![408, 409, 425, 429].includes(statusCode);
@@ -2801,13 +2836,30 @@ export function executionFailureDisposition(error: unknown): {
     ? error.message.trim()
     : 'Novel Build task failed';
   const detail = providerErrorDetail(value.responseBody) ?? providerErrorDetail(cause.responseBody);
+  const retryAfterMs = providerRetryAfterMs(statusCode, value.responseHeaders ?? cause.responseHeaders, detail);
   return {
     message: detail && !baseMessage.toLowerCase().includes(detail.toLowerCase())
       ? `${baseMessage}: ${detail}`
       : baseMessage,
-    retryable: !rejectedBeforeExecution && !explicitlyNonRetryable,
-    mayHaveUnreportedUsage: !rejectedBeforeExecution && !providerUsageComplete
+    retryable: !permanentRejection && !explicitlyNonRetryable,
+    // An HTTP rejection before streaming is not an unmetered inference.
+    // Any earlier completed steps are still charged from measured usage.
+    mayHaveUnreportedUsage: !permanentRejection && statusCode !== 429 && statusCode !== 425 && !providerUsageComplete,
+    ...(retryAfterMs === undefined ? {} : { retryAfterMs })
   };
+}
+
+function providerRetryAfterMs(statusCode: number | null, headers: unknown, detail: string | null): number | undefined {
+  if (statusCode !== 429 && statusCode !== 503) return undefined;
+  const raw = Object.entries(jsonRecord(headers)).find(([key]) => key.toLowerCase() === 'retry-after')?.[1];
+  if (typeof raw === 'string' && raw.trim()) {
+    const seconds = Number(raw);
+    const ms = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(raw) - Date.now();
+    if (Number.isFinite(ms) && ms >= 0) return Math.min(86_400_000, Math.max(1000, Math.ceil(ms)));
+  }
+  const reset = detail?.match(/resets? in\s+(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?/i);
+  if (reset && reset.slice(1).some(Boolean)) return Math.min(86_400_000, Math.max(1000, ((Number(reset[1]) || 0) * 3600 + (Number(reset[2]) || 0) * 60 + (Number(reset[3]) || 0)) * 1000));
+  return statusCode === 429 ? 60_000 : undefined;
 }
 
 function numericStatus(value: unknown): number | null {
@@ -2977,6 +3029,20 @@ export function measuredInvocationUsage(
   return normalizeMeasuredUsage(undefined, modelId, totalInputTokens, totalOutputTokens);
 }
 
+function partialInvocationUsage(
+  steps: Array<{ usage?: { inputTokens?: number; outputTokens?: number } }>,
+  modelId: string,
+  total?: { inputTokens?: number; outputTokens?: number }
+): MeasuredModelUsage[] {
+  const count = (value: number | undefined) => Number.isSafeInteger(value) && value! >= 0 ? value! : 0;
+  const measured = steps.map(step => ({ modelId, inputTokens: count(step.usage?.inputTokens), outputTokens: count(step.usage?.outputTokens) }));
+  const input = measured.reduce((sum, item) => sum + item.inputTokens, 0);
+  const output = measured.reduce((sum, item) => sum + item.outputTokens, 0);
+  const residual = { modelId, inputTokens: Math.max(0, count(total?.inputTokens) - input), outputTokens: Math.max(0, count(total?.outputTokens) - output) };
+  if (residual.inputTokens || residual.outputTokens || !measured.length) measured.push(residual);
+  return measured;
+}
+
 function tokenCount(value: number, label: string): number {
   if (!Number.isSafeInteger(value) || value < 0 || value > 2_000_000_000) throw new Error(`${label} must be a non-negative safe integer`);
   return value;
@@ -3080,7 +3146,13 @@ function parseModelRouting(value: string | undefined): Partial<Record<'fast' | '
   return result;
 }
 
-/** Shared request window across all reachable routes, including an independent judge. */
+export function taskOutputTokenLimit(policy: Record<string, unknown>, defaultLimit: number, prices: Array<ModelPrice | null>): number {
+  if (typeof policy.maxOutputTokens === 'number') return policy.maxOutputTokens;
+  const advertised = prices.flatMap(price => price?.limits?.output ? [price.limits.output] : []);
+  return Math.min(defaultLimit, ...advertised);
+}
+
+/** Shared request window across reachable fallback routes for one executor. */
 export function resolveContextWindow(prices: Array<ModelPrice | null>, outputTokens: number): { inputTokens: number; contextTokens: number } | null {
   if (!prices.length || prices.some(price => !price?.limits)) return null;
   const contextTokens = Math.min(...prices.map(price => price!.limits!.context));

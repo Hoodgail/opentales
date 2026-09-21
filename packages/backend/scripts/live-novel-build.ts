@@ -56,9 +56,10 @@ try {
   }
   const existingRun = await prisma.buildRun.findUniqueOrThrow({ where: { id: buildRunId } });
   const terminalRun = ['COMPLETED', 'CANCELLED'].includes(existingRun.status);
-  const existingSettings = await prisma.projectAiSettings.findUniqueOrThrow({ where: { projectId: existingRun.projectId } });
-  if (!terminalRun && existingSettings.model !== model) {
-    await new ProjectAiSettingsUseCase(prisma).update(existingRun.authorizedById ?? existingRun.createdById!, existingRun.projectId, { model });
+  if (!terminalRun) {
+    // Rehydrate fixture credentials from the environment after restoring a
+    // checkpoint. Snapshots must not need the old runtime encryption secret.
+    await new ProjectAiSettingsUseCase(prisma).update(existingRun.authorizedById ?? existingRun.createdById!, existingRun.projectId, { model, baseUrl, apiKey });
   }
   if (!terminalRun && process.env.LIVE_BUILD_ID && process.env.LIVE_MAX_TOKENS) {
     const builds = new NovelBuildUseCase(prisma);

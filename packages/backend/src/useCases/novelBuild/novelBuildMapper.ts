@@ -269,6 +269,7 @@ export function toBuildTask(task: BuildTaskWithTransitions): BuildTask {
     reservedCostMicros: task.reservedCostMicros,
     leaseExpiresAt: iso(task.leaseExpiresAt),
     heartbeatAt: iso(task.heartbeatAt),
+    retryAfterAt: iso(task.retryAfterAt),
     startedAt: iso(task.startedAt),
     completedAt: iso(task.completedAt),
     failedAt: iso(task.failedAt),

@@ -32,6 +32,7 @@ const {
   validateBeatReferences,
   judgeEvidenceCharacterBudget,
   resolveContextWindow,
+  taskOutputTokenLimit,
   collectStepToolResults,
   lookupExecutionModelPrice,
   measuredInvocationUsage,
@@ -111,6 +112,17 @@ describe('durable Novel Build execution contract', () => {
     expect(read).toHaveBeenCalledTimes(10);
     expect(write).toHaveBeenCalledTimes(4);
     expect(exhausted).toHaveBeenCalledOnce();
+  });
+
+  it('preserves enough writes to finish a manuscript-wide revision after extensive inspection', async () => {
+    const writes = vi.fn(async () => ({ saved: true }));
+    const tools = guardWorkerTools({ readBuildUnit: { execute: async () => ({}) }, applyBuildUnitPatch: { execute: writes }, reportTaskResult: { execute: async () => ({ ok: true }) } } as any, 240, new AbortController().signal, async () => {}, () => {}, 104);
+    const call = (name: string) => (tools[name] as any).execute({});
+    for (let i = 0; i < 134; i++) await call('readBuildUnit');
+    await expect(call('readBuildUnit')).rejects.toThrow('reserved for saving outputs');
+    for (let i = 0; i < 104; i++) await call('applyBuildUnitPatch');
+    await expect(call('reportTaskResult')).resolves.toEqual({ ok: true });
+    expect(writes).toHaveBeenCalledTimes(104);
   });
 
   it('continues after rejected task reports and stops only after a validated receipt', () => {
@@ -252,11 +264,19 @@ describe('durable Novel Build execution contract', () => {
     });
     expect(defaultTaskBudget({ type: 'create-story-brief' } as any)).toMatchObject({
       maxInputTokens: 96_000,
-      maxOutputTokens: 12_000
+      maxOutputTokens: 32_000
     });
     expect(defaultTaskBudget({ type: 'create-scene-plan-shard' } as any)).toMatchObject({
       maxOutputTokens: 32_000
     });
+  });
+
+  it('reserves reasoning capacity by default but respects model limits and explicit output caps', () => {
+    const small = { inputMicrosPerMillion: 1, outputMicrosPerMillion: 1, source: 'test', version: '1', limits: { context: 128000, output: 8192 } };
+    expect(taskOutputTokenLimit({}, 32000, [])).toBe(32000);
+    expect(taskOutputTokenLimit({}, 32000, [small])).toBe(8192);
+    expect(taskOutputTokenLimit({ maxOutputTokens: 4000 }, 32000, [small])).toBe(4000);
+    expect(() => resolveContextWindow([small], taskOutputTokenLimit({ maxOutputTokens: 12000 }, 32000, [small]))).toThrow('output limit');
   });
 
   it('keeps multi-step provider usage separate for per-invocation limits', () => {
@@ -334,6 +354,16 @@ describe('durable Novel Build execution contract', () => {
       retryable: true,
       mayHaveUnreportedUsage: false
     });
+  });
+
+  it('keeps rate-limit rejection free of invented usage and honors durable cooldown hints', () => {
+    const error = Object.assign(new Error('Rate limited'), { statusCode: 429, responseHeaders: { 'retry-after': '90' } });
+    expect(executionFailureDisposition(error)).toMatchObject({ retryable: true, mayHaveUnreportedUsage: false, retryAfterMs: 90_000 });
+    expect(executionFailureDisposition(Object.assign(new Error('Quota'), {
+      statusCode: 429, responseBody: JSON.stringify({ error: { message: 'Individual quota reached. Resets in 58m44s.' } })
+    }))).toMatchObject({ retryAfterMs: 3_524_000, mayHaveUnreportedUsage: false });
+    expect(executionFailureDisposition(Object.assign(new Error('Rate limited'), { statusCode: 429 }))).toMatchObject({ retryAfterMs: 60_000 });
+    expect(executionFailureDisposition(Object.assign(new Error('Timeout'), { statusCode: 408 }))).toMatchObject({ mayHaveUnreportedUsage: true });
   });
 
   it('accounts Codex subscription models at zero without making other providers free', () => {

@@ -1654,6 +1654,7 @@ export interface BuildTask {
   reservedCostMicros: number;
   leaseExpiresAt: string | null;
   heartbeatAt: string | null;
+  retryAfterAt?: string | null;
   startedAt: string | null;
   completedAt: string | null;
   failedAt: string | null;
@@ -1836,6 +1837,7 @@ export interface FailBuildTaskInput {
   expectedRevision: number;
   error: string;
   retryable?: boolean;
+  retryAfterMs?: number;
 }
 
 export interface BuildTaskActionResult {
