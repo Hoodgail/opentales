@@ -48,6 +48,28 @@ const {
 const { isLegacyLogicalReference, referenceVariants } = await import('../../novelBuild/NovelBuildUseCase.js');
 
 describe('durable Novel Build execution contract', () => {
+  it('uses a bounded manuscript-sized deadline in the actual worker and honors explicit overrides', async () => {
+    const task = { id: 'deadline-task', type: 'line-edit', assignedAgent: 'reviser', scopeUnitIds: Array.from({ length: 110 }, (_, i) => `scene-${i}`), executionPolicy: {} };
+    expect(defaultTaskBudget(task as any).maxDurationMs).toBe(110 * 45_000);
+    expect(defaultTaskBudget({ ...task, scopeUnitIds: ['scene-1'] } as any).maxDurationMs).toBe(15 * 60_000);
+    expect(defaultTaskBudget({ ...task, scopeUnitIds: Array(500).fill('unit') } as any).maxDurationMs).toBe(2 * 60 * 60_000);
+    const timer = vi.spyOn(globalThis, 'setTimeout');
+    try {
+      const worker = new NovelBuildWorker({} as PrismaClient) as any;
+      worker.startTaskHeartbeat = () => async () => {};
+      worker.executeModelTask = vi.fn().mockResolvedValue({});
+      worker.finalizeExecution = vi.fn().mockResolvedValue(undefined);
+      worker.failOrRetry = vi.fn();
+      const claimed = { run: { id: 'deadline-run' }, task, lease: { leaseToken: 'deadline-lease', leaseGeneration: 1 } };
+      await worker.executeClaimedTask(claimed);
+      expect(timer).toHaveBeenCalledWith(expect.any(Function), 110 * 45_000);
+      timer.mockClear();
+      await worker.executeClaimedTask({ ...claimed, task: { ...task, executionPolicy: { maxDurationMs: 1234 } } });
+      expect(timer).toHaveBeenCalledWith(expect.any(Function), 1234);
+      expect(worker.failOrRetry).not.toHaveBeenCalled();
+    } finally { timer.mockRestore(); }
+  });
+
   it('requires a matching nonempty current-head read receipt for unchanged copy edits', () => {
     const calls = [{ toolName: 'readBuildUnit', toolCallId: 'read-1', input: { unitId: 'scene-1' } }];
     const receipt = { toolName: 'readBuildUnit', toolCallId: 'read-1', output: { id: 'scene-1', headVersionId: 'current-head', body: 'Saved prose.' } };

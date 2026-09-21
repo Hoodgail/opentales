@@ -454,10 +454,13 @@ function runChronologyRules(context: DiagnosticContext): void {
 
   const events = context.input.timelineEvents.filter((event) => event.isCurrent && event.invalidatedAt === null);
   const byId = new Map(events.map((event) => [event.id, event]));
+  // State writes accept either a current record ID or its stable key. Keys
+  // remain valid when canon re-extraction creates a new record version.
+  const byKey = new Map(events.map((event) => [event.key, event]));
   for (const event of events) {
     const eventOrder = event.sortOrder ?? parseChronology(event.chronology);
     for (const dependencyId of event.dependencyIds) {
-      const dependency = byId.get(dependencyId);
+      const dependency = byId.get(dependencyId) ?? byKey.get(dependencyId);
       if (!dependency) {
         context.add({
           code: 'missing-timeline-prerequisite',

@@ -87,7 +87,7 @@ const timelineEventSchema = z.object({
   sortOrder: z.number().optional(),
   chapterId: chapterSourceId.optional(),
   sceneId: sceneSourceId.optional(),
-  dependencyIds: z.array(z.string()).default([]),
+  dependencyIds: z.array(z.string()).default([]).describe('Exact prerequisite timeline-event keys or current record IDs in this build. Prefer stable keys so references survive re-extraction; prerequisites must precede this event.'),
   participantRefs: z.unknown().default([]),
   sourceArtifactId: artifactSourceId.optional(),
   sourceSpan: z.unknown().optional()

@@ -572,7 +572,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const abortFromWorker = () => controller.abort(this.abortController.signal.reason);
     this.abortController.signal.addEventListener('abort', abortFromWorker, { once: true });
     const policy = jsonRecord(claimed.task.executionPolicy);
-    const maxDurationMs = clamp(numeric(policy.maxDurationMs, 15 * 60_000), 1_000, 24 * 60 * 60_000);
+    const maxDurationMs = clamp(numeric(policy.maxDurationMs, defaultTaskBudget(claimed.task).maxDurationMs), 1_000, 24 * 60 * 60_000);
     const durationTimer = setTimeout(() => controller.abort(new Error(`Task exceeded maxDurationMs=${maxDurationMs}`)), maxDurationMs);
     // An awaited task owns this deadline. Keep standalone workers alive through
     // provider backoff or an idle stream; idle background polling remains unref'd.
@@ -2097,16 +2097,24 @@ export function defaultTaskBudget(task: BuildTask): {
   maxToolCalls: number;
   maxDurationMs: number;
 } {
+  // Whole-manuscript workers may read and patch hundreds of units. Give that
+  // bounded tool loop a proportional deadline instead of a single-scene one.
+  // An explicit executionPolicy.maxDurationMs still overrides this default.
+  const unitCount = task.scopeUnitIds?.length ?? 0;
+  const manuscriptRole = ['critic', 'reviser'].includes(roleForTask(task.assignedAgent ?? ''));
+  const maxDurationMs = manuscriptRole && unitCount > 1
+    ? Math.min(2 * 60 * 60_000, Math.max(15 * 60_000, unitCount * 45_000))
+    : 15 * 60_000;
   if (task.key === 'planning-quality-gate') {
     // Its independent judge receives the complete planning corpus, not a shard.
-    return { maxInputTokens: 256_000, maxOutputTokens: 32_000, maxToolCalls: 16, maxDurationMs: 15 * 60_000 };
+    return { maxInputTokens: 256_000, maxOutputTokens: 32_000, maxToolCalls: 16, maxDurationMs };
   }
   if (AGGREGATE_ARTIFACT_TASK_TYPES.has(task.type)) {
     return {
       maxInputTokens: 256_000,
       maxOutputTokens: 64_000,
       maxToolCalls: 16,
-      maxDurationMs: 15 * 60_000
+      maxDurationMs
     };
   }
   if (task.type === 'create-relationship-graph') {
@@ -2114,20 +2122,20 @@ export function defaultTaskBudget(task: BuildTask): {
       maxInputTokens: 320_000,
       maxOutputTokens: 32_000,
       maxToolCalls: 12,
-      maxDurationMs: 15 * 60_000
+      maxDurationMs
     };
   }
   if (task.type === 'create-scene-plan-shard') {
     // Structured multi-scene writes plus reasoning exceeded 12k output tokens
     // in live provider usage. Reserve that capacity before execution; never
     // waive the measured output limit after a write.
-    return { maxInputTokens: 128_000, maxOutputTokens: 32_000, maxToolCalls: 16, maxDurationMs: 15 * 60_000 };
+    return { maxInputTokens: 128_000, maxOutputTokens: 32_000, maxToolCalls: 16, maxDurationMs };
   }
   return {
     maxInputTokens: 96_000,
     maxOutputTokens: 32_000,
     maxToolCalls: 16,
-    maxDurationMs: 15 * 60_000
+    maxDurationMs
   };
 }
 

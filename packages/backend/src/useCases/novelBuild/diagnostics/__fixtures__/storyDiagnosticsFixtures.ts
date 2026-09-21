@@ -776,7 +776,7 @@ export function entityState(overrides: Partial<EntityState>): EntityState {
   };
 }
 
-function timelineEvent(overrides: Partial<TimelineEvent>): TimelineEvent {
+export function timelineEvent(overrides: Partial<TimelineEvent>): TimelineEvent {
   return {
     id: 'event',
     projectId: PROJECT_ID,

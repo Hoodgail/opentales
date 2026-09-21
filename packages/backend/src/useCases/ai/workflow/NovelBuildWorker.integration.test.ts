@@ -1393,6 +1393,10 @@ function deterministicExecutor(prisma: PrismaClient, buildRunId: string, scale?:
       ]);
       const isOpeningScene = unit.key === 'scene-1';
       const storyOrder = (unit.parentUnit?.order ?? 0) * 10_000 + unit.order;
+      const prerequisite = await prisma.timelineEvent.findFirst({
+        where: { buildRunId, isCurrent: true, invalidatedAt: null, sortOrder: { lt: storyOrder } },
+        orderBy: { sortOrder: 'desc' }
+      });
       const characterKey = typeof (characterArtifact.content as Record<string, unknown>).characterKey === 'string'
         ? String((characterArtifact.content as Record<string, unknown>).characterKey)
         : characterArtifact.key;
@@ -1403,7 +1407,7 @@ function deterministicExecutor(prisma: PrismaClient, buildRunId: string, scale?:
         idempotencyKey: `${taskKey}:canon:${attempt}:${revisionIteration}`,
         facts: [{ key: `${unit.key}:recognition`, subjectType: 'character', subjectId: characterKey, predicate: 'recognizes-lover', object: isOpeningScene, status: 'CANONICAL', validFromOrder: storyOrder, validToOrder: isOpeningScene ? storyOrder : undefined, confidence: 1 }],
         entityStates: [{ key: `${unit.key}:state`, entityType: 'character', entityId: characterKey, stateKey: 'recognizes-lover', value: isOpeningScene, status: 'ACTIVE', validFromOrder: storyOrder, validToOrder: isOpeningScene ? storyOrder : undefined, storyOrder, sourceFactKey: `${unit.key}:recognition` }],
-        timelineEvents: [{ key: `${unit.key}:event`, title: unit.title, chronology: { order: storyOrder }, sortOrder: storyOrder, participantRefs: [{ type: 'artifact', id: characterArtifact.id, key: characterKey }] }],
+        timelineEvents: [{ key: `${unit.key}:event`, title: unit.title, chronology: { order: storyOrder }, sortOrder: storyOrder, dependencyIds: prerequisite ? [prerequisite.key] : [], participantRefs: [{ type: 'artifact', id: characterArtifact.id, key: characterKey }] }],
         openLoops: [{ key: `${unit.key}:memory-cost`, kind: 'MYSTERY', status: isOpeningScene ? 'OPEN' : 'RESOLVED', title: 'Can Mara recover the lost recognition?', description: 'The cost becomes the ending choice.', resolvedArtifactId: isOpeningScene ? undefined : characterArtifact.id }]
       });
     }
