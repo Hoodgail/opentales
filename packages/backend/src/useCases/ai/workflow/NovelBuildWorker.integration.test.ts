@@ -239,6 +239,13 @@ integration('NovelBuildWorker PostgreSQL integration', () => {
     expect(artifacts.filter((artifact) => artifact.type === 'BEAT')).toHaveLength(104);
     expect(artifacts.filter((artifact) => artifact.type === 'SCENE_PLAN')).toHaveLength(104);
     expect(artifacts.filter((artifact) => artifact.type === 'CHAPTER_BRIEF')).toHaveLength(32);
+    // Simulate a legacy plan written before plain-ID reference validation existed.
+    const legacyScene = artifacts.find(artifact => artifact.type === 'SCENE_PLAN')!;
+    const wrongTypeId = artifacts.find(artifact => artifact.type === 'CHAPTER_BRIEF')!.id;
+    await prisma.storyArtifact.update({ where: { id: legacyScene.id }, data: { content: { ...(legacyScene.content as Prisma.JsonObject), characterReferencedIds: [wrongTypeId] } } });
+    await expect(prisma.$transaction(tx => builds.validateBuildCompletenessInTransaction(tx, run.id, { requireExport: false, planningOnly: true }))).rejects.toThrow('Planning reference audit');
+    await prisma.storyArtifact.update({ where: { id: legacyScene.id }, data: { content: legacyScene.content as Prisma.InputJsonValue } });
+
     expect(units.filter((unit) => unit.kind === 'CHAPTER')).toHaveLength(32);
     expect(units.filter((unit) => unit.kind === 'SCENE')).toHaveLength(104);
     expect(planningTasks.filter((task) => task.type === 'create-beat-shard').length).toBeGreaterThan(1);
@@ -1177,6 +1184,10 @@ function deterministicExecutor(prisma: PrismaClient, buildRunId: string, scale?:
         buildRunId, taskId: input.contract.scope.buildTaskId, idempotencyKey: `${taskKey}:invented-location`,
         operations: [{ ...first, content: { ...(first.content as Record<string, unknown>), locationRef: { type: 'location', id: world.id, key: 'geo:invented-alias' } } }]
       })).rejects.toThrow('references missing location');
+      if (chapterNumber === 1) for (const field of ['characterPresentIds', 'characterReferencedIds']) await expect(call('applyArtifactBatch', {
+        buildRunId, taskId: input.contract.scope.buildTaskId, idempotencyKey: `${taskKey}:wrong-character-type:${field}`,
+        operations: [{ ...first, content: { ...(first.content as Record<string, unknown>), [field]: [brief.id] } }]
+      })).rejects.toThrow('references missing character');
       planningOperations = planningOperations.map(operation => ({ ...operation, content: {
         ...(operation.content as Record<string, unknown>), locationRef: { type: 'location', id: world.id, key: 'erased-city' }
       } }));
@@ -1439,6 +1450,11 @@ function deterministicJudgeExecutor(): BuildJudgeExecutor {
       });
     }
     const sceneCritic = input.contract.metadata.taskType === 'critique-scene';
+    if (sceneCritic) {
+      const types = input.evidencePack.artifacts.map(artifact => artifact.type);
+      expect(types).toEqual(expect.arrayContaining(['story-brief', 'narrative-contract', 'world-bible', 'character-bible']));
+    }
+
     const firstSceneGate = input.contract.metadata.taskType === 'quality-gate'
       && String(input.contract.metadata.taskKey ?? '').startsWith('scene:')
       && Number(input.contract.metadata.revisionIteration ?? 0) === 0;

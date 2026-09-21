@@ -1361,14 +1361,16 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
           },
           orderBy: [{ type: 'asc' }, { key: 'asc' }]
         })
-        : artifactIds.length
-        ? this.prisma.storyArtifact.findMany({ where: { id: { in: artifactIds }, buildRunId: claimed.run.id, invalidatedAt: null }, orderBy: [{ type: 'asc' }, { key: 'asc' }] })
-        : Promise.resolve([]),
+        : this.prisma.storyArtifact.findMany({ where: {
+          buildRunId: claimed.run.id, invalidatedAt: null, status: { in: ['VALIDATED', 'ACCEPTED'] },
+          OR: [{ id: { in: artifactIds } }, { type: { in: ['STORY_BRIEF', 'NARRATIVE_CONTRACT', 'WORLD_BIBLE', 'CHARACTER_BIBLE', 'RELATIONSHIP_GRAPH'] } }]
+        }, orderBy: [{ type: 'asc' }, { key: 'asc' }] }),
       claimed.task.scopeUnitIds.length
         ? this.prisma.buildManuscriptUnit.findMany({ where: { id: { in: claimed.task.scopeUnitIds }, buildRunId: claimed.run.id, invalidatedAt: null }, orderBy: [{ kind: 'asc' }, { containerKey: 'asc' }, { order: 'asc' }], include: { branch: { include: { headVersion: true } } } })
         : Promise.resolve([]),
       this.storyState.diagnostics(requiredUserId(claimed.run), claimed.run.projectId, claimed.run.id)
     ]);
+    const missingArtifactCount = artifactIds.filter(id => !artifacts.some(artifact => artifact.id === id)).length;
     const maximumCharacters = judgeEvidenceCharacterBudget(maxInputTokens, completePlanningCorpus);
     const artifactCharacters = Math.floor(maximumCharacters * (completePlanningCorpus ? 0.78 : 0.3));
     const unitCharacters = Math.floor(maximumCharacters * (completePlanningCorpus ? 0 : 0.45));
@@ -1401,9 +1403,9 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       })),
       artifactCoverage: {
         scope: completePlanningCorpus ? 'complete-planning-corpus' : 'task-artifacts',
-        requestedCount: completePlanningCorpus ? artifacts.length : artifactIds.length,
+        requestedCount: artifacts.length + (completePlanningCorpus ? 0 : missingArtifactCount),
         includedCount: artifacts.length,
-        omittedCount: Math.max(0, (completePlanningCorpus ? artifacts.length : artifactIds.length) - artifacts.length),
+        omittedCount: completePlanningCorpus ? 0 : missingArtifactCount,
         countsByType,
         contentTruncatedCount: artifactContent.filter(({ serialized, limit }) => serialized.length > limit).length
       },
@@ -2597,7 +2599,7 @@ async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Promise<Bui
     model,
     system: [
       'You are an independent fiction-quality evaluator. You have diagnostics-only authority and cannot mutate or self-certify the candidate.',
-      'Score only the supplied rubric and observable evidence. Do not expose hidden reasoning.',
+      'Score only the supplied rubric and observable evidence. Check prose tense, POV, character identities, and world rules against the supplied story brief and narrative contract. Do not expose hidden reasoning.',
       'A bounded artifact body may be truncated for transport; use artifactCoverage to determine whether the required corpus is complete and do not fail solely because individual bodies are bounded.',
       'For planning review, declared open questions are review surfaces, not automatic defects; lower scores only when an unresolved item prevents causal execution or violates the owner contract.',
       'A runStoryLint call with buildRunId and omitted or empty chapterIds is build-wide.',

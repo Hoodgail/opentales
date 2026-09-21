@@ -2114,7 +2114,7 @@ function numericJson(value: JsonValue | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function collectJsonReferences(value: JsonValue): Array<{ type: string; id: string; key?: string }> {
+export function collectJsonReferences(value: JsonValue): Array<{ type: string; id: string; key?: string }> {
   const references: Array<{ type: string; id: string; key?: string }> = [];
   const visit = (node: JsonValue) => {
     if (Array.isArray(node)) return node.forEach(visit);
@@ -2124,6 +2124,9 @@ function collectJsonReferences(value: JsonValue): Array<{ type: string; id: stri
       id: node.id,
       ...(typeof node.key === 'string' ? { key: node.key } : {})
     });
+    for (const field of ['characterPresentIds', 'characterReferencedIds']) {
+      for (const id of stringArray(node[field])) references.push({ type: 'character', id });
+    }
     Object.values(node).forEach(visit);
   };
   visit(value);

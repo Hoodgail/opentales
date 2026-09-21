@@ -73,7 +73,7 @@ import {
   stableStringify,
   validateArtifactContent
 } from './schemas.js';
-import { NovelBuildUseCase, referenceVariants } from './NovelBuildUseCase.js';
+import { NovelBuildUseCase, referenceVariants, collectJsonReferences } from './NovelBuildUseCase.js';
 import { abortBuildRunExecutions } from '../ai/workflow/BuildExecutionRegistry.js';
 import { getProjectInclude, toManuscriptProject } from '../projects/projectMapper.js';
 import { createStoryDiagnosticsResult } from './diagnostics/index.js';
@@ -995,7 +995,7 @@ export class StoryStateUseCase {
     }
     for (const artifact of artifacts) {
       const content = artifact.content as JsonObject;
-      for (const ref of collectReferences(content)) if (ref.type === 'location' && ![ref.id, ref.key].flatMap(referenceVariants).some(key => locations.has(key))) {
+      for (const ref of collectJsonReferences(content)) if (ref.type === 'location' && ![ref.id, ref.key].flatMap(referenceVariants).some(key => locations.has(key))) {
         throw new HttpError(409, `Artifact '${artifact.key}' references missing location '${ref.key ?? ref.id}'. Copy an exact world-bible geography key or canonical location ID; the world-bible artifact ID is not a location.`);
       }
       if (artifact.type === 'SCENE_PLAN') {
@@ -1011,7 +1011,7 @@ export class StoryStateUseCase {
       // Dossiers can name characters produced by later batches/shards. Downstream
       // artifacts must use the completed character corpus, including exact artifact IDs.
       if (artifact.type !== 'CHARACTER_BIBLE') {
-        for (const ref of collectReferences(content)) if (ref.type === 'character' && !characters.has(ref.id) && !characters.has(ref.key ?? '')) {
+        for (const ref of collectJsonReferences(content)) if (ref.type === 'character' && !characters.has(ref.id) && !characters.has(ref.key ?? '')) {
           const exists = await tx.character.findFirst({ where: { id: ref.id, projectId }, select: { id: true } });
           if (!exists) throw new HttpError(409, `Artifact '${artifact.key}' references missing character '${ref.id}'. Copy an exact character-bible id or characterKey.`);
         }
