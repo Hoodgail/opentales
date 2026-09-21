@@ -1299,6 +1299,7 @@ function deterministicExecutor(prisma: PrismaClient, buildRunId: string, scale?:
     }
 
     if (!scale && taskType === 'create-character-bibles') {
+      if (attempt > 1) expect(input.system).toContain('Controlled transient failure after replacing artifacts');
       const original = planningOperations[0]!;
       const replace = async (voice: string, key: string) => {
         const old = artifactIds[0];
