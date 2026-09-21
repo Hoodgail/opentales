@@ -32,6 +32,7 @@ const {
   validateBeatReferences,
   judgeEvidenceCharacterBudget,
   resolveContextWindow,
+  collectStepToolResults,
   lookupExecutionModelPrice,
   measuredInvocationUsage,
   normalizeJudgeResultCandidate,
@@ -602,4 +603,14 @@ it('uses catalog windows, reserves output, and respects the smallest fallback ro
   expect(resolveContextWindow([large, small], 12000)?.inputTokens).toBe(116000);
   expect(resolveContextWindow([large, null], 12000)).toBeNull();
   expect(() => resolveContextWindow([small], 48000)).toThrow('output limit');
+});
+
+
+it('retains SDK tool rejection messages alongside successful tool results', () => {
+  const result = { toolName: 'readBuildArtifact', toolCallId: 'read-1', output: { ok: true } };
+  const collected = collectStepToolResults([{ toolResults: [result], content: [
+    { type: 'tool-result', ...result },
+    { type: 'tool-error', toolName: 'applyArtifactBatch', toolCallId: 'write-1', error: new Error('Scene plan references missing location geo:invented') }
+  ] }]);
+  expect(collected).toEqual([result, { toolName: 'applyArtifactBatch', toolCallId: 'write-1', output: { ok: false, error: 'Scene plan references missing location geo:invented' } }]);
 });

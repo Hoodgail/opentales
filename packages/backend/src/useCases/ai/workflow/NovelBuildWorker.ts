@@ -2498,13 +2498,16 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
             usage?.outputTokens ?? 0
           )
           : [];
-        throw attachExecutionUsage(
+        throw Object.assign(attachExecutionUsage(
           streamError,
           usage?.inputTokens ?? 0,
           usage?.outputTokens ?? 0,
           actualModelId,
           partialUsage
-        );
+        ), {
+          workerToolCalls: steps.flatMap(step => step.toolCalls ?? []).map(compactToolCall),
+          workerToolResults: collectStepToolResults(steps).map(compactToolResult)
+        });
       }
       cumulativeInputTokens += usage?.inputTokens ?? 0;
       cumulativeOutputTokens += usage?.outputTokens ?? 0;
@@ -2526,7 +2529,7 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
         if (error && typeof error === 'object') Object.assign(error, {
           providerUsageComplete: true,
           workerToolCalls: steps.flatMap(step => step.toolCalls ?? []).map(compactToolCall),
-          workerToolResults: steps.flatMap(step => step.toolResults ?? []).map(compactToolResult),
+          workerToolResults: collectStepToolResults(steps).map(compactToolResult),
           workerOutputText: boundedText(text, 6_000)
         });
         throw error;
@@ -2536,7 +2539,7 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
         inputTokens: cumulativeInputTokens,
         outputTokens: cumulativeOutputTokens,
         toolCalls: steps.flatMap((step) => step.toolCalls ?? []),
-        toolResults: steps.flatMap((step) => step.toolResults ?? []),
+        toolResults: collectStepToolResults(steps),
         modelId: actualModelId,
         usageByModel
       };
@@ -3074,4 +3077,16 @@ export function resolveContextWindow(prices: Array<ModelPrice | null>, outputTok
   const inputTokens = Math.min(contextTokens - outputTokens, ...prices.map(price => price!.limits!.input ?? price!.limits!.context));
   if (inputTokens < 2_000) throw new Error('Selected model has insufficient context after reserving output tokens');
   return { inputTokens, contextTokens };
+}
+
+
+/** SDK tool rejections live in step.content, not in step.toolResults. */
+export function collectStepToolResults(steps: Array<{ toolResults?: readonly unknown[]; content?: readonly unknown[] }>): unknown[] {
+  return steps.flatMap(step => [
+    ...(step.toolResults ?? []),
+    ...(step.content ?? []).map(jsonRecord).filter(part => part.type === 'tool-error').map(part => ({
+      toolName: part.toolName, toolCallId: part.toolCallId,
+      output: { ok: false, error: boundedText(part.error instanceof Error ? part.error.message : typeof part.error === 'string' ? part.error : JSON.stringify(part.error) ?? 'Unknown tool error', 4000) }
+    }))
+  ]);
 }
