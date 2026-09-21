@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { chapterAllocationIndex, estimateTokens, packContextSections, selectTemporalState, type ContextSection } from './ContextAssembler.js';
+import { characterIdentityIndex, chapterAllocationIndex, worldLocationIndex, estimateTokens, packContextSections, selectTemporalState, type ContextSection } from './ContextAssembler.js';
 
 describe('context packing', () => {
+it('preserves exact geography keys beyond a verbose world-bible excerpt', () => {
+  const rows = [{ id: 'world-container', content: { rules: 'World rules. '.repeat(4000), geography: [
+    { key: 'geo:diner-interior', name: 'Night Diner Interior', description: 'A long setting description.' },
+    { key: 'geo:studio', name: 'Broadcast Studio' }
+  ] } }];
+  const pack = packContextSections([{ kind: 'world', title: 'World', content: JSON.stringify(rows), protectedContent: worldLocationIndex(rows), required: true, identifiers: ['world-container'], priority: 1, maxTokens: 500 }], 600);
+  expect(pack.text).toContain('geo:diner-interior');
+  expect(pack.text).toContain('geo:studio');
+  expect(pack.text).toContain('artifact ID is not a location');
+  expect(pack.truncated).toBe(true);
+});
 it('preserves every declared scene key from 32 verbose briefs through model-visible packing', () => {
   const rows = Array.from({ length: 32 }, (_, i) => ({ id: `brief-${i + 1}`, type: 'CHAPTER_BRIEF', content: {
     chapterKey: `chapter-${i + 1}`, number: i + 1, purpose: 'Long chapter purpose. '.repeat(300),
@@ -72,4 +83,34 @@ it('retains more than eighty temporally valid causal-unit facts before relevance
   expect(selected.canon).toHaveLength(120);
   expect(selected.canon.map((fact) => fact.id)).not.toContain('future');
 });
+});
+
+
+describe('large model context', () => {
+  it('preserves full prose and canon beyond 100k tokens when a 1M window has room', () => {
+    const prose = 'Mara crossed the diner, remembering the studio. '.repeat(14000) + 'FINAL-PROSE-MARKER';
+    const canon = 'Location detail. '.repeat(3000) + 'EXACT-LOCATION: geo:channel-83-basement-studio';
+    const sections: ContextSection[] = [
+      { kind: 'recent-causal', title: 'Manuscript', content: prose, identifiers: ['scene-1'], priority: 90, maxTokens: 4000 },
+      { kind: 'world', title: 'World', content: canon, identifiers: ['world-1'], priority: 80, maxTokens: 2500 }
+    ];
+    const full = packContextSections(sections, 850000, true);
+    expect(full.estimatedTokens).toBeGreaterThan(100000);
+    expect(full.estimatedTokens).toBeLessThanOrEqual(850000);
+    expect(full.text).toContain(prose);
+    expect(full.text).toContain(canon);
+    expect(full.truncated).toBe(false);
+    const small = packContextSections(sections, 24000, true);
+    expect(small.truncated).toBe(true);
+    expect(small.estimatedTokens).toBeLessThanOrEqual(24000);
+    expect(small.text).toContain('Some context was omitted');
+  });
+});
+
+it('preserves character names and aliases even when descriptive prose cannot fit', () => {
+  const rows = [{ id: 'character-1', type: 'CHARACTER_BIBLE', content: { characterKey: 'mara', name: 'Mara Chen', aliases: ['Night Cook'], description: 'Long history. '.repeat(10000) } }];
+  const pack = packContextSections([{ kind: 'characters', title: 'Characters', content: JSON.stringify(rows), protectedContent: characterIdentityIndex(rows), required: true, priority: 90, maxTokens: 500 } as ContextSection].map(section => ({ ...section, identifiers: ['character-1'] })), 1000, true);
+  expect(pack.text).toContain('Mara Chen');
+  expect(pack.text).toContain('Night Cook');
+  expect(pack.truncated).toBe(true);
 });

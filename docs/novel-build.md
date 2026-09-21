@@ -227,3 +227,16 @@ Chapter-scoped scene planning allows up to 128,000 input tokens per model invoca
 Failed-attempt recovery also invalidates every ledger version created by that attempt, including versions already superseded within it. It restores only pre-attempt predecessors, so repeated canon/state/timeline/loop/thread updates cannot leave intermediate failed values active. The regression covers both a newly introduced fact and replacement of an existing fact.
 
 Whole-book timeline generation uses the aggregate artifact budget (256,000 input / 48,000 output tokens per invocation), rather than the small-task output ceiling. Its regression includes the observed 19,086-token output, and its prompt keeps individual timeline entries concise.
+
+
+## Model context and cumulative budgets
+
+Novel Build resolves `limit.context`, `limit.input`, and `limit.output` from the same cached models.dev catalog used for pricing. Official model IDs and catalog-declared reasoning aliases share these limits. Price-only operator overrides retain catalog limits. An ambiguous relay alias uses the smallest known window; a route with unknown capacity falls back to the task's existing input budget instead of assuming a million-token model.
+
+The available request input is the smallest supported input across the worker's configured routes and judge, after reserving output. Context packing also reserves space for instructions, serialized tool schemas, and tool history. Skill section sizes and the former 80K assembler ceiling do not cap Novel Build context. Current build artifacts, character identities, world rules, temporally valid canon, and prior scene prose are supplied in full when the available request budget permits. Invalidated artifacts and future character states are excluded intentionally. Large records are not reduced to 500-character excerpts before packing. Character identities, location keys, and chapter scene allocations have protected indexes.
+
+If the actual available budget is insufficient, priority packing reports truncation and retains retrieval identifiers; workers can read the complete persisted records. Tool history is checked before subsequent model requests and is never silently discarded. Context-size estimates are approximate, not provider tokenizer counts. A larger context reduces missing evidence but does not guarantee factual consistency, so reference validation and manuscript quality gates remain required.
+
+`BuildTrace.inputs.contextCoverage` records the resolved window, request input allowance, estimated tool-schema size, context budget, per-section packing results, truncation, and cumulative task budget. `contextTokenCount` measures the packed context; provider usage measures the complete request including repeated context across tool exchanges. These are different quantities.
+
+The build's `maxTokens` is cumulative across requests and retries. It is not a context-window setting. Using a large context repeatedly can consume a 5M budget quickly. Each tool-loop request checks remaining build tokens and priced cost; increasing context capacity does not remove these limits.

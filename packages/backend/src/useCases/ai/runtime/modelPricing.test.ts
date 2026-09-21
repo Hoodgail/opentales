@@ -234,3 +234,18 @@ describe('official models and reasoning aliases', () => {
   });
 
 });
+
+
+it('caches official model windows and preserves them through effort aliases and price-only overrides', async () => {
+  const fetchFn = vi.fn(async () => new Response(JSON.stringify({ google: { models: {
+    'gemini-3.8-flash': { cost: { input: 1, output: 2 }, limit: { context: 1048576, output: 65536 }, reasoning_options: [{ type: 'effort', values: ['high'] }] }
+  } } })));
+  const cache = new ModelsDevPricingCache({ fetchFn: fetchFn as typeof fetch });
+  const catalog = await cache.get();
+  expect(catalog['gemini-3.8-flash-high'].limits).toEqual({ context: 1048576, output: 65536 });
+  const configured = { 'google/gemini-3.8-flash': { inputMicrosPerMillion: 3, outputMicrosPerMillion: 4, source: 'relay', version: 'v1' } };
+  const merged = await loadModelPricing({ cache, configured });
+  expect(fetchFn).toHaveBeenCalledTimes(1);
+  expect(merged['gemini-3.8-flash-high'].limits).toEqual(catalog['google/gemini-3.8-flash'].limits);
+  expect(merged['google/gemini-3.8-flash'].inputMicrosPerMillion).toBe(3);
+});

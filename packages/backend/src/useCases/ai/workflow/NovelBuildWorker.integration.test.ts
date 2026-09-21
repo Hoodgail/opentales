@@ -1143,6 +1143,16 @@ function deterministicExecutor(prisma: PrismaClient, buildRunId: string, scale?:
       expect(planningOperations.map(op => (op.content as Record<string, unknown>).sceneKey)).toEqual(content.sceneKeys);
       await expect(call('readBuildArtifact', { buildRunId: 'another-build', artifactId: brief.id })).rejects.toThrow();
       const first = planningOperations[0]!;
+      const world = await prisma.storyArtifact.findFirstOrThrow({ where: { buildRunId, type: 'WORLD_BIBLE', invalidatedAt: null } });
+      expect(input.system).toContain('Declared world locations');
+      expect(input.system).toContain('erased-city');
+      if (chapterNumber === 1) await expect(call('applyArtifactBatch', {
+        buildRunId, taskId: input.contract.scope.buildTaskId, idempotencyKey: `${taskKey}:invented-location`,
+        operations: [{ ...first, content: { ...(first.content as Record<string, unknown>), locationRef: { type: 'location', id: world.id, key: 'geo:invented-alias' } } }]
+      })).rejects.toThrow('references missing location');
+      planningOperations = planningOperations.map(operation => ({ ...operation, content: {
+        ...(operation.content as Record<string, unknown>), locationRef: { type: 'location', id: world.id, key: 'erased-city' }
+      } }));
       await expect(call('applyArtifactBatch', {
         buildRunId, taskId: input.contract.scope.buildTaskId, idempotencyKey: `${taskKey}:undeclared-dependency`,
         operations: [{ ...first, content: { ...(first.content as Record<string, unknown>), dependencies: ['invented-future-scene'] } }]
@@ -1413,7 +1423,7 @@ function deterministicJudgeExecutor(): BuildJudgeExecutor {
       feedback: sceneCritic || firstSceneGate ? 'Independent critic requests the bounded scene revision.' : 'Deterministic independent judge fixture passed.',
       evidence: [{ type: 'fixture', summary: 'Independent judge invocation' }]
       },
-      inputTokens: 50,
+      inputTokens: input.contract.metadata.taskKey === 'planning-quality-gate' ? 114_230 : 50,
       outputTokens: 25,
       modelId: 'priced/model'
     };

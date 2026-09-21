@@ -11,6 +11,11 @@ export const modelPriceSchema = z.object({
   outputMicrosPerMillion: z.number().int().nonnegative(),
   source: z.string().trim().min(1),
   version: z.string().trim().min(1),
+  limits: z.object({
+    context: z.number().int().positive(),
+    input: z.number().int().positive().optional(),
+    output: z.number().int().positive().optional()
+  }).strict().optional(),
   contextTiers: z.array(z.object({
     aboveInputTokens: z.number().int().nonnegative(),
     inputMicrosPerMillion: z.number().int().nonnegative(),
@@ -88,7 +93,15 @@ export function parseModelsDevPricing(
       if (![input, output].every(value => Number.isSafeInteger(Math.ceil(value * 1_000_000)))) continue;
       const version = `${catalogVersion}; model=${stringValue(model.last_updated) ?? 'unknown'}`;
       const contextTiers = parseContextTiers(cost);
+      const rawLimits = objectRecord(model.limit);
+      const positiveInteger = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+      const limits = positiveInteger(rawLimits.context) ? {
+        context: rawLimits.context,
+        ...(positiveInteger(rawLimits.input) ? { input: rawLimits.input } : {}),
+        ...(positiveInteger(rawLimits.output) ? { output: rawLimits.output } : {})
+      } : undefined;
       const exact: ModelPrice = {
+        ...(limits ? { limits } : {}),
         inputMicrosPerMillion: dollarsPerMillionToMicros(input),
         outputMicrosPerMillion: dollarsPerMillionToMicros(output),
         source: `${source}#${encodeURIComponent(providerId)}/${encodeURIComponent(modelId)}`,
@@ -251,10 +264,13 @@ export async function loadModelPricing(options: {
     const canonical = remote[id].source.split('#')[1]?.split('/').map(decodeURIComponent).join('/');
     if (id !== canonical && id !== canonical?.split('/').slice(1).join('/')) continue;
     for (const [alias, remotePrice] of Object.entries(remote)) {
-      if (remotePrice === remote[id]) resolved[alias] = price;
+      if (remotePrice === remote[id]) resolved[alias] = { ...price, ...(remotePrice.limits ? { limits: price.limits ?? remotePrice.limits } : {}) };
     }
   }
-  return { ...resolved, ...configured };
+  for (const [id, price] of Object.entries(configured)) {
+    resolved[id] = { ...price, ...(remote[id]?.limits ? { limits: price.limits ?? remote[id].limits } : {}) };
+  }
+  return resolved;
 }
 
 function mergeConservativePrice(
@@ -264,7 +280,14 @@ function mergeConservativePrice(
   modelId: string
 ): ModelPrice {
   if (!current) return incoming;
+  // Ambiguous relay aliases must never advertise a larger window than either route.
+  const limits = current.limits && incoming.limits ? {
+    context: Math.min(current.limits.context, incoming.limits.context),
+    input: Math.min(current.limits.input ?? current.limits.context, incoming.limits.input ?? incoming.limits.context),
+    ...(current.limits.output && incoming.limits.output ? { output: Math.min(current.limits.output, incoming.limits.output) } : {})
+  } : undefined;
   return {
+    ...(limits ? { limits } : {}),
     inputMicrosPerMillion: Math.max(current.inputMicrosPerMillion, incoming.inputMicrosPerMillion, ...(current.contextTiers ?? []).map(tier => tier.inputMicrosPerMillion), ...(incoming.contextTiers ?? []).map(tier => tier.inputMicrosPerMillion)),
     outputMicrosPerMillion: Math.max(current.outputMicrosPerMillion, incoming.outputMicrosPerMillion, ...(current.contextTiers ?? []).map(tier => tier.outputMicrosPerMillion), ...(incoming.contextTiers ?? []).map(tier => tier.outputMicrosPerMillion)),
     source: `${source}#model=${encodeURIComponent(modelId)} (conservative provider maximum)`,

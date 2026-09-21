@@ -73,7 +73,7 @@ import {
   stableStringify,
   validateArtifactContent
 } from './schemas.js';
-import { NovelBuildUseCase } from './NovelBuildUseCase.js';
+import { NovelBuildUseCase, referenceVariants } from './NovelBuildUseCase.js';
 import { abortBuildRunExecutions } from '../ai/workflow/BuildExecutionRegistry.js';
 import { getProjectInclude, toManuscriptProject } from '../projects/projectMapper.js';
 import { createStoryDiagnosticsResult } from './diagnostics/index.js';
@@ -973,10 +973,16 @@ export class StoryStateUseCase {
     const briefs = new Set<string>();
     const scenes = new Set<string>();
     const characters = new Set<string>();
+    const locations = new Set<string>();
+    const canonicalLocations = await tx.location.findMany({ where: { projectId }, select: { id: true, name: true } });
+    for (const location of canonicalLocations) for (const key of [location.id, location.name].flatMap(referenceVariants)) locations.add(key);
     for (const artifact of artifacts) {
       const content = artifact.content as JsonObject;
       if (artifact.type === 'CHAPTER_BRIEF') briefs.add(typeof content.chapterKey === 'string' ? content.chapterKey : artifact.key);
       if (artifact.type === 'SCENE_PLAN') scenes.add(typeof content.sceneKey === 'string' ? content.sceneKey : artifact.key);
+      if (artifact.type === 'WORLD_BIBLE' && Array.isArray(content.geography)) {
+        for (const entry of content.geography.filter(isObject)) for (const key of [entry.key, entry.name].flatMap(referenceVariants)) locations.add(key);
+      }
       if (artifact.type === 'CHARACTER_BIBLE') {
         for (const key of [artifact.id, artifact.key, content.characterKey, content.name, ...stringArray(content.aliases)]) {
           if (typeof key === 'string') characters.add(key);
@@ -985,6 +991,9 @@ export class StoryStateUseCase {
     }
     for (const artifact of artifacts) {
       const content = artifact.content as JsonObject;
+      for (const ref of collectReferences(content)) if (ref.type === 'location' && ![ref.id, ref.key].flatMap(referenceVariants).some(key => locations.has(key))) {
+        throw new HttpError(409, `Artifact '${artifact.key}' references missing location '${ref.key ?? ref.id}'. Copy an exact world-bible geography key or canonical location ID; the world-bible artifact ID is not a location.`);
+      }
       if (artifact.type === 'SCENE_PLAN') {
         if (typeof content.chapterKey !== 'string' || !briefs.has(content.chapterKey)) throw new HttpError(409, `Scene plan '${artifact.key}' references missing chapter brief '${String(content.chapterKey)}'`);
         for (const dependency of stringArray(content.dependencies)) if (!scenes.has(dependency)) throw new HttpError(409, `Scene plan '${artifact.key}' references missing dependency '${dependency}'`);

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { BuildRun, BuildTask, Prisma, PrismaClient } from '@prisma/client';
-import { hasToolCall, stepCountIs, streamText, tool, type ToolSet } from 'ai';
+import { asSchema, hasToolCall, stepCountIs, streamText, tool, type ToolSet } from 'ai';
 import { z } from 'zod';
 import type { JsonValue } from '@opentales/sdk';
 import type { BuildTaskLease } from '@opentales/sdk';
@@ -31,6 +31,7 @@ import {
 import {
   calculateModelCostMicros,
   loadModelPricing,
+  modelPriceSchema,
   lookupModelPrice,
   parseModelPricing,
   type ModelPrice,
@@ -534,9 +535,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const policy = jsonRecord(task.executionPolicy);
     const defaults = defaultTaskBudget(task);
     const judgeRequired = typeof jsonRecord(task.acceptanceCriteria).rubric === 'string' || task.qualityThreshold !== null || allowsUnchangedReview(task);
-    const inputTokens = numeric(policy.maxInputTokens, defaults.maxInputTokens);
     const outputTokens = numeric(policy.maxOutputTokens, defaults.maxOutputTokens);
-    const judgeInputTokens = judgeRequired ? numeric(policy.maxInputTokens, defaults.maxInputTokens) : 0;
     const judgeOutputTokens = judgeRequired ? Math.min(4_000, numeric(policy.maxOutputTokens, defaults.maxOutputTokens)) : 0;
     const settings = await this.prisma.projectAiSettings.findUnique({ where: { projectId: run.projectId }, select: { model: true, providerKind: true } });
     const route = this.modelRoute(task);
@@ -546,6 +545,9 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const executionPrices = executionModels.slice(0, modelAttempts).map((candidate) => lookupExecutionModelPrice(this.modelPricing, settings?.providerKind, candidate)).filter((price): price is ModelPrice => Boolean(price));
     const judgeModelId = judgeRequired ? process.env.AI_JUDGE_MODEL?.trim() || modelId : null;
     const judgePrice = judgeRequired ? lookupExecutionModelPrice(this.modelPricing, settings?.providerKind, judgeModelId) : null;
+    const window = resolveContextWindow([...executionPrices, ...(judgeRequired ? [judgePrice] : [])], outputTokens);
+    const inputTokens = Math.min(numeric(policy.maxInputTokens, window?.inputTokens ?? defaults.maxInputTokens), window?.inputTokens ?? Number.MAX_SAFE_INTEGER);
+    const judgeInputTokens = judgeRequired ? inputTokens : 0;
     return {
       tokens: (inputTokens + outputTokens) * Math.max(1, modelAttempts) + judgeInputTokens + judgeOutputTokens,
       costMicros: executionPrices.reduce((sum, price) => sum + calculateModelCostMicros(price, inputTokens, outputTokens), 0)
@@ -808,7 +810,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const skillTokenCount = activeSkills.reduce((sum, skill) => sum + estimateTokens(skill.content) + loadAiSkillReferences(skill).reduce((referenceSum, reference) => referenceSum + estimateTokens(reference.content), 0), 0);
     const directive = await this.prisma.buildDirective.findFirst({ where: { buildRunId: claimed.run.id }, orderBy: { createdAt: 'desc' } });
     const brainstormData = serializeUntrustedData('build-brainstorm', {
-      storyText: boundedText(claimed.run.brainstorm, Math.min(48_000, Math.max(8_000, contract.budget.maxInputTokens)))
+      storyText: claimed.run.brainstorm
     });
     const ownerAuthority = JSON.stringify({
       objective: claimed.run.objective,
@@ -819,41 +821,10 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         pinnedArtifactIds: directive.pinnedArtifactIds
       } : null
     }, null, 2);
-    const contextTokenBudget = Math.min(
-      Math.max(2_000, contract.budget.maxInputTokens - skillTokenCount - estimateTokens(brainstormData) - estimateTokens(ownerAuthority) - 6_000),
-      ...activeSkills.map((skill) => skill.manifest.context.maxTokens)
-    );
-    const pack = await new ContextAssembler(this.prisma).assemble({
-      projectId: claimed.run.projectId,
-      task: contract,
-      tokenBudget: contextTokenBudget,
-      sectionKinds: contextSections
-    });
-    const inferencePack = {
-      ...pack,
-      text: [brainstormData, pack.text].filter(Boolean).join('\n\n'),
-      estimatedTokens: pack.estimatedTokens + estimateTokens(brainstormData),
-      tokenBudget: contextTokenBudget + estimateTokens(brainstormData)
-    };
     const proceduralSkills = activeSkills.filter((skill) => skill.manifest.kind !== 'workflow');
     const capabilitySkills = proceduralSkills.length ? proceduralSkills : activeSkills;
     // Excerpts are bounded; every worker needs a build-scoped read-back path.
     const skillAllowedTools = [...new Set([...capabilitySkills.flatMap((skill) => skill.manifest.allowedTools), 'listBuildArtifacts', 'readBuildArtifact'])];
-    const system = [
-      renderInferenceLayers({
-        role,
-        task: contract,
-        activeSkills: activeSkills.map((skill) => ({ manifest: skill.manifest, content: skill.content, references: loadAiSkillReferences(skill) })),
-        contextPack: inferencePack,
-        runtimeInstructions: 'You are a scoped creative worker inside the OpenTales durable Novel Build workflow.',
-        userAuthority: ownerAuthority
-      })
-    ].join('\n\n');
-    const preferredModel = contract.modelPolicy.preferred;
-    const estimatedInputTokens = estimateTokens(system) + estimateTokens(contract.objective);
-    if (estimatedInputTokens > contract.budget.maxInputTokens) throw new Error(`Assembled inference input ${estimatedInputTokens} exceeds maxInputTokens=${contract.budget.maxInputTokens}`);
-    const projectModel = await this.prisma.projectAiSettings.findUnique({ where: { projectId: claimed.run.projectId }, select: { model: true, providerKind: true } });
-    const trace = await this.startTrace(claimed, projectModel?.providerKind ?? null, preferredModel ?? projectModel?.model ?? null, inferencePack.identifiers, inferencePack.estimatedTokens);
     const approval = {
       handleApproval: async (toolName: AgentMutatingToolName, input: unknown, execute: () => Promise<unknown>) => {
         assertAuthorizedTool(claimed.run, toolName, input);
@@ -884,6 +855,47 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       }
     );
     assertRequiredTaskCapabilities(tools as Record<string, unknown>, claimed.task);
+    const toolSchemaTokens = estimateTokens(JSON.stringify(await Promise.all(Object.entries(tools as unknown as ToolSet).map(async ([name, definition]) => ({
+      name, description: definition.description, inputSchema: await asSchema(definition.inputSchema).jsonSchema
+    })))));
+    const window = jsonRecord(contract.metadata.contextWindow);
+    const requestInputTokens = Math.min(contract.budget.maxInputTokens, numeric(window.inputTokens, contract.budget.maxInputTokens));
+    // Leave room for tool schemas and subsequent tool exchanges. Skill section
+    // sizes are relevance hints, not artificial ceilings on a larger model.
+    const contextTokenBudget = Math.max(2_000, Math.floor(requestInputTokens * 0.85)
+      - toolSchemaTokens - skillTokenCount - estimateTokens(brainstormData) - estimateTokens(ownerAuthority) - 6_000);
+    const pack = await new ContextAssembler(this.prisma).assemble({
+      projectId: claimed.run.projectId,
+      task: contract,
+      tokenBudget: contextTokenBudget,
+      fullContext: true,
+      sectionKinds: contextSections
+    });
+    const inferencePack = {
+      ...pack,
+      text: [brainstormData, pack.text].filter(Boolean).join('\n\n'),
+      estimatedTokens: pack.estimatedTokens + estimateTokens(brainstormData),
+      tokenBudget: contextTokenBudget + estimateTokens(brainstormData)
+    };
+    const system = [
+      renderInferenceLayers({
+        role,
+        task: contract,
+        activeSkills: activeSkills.map((skill) => ({ manifest: skill.manifest, content: skill.content, references: loadAiSkillReferences(skill) })),
+        contextPack: inferencePack,
+        runtimeInstructions: 'You are a scoped creative worker inside the OpenTales durable Novel Build workflow.',
+        userAuthority: ownerAuthority
+      })
+    ].join('\n\n');
+    const preferredModel = contract.modelPolicy.preferred;
+    const estimatedInputTokens = estimateTokens(system) + estimateTokens(contract.objective) + toolSchemaTokens;
+    if (estimatedInputTokens > requestInputTokens) throw new Error(`Assembled inference input ${estimatedInputTokens} exceeds maxInputTokens=${contract.budget.maxInputTokens}`);
+    const projectModel = await this.prisma.projectAiSettings.findUnique({ where: { projectId: claimed.run.projectId }, select: { model: true, providerKind: true } });
+    const trace = await this.startTrace(claimed, projectModel?.providerKind ?? null, preferredModel ?? projectModel?.model ?? null, inferencePack.identifiers, inferencePack.estimatedTokens, {
+      modelWindow: window, requestInputTokens, toolSchemaTokens,
+      contextBudgetTokens: contextTokenBudget, truncated: pack.truncated, sections: pack.sections,
+      taskBudget: contract.budget
+    });
     let internalBudgetExhausted = false;
     const guardedTools = guardWorkerTools(
       tools as unknown as ToolSet,
@@ -1273,7 +1285,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     execution.trace.provider ??= settings?.providerKind ?? null;
     execution.trace.model ??= judgeModelId;
     execution.trace.price ??= configuredJudgePrice;
-    const evidencePack = await this.buildJudgeEvidencePack(claimed, execution, contract.budget.maxInputTokens);
+    const evidencePack = await this.buildJudgeEvidencePack(claimed, execution, Math.min(contract.budget.maxInputTokens, numeric(jsonRecord(contract.metadata.contextWindow).inputTokens, contract.budget.maxInputTokens)));
     let judged: BuildJudgeExecutorOutput;
     try {
       judged = await this.judgeExecutor({
@@ -1304,7 +1316,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         + `(inputTokens=${judgeUsage.inputTokens}/${contract.budget.maxInputTokens}, `
         + `outputTokens=${judgeUsage.outputTokens}/${contract.budget.maxOutputTokens})`
       );
-      Object.assign(error, { providerUsageComplete: true });
+      Object.assign(error, { providerUsageComplete: true, workerToolCalls: execution.toolCalls, workerToolResults: execution.toolResults });
       throw error;
     }
     const parsed = judgeResultSchema.parse(judged.result);
@@ -1362,14 +1374,15 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const unitCharacters = Math.floor(maximumCharacters * (completePlanningCorpus ? 0 : 0.45));
     const diagnosticCharacters = Math.floor(maximumCharacters * 0.15);
     const toolCharacters = maximumCharacters - artifactCharacters - unitCharacters - diagnosticCharacters;
-    const artifactLimit = perItemLimit(artifactCharacters, artifacts.length, 300, 8_000);
-    const unitLimit = perItemLimit(unitCharacters, units.length, 300, 12_000);
+    const completeEvidenceFits = JSON.stringify({ artifacts: artifacts.map(a => a.content), units: units.map(u => u.branch.headVersion?.body), diagnostics: diagnostics.diagnostics }).length < maximumCharacters * 0.75;
+    const artifactLimit = completeEvidenceFits ? Number.MAX_SAFE_INTEGER : perItemLimit(artifactCharacters, artifacts.length, 300, 8_000);
+    const unitLimit = completeEvidenceFits ? Number.MAX_SAFE_INTEGER : perItemLimit(unitCharacters, units.length, 300, 12_000);
     const diagnosticLimit = perItemLimit(diagnosticCharacters, diagnostics.diagnostics.length * 3, 200, 2_000);
     const toolLimit = perItemLimit(toolCharacters, execution.toolCalls.length + execution.toolResults.length, 200, 2_000);
     const artifactContent = artifacts.map((artifact) => ({
       artifact,
       serialized: JSON.stringify(artifact.content),
-      limit: completePlanningCorpus ? completePlanningArtifactLimit(prismaArtifactType(artifact.type)) : artifactLimit
+      limit: completeEvidenceFits ? Number.MAX_SAFE_INTEGER : completePlanningCorpus ? completePlanningArtifactLimit(prismaArtifactType(artifact.type)) : artifactLimit
     }));
     const countsByType = Object.fromEntries([...new Set(artifacts.map((artifact) => prismaArtifactType(artifact.type)))].sort().map((type) => [
       type,
@@ -1480,12 +1493,9 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const runScope = jsonRecord(claimed.run.authorizationScope);
     const role = roleForTask(claimed.task.assignedAgent);
     const modelRoute = this.modelRoute(claimed.task);
-    const configuredModel = !modelRoute.preferred && claimed.task.type === 'create-story-brief'
-      ? await this.prisma.projectAiSettings.findUnique({
-        where: { projectId: claimed.run.projectId },
-        select: { providerKind: true, model: true }
-      })
-      : null;
+    const configuredModel = await this.prisma.projectAiSettings.findUnique({
+      where: { projectId: claimed.run.projectId }, select: { providerKind: true, model: true }
+    });
     const preferredModel = preferredStoryIntakeModel(
       claimed.task.type,
       configuredModel?.providerKind ?? null,
@@ -1511,6 +1521,11 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       policy.maxToolCalls,
       scopedContinuationRole ? Math.min(1_000, claimed.scopeUnitIds.length + 32) : defaults.maxToolCalls
     );
+    const contextWindow = resolveContextWindow(
+      [preferredModel ?? configuredModel?.model, ...modelRoute.fallbacks, process.env.AI_JUDGE_MODEL?.trim()].filter((id): id is string => Boolean(id))
+        .map(id => lookupExecutionModelPrice(this.modelPricing, configuredModel?.providerKind, id)),
+      numeric(policy.maxOutputTokens, defaults.maxOutputTokens)
+    );
     return taskContractSchema.parse({
       objective: typeof policy.objective === 'string'
         ? policy.objective
@@ -1524,7 +1539,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         ? criterionEntries.map(([id, value]) => ({ id, description: criterionDescription(id, value), check: id === 'rubric' ? 'rubric' : 'deterministic' }))
         : [{ id: 'task-complete', description: `${claimed.task.type} completes with persisted evidence.` }],
       budget: {
-        maxInputTokens: numeric(policy.maxInputTokens, defaults.maxInputTokens),
+        maxInputTokens: numeric(policy.maxInputTokens, contextWindow ? contextWindow.inputTokens * (maxToolCalls + 1) : defaults.maxInputTokens),
         maxOutputTokens: numeric(policy.maxOutputTokens, defaults.maxOutputTokens),
         maxToolCalls,
         maxDurationMs: numeric(policy.maxDurationMs, defaults.maxDurationMs),
@@ -1558,6 +1573,10 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       },
       skillVersions: jsonRecord(claimed.task.skillVersions),
       metadata: {
+        ...(contextWindow ? { contextWindow } : {}),
+        remainingRunTokens: claimed.run.maxTokens === null ? null : Math.max(0, claimed.run.maxTokens - claimed.run.tokensUsed),
+        remainingRunCostMicros: claimed.run.maxCostMicros === null ? null : Math.max(0, claimed.run.maxCostMicros - claimed.run.costMicrosUsed),
+        routePrices: Object.fromEntries(uniqueStrings([preferredModel ?? configuredModel?.model ?? '', ...modelRoute.fallbacks]).filter(Boolean).map(id => [id, lookupExecutionModelPrice(this.modelPricing, configuredModel?.providerKind, id)])),
         taskKey: claimed.task.key,
         taskType: claimed.task.type,
         phase: claimed.task.phase,
@@ -1814,7 +1833,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     return true;
   }
 
-  private async startTrace(claimed: ClaimedTask, provider: string | null, model: string | null, retrievedArtifactIds: string[], contextTokenCount: number): Promise<PendingTrace> {
+  private async startTrace(claimed: ClaimedTask, provider: string | null, model: string | null, retrievedArtifactIds: string[], contextTokenCount: number, contextCoverage?: Record<string, unknown>): Promise<PendingTrace> {
     const idempotencyKey = `worker-trace:${claimed.task.id}:${claimed.task.attempts}:${claimed.task.revisionIteration}`;
     const startedAt = new Date();
     const price = lookupExecutionModelPrice(this.modelPricing, provider, model);
@@ -1843,7 +1862,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
           provenance: jsonRecord(claimed.task.executionPolicy).skillProvenance ?? []
         }) as JsonValue,
         toolSchemaVersions: { storyIntelligence: 2, buildWorkflow: 2 },
-        inputs: { taskKey: claimed.task.key, taskType: claimed.task.type, dependencyIds: claimed.task.dependencyIds, inputArtifactIds: claimed.task.inputArtifactIds, scopeUnitIds: claimed.task.scopeUnitIds },
+        inputs: { ...(contextCoverage ? { contextCoverage: jsonSafe(contextCoverage) as JsonValue } : {}), taskKey: claimed.task.key, taskType: claimed.task.type, dependencyIds: claimed.task.dependencyIds, inputArtifactIds: claimed.task.inputArtifactIds, scopeUnitIds: claimed.task.scopeUnitIds },
         retrievedArtifactIds,
         contextTokenCount,
         startedAt: startedAt.toISOString()
@@ -2033,6 +2052,10 @@ export function defaultTaskBudget(task: BuildTask): {
   maxToolCalls: number;
   maxDurationMs: number;
 } {
+  if (task.key === 'planning-quality-gate') {
+    // Its independent judge receives the complete planning corpus, not a shard.
+    return { maxInputTokens: 256_000, maxOutputTokens: 12_000, maxToolCalls: 16, maxDurationMs: 15 * 60_000 };
+  }
   if (AGGREGATE_ARTIFACT_TASK_TYPES.has(task.type)) {
     return {
       maxInputTokens: 256_000,
@@ -2259,7 +2282,7 @@ function perItemLimit(totalCharacters: number, itemCount: number, minimum: numbe
 export function judgeEvidenceCharacterBudget(maxInputTokens: number, completePlanningCorpus = false): number {
   return Math.max(
     12_000,
-    Math.min(completePlanningCorpus ? 220_000 : 80_000, Math.max(0, maxInputTokens - 8_000) * (completePlanningCorpus ? 3 : 2))
+    Math.max(0, maxInputTokens - 8_000) * 2
   );
 }
 
@@ -2417,6 +2440,9 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
     const modelId = candidates[attempt];
     const actualModelId = modelId ?? input.defaultModelId ?? input.contract.modelPolicy.preferred ?? null;
     try {
+      const toolSchemaTokens = estimateTokens(JSON.stringify(await Promise.all(Object.entries(input.tools).map(async ([name, definition]) => ({
+        name, description: definition.description, inputSchema: await asSchema(definition.inputSchema).jsonSchema
+      })))));
       const model = await input.resolveModel(modelId);
       let streamError: unknown;
       const generation = streamText({
@@ -2433,9 +2459,29 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
             ? { reasoningEffort: 'low', textVerbosity: 'low' }
             : {}
         ),
-        prepareStep: input.contract.metadata.taskType === 'create-story-brief'
-          ? ({ steps }) => prepareStoryBriefStep(steps)
-          : undefined,
+        prepareStep: ({ steps, messages }) => {
+          const requestLimit = jsonRecord(input.contract.metadata.contextWindow).inputTokens;
+          const estimate = estimateTokens(JSON.stringify(messages)) + estimateTokens(input.system) + toolSchemaTokens + 4_000;
+          const usedTokens = cumulativeInputTokens + cumulativeOutputTokens + steps.reduce((sum, step) => sum + (step.usage.inputTokens ?? 0) + (step.usage.outputTokens ?? 0), 0);
+          const remainingRunTokens = input.contract.metadata.remainingRunTokens;
+          if (typeof remainingRunTokens === 'number' && usedTokens + estimate + input.contract.budget.maxOutputTokens > remainingRunTokens) {
+            throw new Error(`Token budget exhausted before the next model request: ${remainingRunTokens - usedTokens} tokens remain, but approximately ${estimate + input.contract.budget.maxOutputTokens} are needed. Increase the build budget or split the task.`);
+          }
+          const price = modelPriceSchema.safeParse(jsonRecord(input.contract.metadata.routePrices)[actualModelId ?? '']);
+          const remainingRunCost = input.contract.metadata.remainingRunCostMicros;
+          if (price.success && typeof remainingRunCost === 'number') {
+            const previousCost = usageByModel.reduce((sum, usage) => {
+              const previousPrice = modelPriceSchema.safeParse(jsonRecord(input.contract.metadata.routePrices)[usage.modelId]);
+              return sum + (previousPrice.success ? calculateModelCostMicros(previousPrice.data, usage.inputTokens, usage.outputTokens) : 0);
+            }, 0);
+            const stepCost = steps.reduce((sum, step) => sum + calculateModelCostMicros(price.data, step.usage.inputTokens ?? 0, step.usage.outputTokens ?? 0), 0);
+            if (previousCost + stepCost + calculateModelCostMicros(price.data, estimate, input.contract.budget.maxOutputTokens) > remainingRunCost) throw new Error('Cost budget exhausted before the next model request; increase the build cost budget or split the task.');
+          }
+          if (typeof requestLimit === 'number') {
+            if (estimate > requestLimit) throw new Error(`Model context window exhausted by tool history (${estimate} estimated tokens; ${requestLimit} available). Split this task or retrieve smaller records; no story context was silently removed.`);
+          }
+          return input.contract.metadata.taskType === 'create-story-brief' ? prepareStoryBriefStep(steps) : {};
+        },
         onError: ({ error }) => { streamError ??= error; }
       });
       const [usage, text, steps] = await Promise.all([
@@ -3017,4 +3063,15 @@ function parseModelRouting(value: string | undefined): Partial<Record<'fast' | '
     result[tier] = uniqueStrings(models as string[]);
   }
   return result;
+}
+
+/** Shared request window across all reachable routes, including an independent judge. */
+export function resolveContextWindow(prices: Array<ModelPrice | null>, outputTokens: number): { inputTokens: number; contextTokens: number } | null {
+  if (!prices.length || prices.some(price => !price?.limits)) return null;
+  const contextTokens = Math.min(...prices.map(price => price!.limits!.context));
+  const outputLimit = Math.min(...prices.map(price => price!.limits!.output ?? Number.MAX_SAFE_INTEGER));
+  if (outputTokens > outputLimit) throw new Error(`Requested output budget ${outputTokens} exceeds the selected model output limit ${outputLimit}`);
+  const inputTokens = Math.min(contextTokens - outputTokens, ...prices.map(price => price!.limits!.input ?? price!.limits!.context));
+  if (inputTokens < 2_000) throw new Error('Selected model has insufficient context after reserving output tokens');
+  return { inputTokens, contextTokens };
 }

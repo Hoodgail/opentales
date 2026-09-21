@@ -31,6 +31,7 @@ const {
   validateBeatShardOperations,
   validateBeatReferences,
   judgeEvidenceCharacterBudget,
+  resolveContextWindow,
   lookupExecutionModelPrice,
   measuredInvocationUsage,
   normalizeJudgeResultCandidate,
@@ -224,9 +225,9 @@ describe('durable Novel Build execution contract', () => {
       scores: { completeness: 0.9, causality: 0.85, coherence: 0.88, contract: 0.95 },
       feedback: 'Recovered from the provider tool-call arguments.'
     });
-    expect(judgeEvidenceCharacterBudget(96_000)).toBe(80_000);
+    expect(judgeEvidenceCharacterBudget(96_000)).toBe(176_000);
     expect(judgeEvidenceCharacterBudget(12_000)).toBe(12_000);
-    expect(judgeEvidenceCharacterBudget(96_000, true)).toBe(220_000);
+    expect(judgeEvidenceCharacterBudget(96_000, true)).toBe(176_000);
     expect(completePlanningArtifactLimit('scene-plan')).toBe(700);
     expect(completePlanningArtifactLimit('open-questions')).toBe(6_000);
   });
@@ -591,3 +592,14 @@ function index(order: string[], key: string): number {
   expect(value, `${key} should be in execution order`).toBeGreaterThanOrEqual(0);
   return value;
 }
+
+
+it('uses catalog windows, reserves output, and respects the smallest fallback route', () => {
+  const price = { inputMicrosPerMillion: 1, outputMicrosPerMillion: 1, source: 'test', version: '1' };
+  const large = { ...price, limits: { context: 1048576, output: 65536 } };
+  const small = { ...price, limits: { context: 128000, input: 120000, output: 32000 } };
+  expect(resolveContextWindow([large], 12000)).toEqual({ contextTokens: 1048576, inputTokens: 1036576 });
+  expect(resolveContextWindow([large, small], 12000)?.inputTokens).toBe(116000);
+  expect(resolveContextWindow([large, null], 12000)).toBeNull();
+  expect(() => resolveContextWindow([small], 48000)).toThrow('output limit');
+});

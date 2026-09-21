@@ -71,6 +71,14 @@ try {
   for (const taskKey of (process.env.LIVE_RERUN_TASK ?? '').split(',').map(key => key.trim()).filter(Boolean)) {
     const run = await prisma.buildRun.findUniqueOrThrow({ where: { id: buildRunId } });
     const task = await prisma.buildTask.findFirstOrThrow({ where: { buildRunId, key: taskKey } });
+    if (process.env.LIVE_REPLAN_DIRECTIVE_FILE) {
+      await new NovelBuildUseCase(prisma).replan(run.authorizedById ?? run.createdById!, run.projectId, run.id, {
+        idempotencyKey: randomUUID(), expectedRevision: run.revision, fromTaskId: task.id,
+        directive: await readFile(process.env.LIVE_REPLAN_DIRECTIVE_FILE, 'utf8'), pinnedArtifactIds: []
+      });
+      delete process.env.LIVE_REPLAN_DIRECTIVE_FILE;
+      continue;
+    }
     await new NovelBuildUseCase(prisma).rerun(run.authorizedById ?? run.createdById!, run.projectId, run.id, task.id, {
       idempotencyKey: randomUUID(), expectedRevision: run.revision,
       reason: 'Explicit live validation rerun after correcting the implementation; invalidate dependent outputs.'
