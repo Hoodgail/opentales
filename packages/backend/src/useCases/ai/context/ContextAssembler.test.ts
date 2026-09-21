@@ -1,7 +1,34 @@
 import { describe, expect, it } from 'vitest';
-import { estimateTokens, packContextSections, selectTemporalState, type ContextSection } from './ContextAssembler.js';
+import { chapterAllocationIndex, estimateTokens, packContextSections, selectTemporalState, type ContextSection } from './ContextAssembler.js';
 
 describe('context packing', () => {
+it('preserves every declared scene key from 32 verbose briefs through model-visible packing', () => {
+  const rows = Array.from({ length: 32 }, (_, i) => ({ id: `brief-${i + 1}`, type: 'CHAPTER_BRIEF', content: {
+    chapterKey: `chapter-${i + 1}`, number: i + 1, purpose: 'Long chapter purpose. '.repeat(300),
+    sceneKeys: Array.from({ length: i < 14 ? 4 : 3 }, (_, j) => `chapter-${i + 1}-scene-${j + 1}`)
+  } }));
+  const task = { metadata: { taskType: 'create-scene-plans' } };
+  const index = chapterAllocationIndex(rows, task);
+  const pack = packContextSections([
+    { kind: 'story-brief', title: 'Brief', content: 'Prose '.repeat(4000), identifiers: [], priority: 100, maxTokens: 1000, required: true },
+    { kind: 'active-task', title: 'Target', content: rows.map(row => JSON.stringify(row).slice(0, 500)).join('\n'), protectedContent: index, identifiers: rows.map(row => row.id), priority: 90, maxTokens: 5000, required: true }
+  ], 5000);
+  const body = JSON.parse(pack.text.split('\n').slice(1, -1).join('\n')).content as string;
+  const declaration = body.split('chapter-local ordinals starting at 1):\n')[1].split('\n')[0];
+  const chapters = JSON.parse(declaration) as Array<{ sceneKeys: string[] }>;
+  expect(chapters).toHaveLength(32);
+  expect(chapters.flatMap(row => row.sceneKeys)).toEqual(rows.flatMap(row => row.content.sceneKeys));
+  expect(pack.estimatedTokens).toBeLessThanOrEqual(5000);
+  expect(pack.truncated).toBe(true);
+  const shardIndex = chapterAllocationIndex(rows, { metadata: { taskType: 'create-scene-plan-shard', shard: { chapterNumber: 32 } } });
+  expect(shardIndex).toContain('chapter-32-scene-3');
+  expect(shardIndex).not.toContain('chapter-31');
+});
+
+it('fails before inference when required structural inputs are absent or cannot fit', () => {
+  expect(() => chapterAllocationIndex([], { metadata: { taskType: 'create-scene-plans' } })).toThrow('missing its persisted chapter briefs');
+  expect(() => packContextSections([{ kind: 'active-task', title: 'Target', content: 'excerpt', protectedContent: 'key'.repeat(2000), identifiers: [], priority: 1, maxTokens: 1000, required: true }], 1000)).toThrow('Split the task inputs');
+});
 it('respects its hard token budget and retains retrieval identifiers', () => {
   const sections: ContextSection[] = [
     { kind: 'story-brief', title: 'Brief', content: 'A'.repeat(4_000), identifiers: ['artifact:brief'], priority: 100, maxTokens: 400 },

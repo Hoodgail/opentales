@@ -77,7 +77,7 @@ const DIAGNOSTIC_TOOLS = new Set(['runStoryLint', 'reportTaskResult']);
 const ARTIFACT_WRITE_TOOLS = new Set(['applyArtifactBatch', 'createCheckpoint', 'reportTaskResult']);
 const DRAFT_WRITE_TOOLS = new Set(['applyArtifactBatch', 'applyBuildUnitPatch', 'updateChapter', 'updateScene', 'reportTaskResult', 'createCheckpoint']);
 const CANON_WRITE_TOOLS = new Set(['applyArtifactBatch', 'commitCanonDelta', 'linkSetupPayoff', 'reportTaskResult']);
-const BUILD_BOUND_READ_TOOLS = new Set(['getBuildState', 'listBuildUnits', 'readBuildUnit', 'searchStory', 'findReferences', 'queryCanon', 'queryTimeline', 'queryEntityState', 'queryOpenLoops', 'runStoryLint', 'getArcState']);
+const BUILD_BOUND_READ_TOOLS = new Set(['getBuildState', 'listBuildUnits', 'readBuildUnit', 'listBuildArtifacts', 'readBuildArtifact', 'readBuildCompilation', 'compareBuildManuscript', 'listBuildReviews', 'readBuildReview', 'searchStory', 'findReferences', 'queryCanon', 'queryTimeline', 'queryEntityState', 'queryOpenLoops', 'runStoryLint', 'getArcState']);
 
 function allowedTools(role: RuntimeRole, isPrimary: boolean, contract: TaskContract | null): Set<string> | null {
   if (isPrimary && role === 'orchestrator') return null;

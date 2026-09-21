@@ -22,6 +22,8 @@ export interface ContextSection {
   priority: number;
   maxTokens: number;
   required?: boolean;
+  /** Structural identifiers must survive packing intact, or fail before inference. */
+  protectedContent?: string;
 }
 
 export interface AssembledContextPack {
@@ -83,7 +85,7 @@ export class ContextAssembler {
       chapterId ? this.loadChapter(input.projectId, chapterId, input.task?.scope.buildRunId) : Promise.resolve(null),
       this.loadDynamicRows('storyArtifact', { projectId: input.projectId, ...(input.task?.scope.buildRunId ? { buildRunId: input.task.scope.buildRunId } : {}), status: { in: ['VALIDATED', 'ACCEPTED'] }, invalidatedAt: null }, 80),
       input.task?.scope.buildRunId && input.task.inputs.length
-        ? this.loadDynamicRows('storyArtifact', { projectId: input.projectId, buildRunId: input.task.scope.buildRunId, id: { in: input.task.inputs.filter((item) => item.type !== 'chapter' && item.type !== 'scene' && item.type !== 'character' && item.type !== 'location').map((item) => item.id) } }, 200)
+        ? this.loadDynamicRows('storyArtifact', { projectId: input.projectId, buildRunId: input.task.scope.buildRunId, id: { in: input.task.inputs.filter((item) => item.type !== 'chapter' && item.type !== 'scene' && item.type !== 'character' && item.type !== 'location').map((item) => item.id) } }, input.task.inputs.length)
         : Promise.resolve([]),
       this.loadDynamicRows('canonFact', { projectId: input.projectId, ...(input.task?.scope.buildRunId ? { buildRunId: input.task.scope.buildRunId } : {}), status: 'CANONICAL', isCurrent: true, invalidatedAt: null }, 2_000),
       this.loadDynamicRows('entityState', { projectId: input.projectId, ...(input.task?.scope.buildRunId ? { buildRunId: input.task.scope.buildRunId } : {}), status: 'ACTIVE', isCurrent: true, invalidatedAt: null }, 5_000),
@@ -170,7 +172,8 @@ export class ContextAssembler {
         identifiers: compact([activeChapter?.id, targetScene?.id, targetUnit?.id, ...inputArtifacts.map(rowIdentifier), ...priorEvaluations.map(rowIdentifier), ...buildUnits.map((unit) => unit.id)]),
         priority: 96,
         maxTokens: 5_000,
-        required: true
+        required: true,
+        protectedContent: chapterAllocationIndex(inputArtifacts, input.task)
       },
       {
         kind: 'characters',
@@ -425,17 +428,21 @@ export function packContextSections(sections: ContextSection[], tokenBudget: num
     const section = orderedSections[index];
     const content = section.content.trim();
     if (!content) continue;
-    const headerTokens = estimateTokens(`${section.title}\n${section.identifiers.join(', ')}`) + 4;
+    const headerTokens = serializedTokens(`${section.title}\n${section.identifiers.join(', ')}`) + 4;
+    const protectedText = section.protectedContent?.trim() ?? '';
+    const protectedTokens = serializedTokens(protectedText) + (protectedText ? 2 : 0);
     const reservedForRequired = orderedSections.slice(index + 1)
       .filter((candidate) => candidate.required && candidate.content.trim())
-      .reduce((sum, candidate) => sum + estimateTokens(`${candidate.title}\n${candidate.identifiers.join(', ')}`) + 4 + Math.min(128, candidate.maxTokens), 0);
+      .reduce((sum, candidate) => sum + serializedTokens(`${candidate.title}\n${candidate.identifiers.join(', ')}`) + 4 + Math.max(Math.min(128, candidate.maxTokens), serializedTokens(candidate.protectedContent ?? '') + 2), 0);
     const available = Math.min(section.maxTokens, Math.max(0, remaining - headerTokens - reservedForRequired));
+    if (protectedTokens > available) throw new Error(`Required structural context for ${section.title} exceeds its context budget. Split the task inputs; do not ask the author to reconstruct persisted scene keys.`);
     if (available <= 0) {
       truncated = true;
       continue;
     }
-    const bounded = truncateToTokens(content, available);
-    const tokens = estimateTokens(bounded.text);
+    const excerpt = truncateSerialized(content, available - protectedTokens);
+    const bounded = { text: [protectedText, excerpt.text].filter(Boolean).join('\n\n'), truncated: excerpt.truncated };
+    const tokens = serializedTokens(bounded.text);
     if (tokens === 0) continue;
     remaining -= tokens + headerTokens;
     truncated ||= bounded.truncated;
@@ -484,6 +491,23 @@ export function packContextSections(sections: ContextSection[], tokenBudget: num
 
 export function estimateTokens(value: string): number {
   return value ? Math.ceil(value.length / 4) : 0;
+}
+
+// JSON and delimiter escaping can expand structural context substantially.
+function serializedTokens(value: string): number {
+  return value ? estimateTokens(serializeUntrustedData('x', value)) - estimateTokens(serializeUntrustedData('x', '')) + 1 : 0;
+}
+
+function truncateSerialized(value: string, budget: number): { text: string; truncated: boolean } {
+  if (serializedTokens(value) <= budget) return { text: value, truncated: false };
+  let low = 0;
+  let high = Math.min(value.length, budget * 4);
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (serializedTokens(value.slice(0, mid)) <= budget) low = mid;
+    else high = mid - 1;
+  }
+  return { text: value.slice(0, low), truncated: true };
 }
 
 function truncateToTokens(value: string, maxTokens: number): { text: string; truncated: boolean } {
@@ -787,6 +811,18 @@ function formatImmutableInputs(rows: Record<string, unknown>[]): string {
     contentHash: row.contentHash,
     content: excerpt(compactJson(row.content ?? row), perArtifact)
   })).join('\n');
+}
+
+export function chapterAllocationIndex(rows: Record<string, unknown>[], task: Pick<TaskContract, 'metadata'> | null): string {
+  if (!['create-scene-plans', 'create-scene-plan-shard'].includes(String(task?.metadata.taskType))) return '';
+  const shard = isRecord(task?.metadata.shard) ? task.metadata.shard : {};
+  const chapters = rows.filter(row => String(row.type).toLowerCase().replace(/_/g, '-') === 'chapter-brief')
+    .map(row => ({ row, content: isRecord(row.content) ? row.content : {} }))
+    .filter(({ content }) => typeof shard.chapterNumber !== 'number' || content.number === shard.chapterNumber)
+    .sort((a, b) => Number(a.content.number) - Number(b.content.number))
+    .map(({ row, content }) => ({ artifactId: row.id, chapterKey: content.chapterKey, number: content.number, sceneKeys: content.sceneKeys }));
+  if (!chapters.length) throw new Error('Scene planning is missing its persisted chapter briefs. Repair the task input binding before inference.');
+  return `Complete declared chapter allocation (sceneKeys order defines chapter-local ordinals starting at 1):\n${JSON.stringify(chapters)}\nUse readBuildArtifact for full prose and other inputs; excerpts below may be truncated. Do not ask the author for data already persisted in this build.`;
 }
 
 export interface SelectedTemporalState {

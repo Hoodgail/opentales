@@ -1058,6 +1058,19 @@ function deterministicExecutor(prisma: PrismaClient, buildRunId: string, scale?:
     let planningOperations = scale
       ? productionPlanningArtifactsFor(input.contract.outputs.map((output) => output.type), input.contract.scope.buildTaskId ?? taskKey, input.contract.metadata, scale)
       : planningArtifactsFor(input.contract.outputs.map((output) => output.type), input.contract.scope.buildTaskId ?? taskKey);
+    if (scale && taskType === 'create-scene-plan-shard') {
+      const chapterNumber = Number((input.contract.metadata.shard as Record<string, unknown>).chapterNumber);
+      const briefs = await prisma.storyArtifact.findMany({ where: { buildRunId, type: 'CHAPTER_BRIEF', invalidatedAt: null } });
+      const brief = briefs.find(row => (row.content as Record<string, unknown>).number === chapterNumber)!;
+      const content = brief.content as { sceneKeys: string[]; purpose: string };
+      // Exercise the exact model boundary, not just fixture-generated outputs.
+      for (const key of content.sceneKeys) expect(input.system).toContain(key);
+      expect(input.system).toContain('Complete declared chapter allocation');
+      const retrieved = await call('readBuildArtifact', { buildRunId, artifactId: brief.id });
+      expect(JSON.stringify(retrieved)).toContain(content.purpose);
+      expect(planningOperations.map(op => (op.content as Record<string, unknown>).sceneKey)).toEqual(content.sceneKeys);
+      await expect(call('readBuildArtifact', { buildRunId: 'another-build', artifactId: brief.id })).rejects.toThrow();
+    }
     if (scale && taskType === 'create-act-architecture') {
       const beatArtifacts = await prisma.storyArtifact.findMany({
         where: { buildRunId, type: 'BEAT', invalidatedAt: null, status: { in: ['VALIDATED', 'ACCEPTED'] } }
@@ -1210,6 +1223,9 @@ function productionPlanningArtifactsFor(
   const beatKeys = Array.from({ length: scale.scenes }, (_, index) => `beat-${index + 1}`);
   const chapterKeys = Array.from({ length: scale.chapters }, (_, index) => `chapter-${index + 1}`);
   const sceneCounts = Array.from({ length: scale.chapters }, (_, index) => Math.floor(scale.scenes / scale.chapters) + (index < scale.scenes % scale.chapters ? 1 : 0));
+  // Deliberately differ from the scheduler's provisional even distribution.
+  sceneCounts[0] -= 1;
+  sceneCounts[scale.chapters - 1] += 1;
   const chapterStart = (chapterNumber: number) => sceneCounts.slice(0, chapterNumber - 1).reduce((sum, count) => sum + count, 0) + 1;
   const shard = metadata.shard && typeof metadata.shard === 'object' && !Array.isArray(metadata.shard) ? metadata.shard as Record<string, unknown> : {};
   return types.flatMap((type) => {
@@ -1231,7 +1247,7 @@ function productionPlanningArtifactsFor(
     if (type === 'chapter-brief') return chapterKeys.map((chapterKey, index) => {
       const start = chapterStart(index + 1);
       const sceneKeys = Array.from({ length: sceneCounts[index] }, (_, offset) => `scene-${start + offset}`);
-      return operation(type, chapterKey, `Chapter ${index + 1}`, { chapterKey, number: index + 1, title: `Chapter ${index + 1}`, actKey: 'act-1', purpose: `Escalate restoration consequence ${index + 1}.`, sceneKeys, threadRefs: [{ type: 'plot-thread', id: 'main-thread', key: 'main-thread' }], entryState: { restoration: index }, exitState: { restoration: index + 1 }, targetWordCount: Math.round(scale.targetWords / scale.chapters) });
+      return operation(type, chapterKey, `Chapter ${index + 1}`, { chapterKey, number: index + 1, title: `Chapter ${index + 1}`, actKey: 'act-1', purpose: `Escalate restoration consequence ${index + 1}. `.repeat(80), sceneKeys, threadRefs: [{ type: 'plot-thread', id: 'main-thread', key: 'main-thread' }], entryState: { restoration: index }, exitState: { restoration: index + 1 }, targetWordCount: Math.round(scale.targetWords / scale.chapters) });
     });
     if (type === 'scene-plan') {
       const chapterNumber = Number(shard.chapterNumber ?? 1);

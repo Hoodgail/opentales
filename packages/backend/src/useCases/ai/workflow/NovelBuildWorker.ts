@@ -824,7 +824,8 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     };
     const proceduralSkills = activeSkills.filter((skill) => skill.manifest.kind !== 'workflow');
     const capabilitySkills = proceduralSkills.length ? proceduralSkills : activeSkills;
-    const skillAllowedTools = [...new Set(capabilitySkills.flatMap((skill) => skill.manifest.allowedTools))];
+    // Excerpts are bounded; every worker needs a build-scoped read-back path.
+    const skillAllowedTools = [...new Set([...capabilitySkills.flatMap((skill) => skill.manifest.allowedTools), 'listBuildArtifacts', 'readBuildArtifact'])];
     const system = [
       renderInferenceLayers({
         role,
@@ -2075,7 +2076,7 @@ export function objectiveForTask(task: BuildTask, buildObjective: string, manife
       ? 'Set mainThreadKey to the main plot-thread content.threadKey; the build validator also accepts that plot-thread artifact\'s exact stable key.'
       : '',
     ['create-scene-plans', 'create-scene-plan-shard'].includes(task.type)
-      ? 'Use exactly the chapter briefs\' declared sceneKeys. Preserve each declared chapterKey and set ordinal to its 1-based position within that chapter; never redistribute scenes or use a book-global ordinal.'
+      ? 'Use the complete declared chapter allocation index and exactly the chapter briefs\' sceneKeys. Preserve chapterKey and ordinal (1-based position within that chapter). Read full inputs with readBuildArtifact when excerpts are truncated. These are persisted data, not questions for the author. For a chapter shard create only the assigned chapter\'s scenes; its declared allocation overrides the whole-book cardinality.'
       : '',
     requiredTypes.length
       ? 'Reference type is the entity kind (character, location, scene-plan, etc.), never a relationship such as sibling; put relationship meaning in label. Every typed reference must use an exact stable id or key from a persisted input artifact or a sibling output; do not invent namespaced aliases such as character:name, thread:name, setup:name, or location:name.'

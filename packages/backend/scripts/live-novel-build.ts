@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { PrismaClient } from '@prisma/client';
 import { NovelBuildUseCase } from '../src/useCases/novelBuild/NovelBuildUseCase.js';
 import { ARTIFACT_TYPES } from '../src/useCases/novelBuild/schemas.js';
@@ -16,6 +16,20 @@ const model = process.env.LIVE_MODEL;
 if (!apiKey || !baseUrl || !model) throw new Error('LIVE_API_KEY, LIVE_BASE_URL and LIVE_MODEL are required');
 const maxTokens = process.env.LIVE_MAX_TOKENS ? Number(process.env.LIVE_MAX_TOKENS) : 5_000_000;
 assert(Number.isSafeInteger(maxTokens) && maxTokens > 0, 'LIVE_MAX_TOKENS must be a positive safe integer');
+function integerSetting(name: string, fallback: number): number {
+  const value = process.env[name] ? Number(process.env[name]) : fallback;
+  assert(Number.isSafeInteger(value) && value > 0, `${name} must be a positive safe integer`);
+  return value;
+}
+const targetWordCount = integerSetting('LIVE_TARGET_WORDS', 1200);
+const minWordCount = integerSetting('LIVE_MIN_WORDS', 1000);
+const maxWordCount = integerSetting('LIVE_MAX_WORDS', 1800);
+const targetChapterCount = integerSetting('LIVE_CHAPTERS', 2);
+const targetSceneCount = integerSetting('LIVE_SCENES', 3);
+const targetCharacterCount = integerSetting('LIVE_CHARACTERS', 2);
+const maxCostMicros = integerSetting('LIVE_MAX_COST_MICROS', 200_000_000);
+const brainstorm = process.env.LIVE_BRAINSTORM_FILE ? await readFile(process.env.LIVE_BRAINSTORM_FILE, 'utf8') : 'At a coastal radio station scheduled for demolition at dawn, Mara receives a recording of her late father asking her to keep transmitting. Her practical brother Ivo arrives to disconnect the power. The signal is an old emergency relay, not a ghost. Together they must choose what to save before the tide floods the transmitter room. End with a concrete costly choice, a repaired relationship, and no supernatural reversal.';
+const objective = process.env.LIVE_OBJECTIVE ?? `Write a complete polished ${targetWordCount}-word story in ${targetChapterCount} chapters and ${targetSceneCount} causal scenes. Use specific sensory details, restrained emotion, natural dialogue, and a resolved ending. Planning must serve the actual finished prose.`;
 const prisma = new PrismaClient();
 const output = process.env.LIVE_OUTPUT_DIR ?? '/tmp/opentales-live-result';
 await mkdir(output, { recursive: true });
@@ -25,17 +39,16 @@ try {
   if (!buildRunId) {
     const user = await prisma.user.create({ data: { username: `live-${suffix}`, email: `${suffix}@example.test`, passwordHash: 'no-login' } });
     const org = await prisma.org.create({ data: { slug: `live-${suffix}`, name: 'Live build validation', memberships: { create: { userId: user.id, role: 'OWNER' } } } });
-    const project = await prisma.project.create({ data: { orgId: org.id, slug: 'last-signal', title: 'The Last Signal', genre: 'literary speculative fiction' } });
+    const project = await prisma.project.create({ data: { orgId: org.id, slug: 'live-story', title: process.env.LIVE_TITLE ?? 'The Last Signal', genre: 'literary speculative fiction' } });
     await prisma.projectAiSettings.create({ data: { projectId: project.id, enabled: true, providerKind: 'OPENAI_COMPATIBLE', baseUrl, model, apiKey: encryptSecret(apiKey) } });
     const run = await new NovelBuildUseCase(prisma).create(user.id, project.id, {
       idempotencyKey: suffix,
-      brainstorm: 'At a coastal radio station scheduled for demolition at dawn, Mara receives a recording of her late father asking her to keep transmitting. Her practical brother Ivo arrives to disconnect the power. The signal is an old emergency relay, not a ghost. Together they must choose what to save before the tide floods the transmitter room. End with a concrete costly choice, a repaired relationship, and no supernatural reversal.',
-      objective: 'Write a complete polished 1200-word short story in two chapters and three causal scenes. Use specific sensory details, restrained emotion, natural dialogue, and a resolved ending. Planning must serve the actual finished prose.',
-      targetWordCount: 1200, minWordCount: 1000, maxWordCount: 1800,
-      targetChapterCount: 2, targetSceneCount: 3, targetCharacterCount: 2,
+      brainstorm, objective,
+      targetWordCount, minWordCount, maxWordCount,
+      targetChapterCount, targetSceneCount, targetCharacterCount,
       autonomyMode: 'autonomous-draft',
       authorizationScope: { artifactTypes: [...ARTIFACT_TYPES], chapterIds: [], sceneIds: [], allowPlanningArtifacts: true, allowCanonWrites: true, allowChapterWrites: true, allowSceneWrites: true, allowDiagnostics: true, expiresAt: null },
-      maxTokens, maxCostMicros: 200_000_000
+      maxTokens, maxCostMicros
     });
     buildRunId = run.id;
     await writeFile(`${output}/run-id.txt`, buildRunId);
@@ -63,7 +76,7 @@ try {
     });
   }
   let completed = false;
-  for (let sweep = 0; sweep < 500; sweep++) {
+  for (let sweep = 0; sweep < integerSetting('LIVE_MAX_SWEEPS', 10000); sweep++) {
     const count = await resumeRunnableBuilds(prisma, { buildRunIds: [buildRunId], maxTasksPerSweep: 1 });
     const run = await prisma.buildRun.findUniqueOrThrow({ where: { id: buildRunId } });
     const tasks = await prisma.buildTask.findMany({ where: { buildRunId }, orderBy: { createdAt: 'asc' }, select: { key: true, status: true, attempts: true, lastError: true } });
@@ -77,10 +90,12 @@ try {
       if (run.status === 'COMPLETED') {
         assert(tasks.every(task => task.status === 'DONE'), 'Every workflow task must be DONE');
         const scenes = orderedScenes;
-        assert.equal(scenes.length, 3);
+        const target = (run.manifest as { target: { targetSceneCount: number; targetChapterCount: number; minWordCount: number; maxWordCount: number } }).target;
+        assert.equal(scenes.length, target.targetSceneCount);
+        assert.equal(units.filter(unit => unit.kind === 'CHAPTER' && !unit.invalidatedAt).length, target.targetChapterCount);
         assert(scenes.every(unit => (unit.branch.headVersion?.wordCount ?? 0) > 0), 'Every scene needs saved prose');
         const words = scenes.reduce((sum, unit) => sum + (unit.branch.headVersion?.wordCount ?? 0), 0);
-        assert(words >= 1000 && words <= 1800, `Manuscript has ${words} words, expected 1000–1800`);
+        assert(words >= target.minWordCount && words <= target.maxWordCount, `Manuscript has ${words} words, expected ${target.minWordCount}–${target.maxWordCount}`);
         const exports = await prisma.projectExport.findMany({ where: { buildRunId, status: 'READY', deletedAt: null } });
         assert(exports.length > 0, 'A completed build needs a real export');
         const artifact = await new ProjectExportUseCase(prisma).download(run.authorizedById ?? run.createdById!, run.projectId, exports[0].id);
