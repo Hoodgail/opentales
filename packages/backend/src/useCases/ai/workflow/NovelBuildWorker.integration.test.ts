@@ -1120,6 +1120,11 @@ function deterministicExecutor(prisma: PrismaClient, buildRunId: string, scale?:
       expect(JSON.stringify(retrieved)).toContain(content.purpose);
       expect(planningOperations.map(op => (op.content as Record<string, unknown>).sceneKey)).toEqual(content.sceneKeys);
       await expect(call('readBuildArtifact', { buildRunId: 'another-build', artifactId: brief.id })).rejects.toThrow();
+      const first = planningOperations[0]!;
+      await expect(call('applyArtifactBatch', {
+        buildRunId, taskId: input.contract.scope.buildTaskId, idempotencyKey: `${taskKey}:undeclared-dependency`,
+        operations: [{ ...first, content: { ...(first.content as Record<string, unknown>), dependencies: ['invented-future-scene'] } }]
+      })).rejects.toThrow('undeclared dependency');
     }
     if (scale && taskType === 'create-act-architecture') {
       const beatArtifacts = await prisma.storyArtifact.findMany({

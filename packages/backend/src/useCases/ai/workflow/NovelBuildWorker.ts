@@ -988,6 +988,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         const chapterKey = typeof content.chapterKey === 'string' ? content.chapterKey : '';
         return stringArray(content.sceneKeys).map((sceneKey, index) => [sceneKey, { chapterKey, ordinal: index + 1 }] as const);
       }));
+      const declaredSceneKeys = new Set(chapterBriefs.flatMap(artifact => stringArray(jsonRecord(artifact.content).sceneKeys)));
       const proposed = operations
         .map(jsonRecord)
         .filter((operation) => operation.action === 'upsert' && operation.type === 'scene-plan');
@@ -999,6 +1000,9 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
           throw new Error(
             `Scene-plan '${sceneKey || '(missing sceneKey)'}' must use an exact chapter-brief sceneKey, chapterKey, and chapter-local ordinal`
           );
+        }
+        for (const dependency of stringArray(content.dependencies)) {
+          if (!declaredSceneKeys.has(dependency)) throw new Error(`Scene '${sceneKey}' references undeclared dependency '${dependency}'. Read the persisted chapter briefs and use their exact sceneKeys, including for future chapters.`);
         }
       }
       const existing = await this.prisma.storyArtifact.findMany({

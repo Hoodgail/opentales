@@ -55,11 +55,12 @@ try {
     console.log(JSON.stringify({ buildRunId }));
   }
   const existingRun = await prisma.buildRun.findUniqueOrThrow({ where: { id: buildRunId } });
+  const terminalRun = ['COMPLETED', 'CANCELLED'].includes(existingRun.status);
   const existingSettings = await prisma.projectAiSettings.findUniqueOrThrow({ where: { projectId: existingRun.projectId } });
-  if (existingSettings.model !== model) {
+  if (!terminalRun && existingSettings.model !== model) {
     await new ProjectAiSettingsUseCase(prisma).update(existingRun.authorizedById ?? existingRun.createdById!, existingRun.projectId, { model });
   }
-  if (process.env.LIVE_BUILD_ID && process.env.LIVE_MAX_TOKENS) {
+  if (!terminalRun && process.env.LIVE_BUILD_ID && process.env.LIVE_MAX_TOKENS) {
     const builds = new NovelBuildUseCase(prisma);
     const current = await builds.get(existingRun.authorizedById ?? existingRun.createdById!, existingRun.projectId, buildRunId);
     await builds.authorize(existingRun.authorizedById ?? existingRun.createdById!, existingRun.projectId, buildRunId, {
@@ -100,7 +101,12 @@ try {
         assert(scenes.every(unit => (unit.branch.headVersion?.wordCount ?? 0) > 0), 'Every scene needs saved prose');
         const words = scenes.reduce((sum, unit) => sum + (unit.branch.headVersion?.wordCount ?? 0), 0);
         assert(words >= target.minWordCount && words <= target.maxWordCount, `Manuscript has ${words} words, expected ${target.minWordCount}–${target.maxWordCount}`);
-        const exports = await prisma.projectExport.findMany({ where: { buildRunId, status: 'READY', deletedAt: null } });
+        const compilation = await prisma.buildCompilation.findFirstOrThrow({ where: { buildRunId }, orderBy: { createdAt: 'desc' }, include: { units: true } });
+        assert.equal(compilation.totalWordCount, words, 'Latest compilation must match the current manuscript word count');
+        for (const scene of scenes) {
+          assert.equal(compilation.units.find(unit => unit.unitId === scene.id)?.writingVersionId, scene.branch.headVersionId, `Export source for ${scene.key} must be its current saved version`);
+        }
+        const exports = await prisma.projectExport.findMany({ where: { buildRunId, compilationId: compilation.id, status: 'READY', deletedAt: null }, orderBy: { createdAt: 'desc' } });
         assert(exports.length > 0, 'A completed build needs a real export');
         const artifact = await new ProjectExportUseCase(prisma).download(run.authorizedById ?? run.createdById!, run.projectId, exports[0].id);
         const chunks: Buffer[] = [];
@@ -109,7 +115,7 @@ try {
         assert.equal(createHash('sha256').update(bytes).digest('hex'), artifact.checksum);
         await writeFile(`${output}/story.txt`, bytes);
         const modelsUsed = (await prisma.buildTrace.findMany({ where: { buildRunId, model: { not: null } }, distinct: ['model'], select: { model: true } })).map(trace => trace.model);
-        await writeFile(`${output}/verification.json`, JSON.stringify({ buildRunId, model, modelsUsed, words, scenes: scenes.length, tasks: tasks.length, exportChecksum: artifact.checksum, tokensUsed: run.tokensUsed, accountingCostMicros: run.costMicrosUsed }, null, 2));
+        await writeFile(`${output}/verification.json`, JSON.stringify({ buildRunId, model, modelsUsed, words, scenes: scenes.length, tasks: tasks.length, compilationId: compilation.id, exportChecksum: artifact.checksum, tokensUsed: run.tokensUsed, accountingCostMicros: run.costMicrosUsed }, null, 2));
         completed = true;
       } else process.exitCode = 1;
       break;
