@@ -1550,7 +1550,7 @@ export class NovelBuildUseCase {
     return done === task.dependencyIds.length;
   }
 
-  async materializeChapterGraphsInTransaction(tx: NovelBuildTx, buildRunId: string): Promise<string[]> {
+  async materializeChapterGraphsInTransaction(tx: NovelBuildTx, buildRunId: string, options: { deferIncomplete?: boolean } = {}): Promise<string[]> {
     const run = await tx.buildRun.findUniqueOrThrow({ where: { id: buildRunId } });
     const [briefs, plans] = await Promise.all([
       tx.storyArtifact.findMany({
@@ -1593,6 +1593,11 @@ export class NovelBuildUseCase {
       chapterScenes.forEach((scene, index) => localSceneOrder.set(scene.sceneKey, index));
     }
     const sceneKeys = new Set(sceneRecords.map((scene) => scene.sceneKey));
+    // Artifact edits can temporarily invalidate one accepted predecessor while
+    // its surviving consumers remain accepted. Save the repair, but do not
+    // materialize a partial graph. Explicit materialization and plan acceptance
+    // still require every dependency to be accepted and present.
+    if (options.deferIncomplete && sceneRecords.some(scene => scene.dependencies.some(dependency => !sceneKeys.has(dependency)))) return [];
     for (const scene of sceneRecords) for (const dependency of scene.dependencies) if (!sceneKeys.has(dependency)) throw new HttpError(409, `Scene '${scene.sceneKey}' depends on missing accepted scene '${dependency}'`);
     assertAcyclicScenePlans(sceneRecords);
     const created: string[] = [];

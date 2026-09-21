@@ -254,6 +254,9 @@ describe('durable Novel Build execution contract', () => {
       maxInputTokens: 96_000,
       maxOutputTokens: 12_000
     });
+    expect(defaultTaskBudget({ type: 'create-scene-plan-shard' } as any)).toMatchObject({
+      maxOutputTokens: 32_000
+    });
   });
 
   it('keeps multi-step provider usage separate for per-invocation limits', () => {

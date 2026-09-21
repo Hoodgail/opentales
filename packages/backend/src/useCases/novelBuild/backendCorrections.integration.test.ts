@@ -615,9 +615,9 @@ describeDatabase('Novel Build correction-wave invariants', () => {
     const initial = await story.applyArtifactBatch(ownerId, projectId, run.id, {
       idempotencyKey: 'dependency-repair:initial', expectedBuildRevision: run.revision,
       operations: [
-        { op: 'create', artifact: { type: 'chapter-brief', key: 'chapter-1', title: 'Chapter', status: 'validated', content: { ...chapterBrief(), sceneKeys: ['scene-1', 'scene-2'] } } },
-        { op: 'create', artifact: { type: 'scene-plan', key: 'scene-1', title: 'First', status: 'validated', content: firstContent } },
-        { op: 'create', artifact: { type: 'scene-plan', key: 'scene-2', title: 'Second', status: 'validated', content: secondContent } }
+        { op: 'create', artifact: { type: 'chapter-brief', key: 'chapter-1', title: 'Chapter', status: 'accepted', content: { ...chapterBrief(), sceneKeys: ['scene-1', 'scene-2'] } } },
+        { op: 'create', artifact: { type: 'scene-plan', key: 'scene-1', title: 'First', status: 'accepted', content: firstContent } },
+        { op: 'create', artifact: { type: 'scene-plan', key: 'scene-2', title: 'Second', status: 'accepted', content: secondContent } }
       ]
     }, { allowTaskBinding: false });
     const first = initial.artifacts.find(a => a.key === 'scene-1')!;
@@ -627,6 +627,7 @@ describeDatabase('Novel Build correction-wave invariants', () => {
       operations: [{ op: 'invalidate', artifactId: first.id, expectedVersion: first.version }]
     }, { allowTaskBinding: false });
     expect((await story.diagnostics(ownerId, projectId, run.id)).diagnostics.some(d => d.code === 'missing-scene-dependency')).toBe(true);
+    await expect(prisma.$transaction(tx => builds.materializeChapterGraphsInTransaction(tx, run.id))).rejects.toThrow('missing accepted scene');
     await expect(story.applyArtifactBatch(ownerId, projectId, run.id, {
       idempotencyKey: 'dependency-repair:invented', expectedBuildRevision: invalidated.buildRevision,
       operations: [{ op: 'replace', artifactId: second.id, expectedVersion: second.version, artifact: {

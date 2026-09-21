@@ -147,7 +147,7 @@ export class StoryStateUseCase {
         );
       }
       await this.validateArtifactCrossLinks(tx, projectId, buildRunId);
-      const createdChapterTaskIds = await this.buildUseCase.materializeChapterGraphsInTransaction(tx, buildRunId);
+      const createdChapterTaskIds = await this.buildUseCase.materializeChapterGraphsInTransaction(tx, buildRunId, { deferIncomplete: true });
       await this.rewireArtifactConsumers(tx, buildRunId, replacementMap);
       await this.builds.refreshReadyTasks(tx, buildRunId);
       const updated = await tx.buildRun.update({ where: { id: buildRunId }, data: { revision: { increment: 1 } }, select: { revision: true } });

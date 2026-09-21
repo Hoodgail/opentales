@@ -1132,6 +1132,8 @@ async function createBudgetRun(prisma: PrismaClient, projectId: string, userId: 
 
 function deterministicExecutor(prisma: PrismaClient, buildRunId: string, scale?: { chapters: number; scenes: number; characters: number; targetWords: number }): BuildModelExecutor {
   return async (input) => {
+    expect(input.system).toContain('Execution mode: AUTO');
+    expect(input.system).not.toContain('Execution mode: MANUAL');
     const taskType = String(input.contract.metadata.taskType ?? '');
     const taskKey = String(input.contract.metadata.taskKey ?? taskType);
     const attempt = Number(input.contract.metadata.attempt ?? 0);

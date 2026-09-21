@@ -880,6 +880,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     const system = [
       renderInferenceLayers({
         role,
+        approvalMode: 'auto',
         task: contract,
         activeSkills: activeSkills.map((skill) => ({ manifest: skill.manifest, content: skill.content, references: loadAiSkillReferences(skill) })),
         contextPack: inferencePack,
@@ -2075,9 +2076,10 @@ export function defaultTaskBudget(task: BuildTask): {
     };
   }
   if (task.type === 'create-scene-plan-shard') {
-    // A chapter's inspection/write conversation can exceed 96k even though
-    // the initial packed context fits. Keep a bounded allowance for that growth.
-    return { maxInputTokens: 128_000, maxOutputTokens: 12_000, maxToolCalls: 16, maxDurationMs: 15 * 60_000 };
+    // Structured multi-scene writes plus reasoning exceeded 12k output tokens
+    // in live provider usage. Reserve that capacity before execution; never
+    // waive the measured output limit after a write.
+    return { maxInputTokens: 128_000, maxOutputTokens: 32_000, maxToolCalls: 16, maxDurationMs: 15 * 60_000 };
   }
   return {
     maxInputTokens: 96_000,
@@ -2429,7 +2431,7 @@ export function hasSuccessfulTaskReport({ steps }: { steps: Array<{ toolResults?
   }));
 }
 
-async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<BuildModelExecutorOutput> {
+export async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<BuildModelExecutorOutput> {
   const candidates: Array<string | null | undefined> = input.contract.modelPolicy.preferred
     ? [input.contract.modelPolicy.preferred, ...input.contract.modelPolicy.fallbacks]
     : [undefined, ...input.contract.modelPolicy.fallbacks];
@@ -2486,11 +2488,17 @@ async function defaultModelExecutor(input: BuildModelExecutorInput): Promise<Bui
         },
         onError: ({ error }) => { streamError ??= error; }
       });
-      const [usage, text, steps] = await Promise.all([
+      const settled = await Promise.allSettled([
         generation.totalUsage,
         generation.text,
         generation.steps
       ]);
+      const usage = settled[0].status === 'fulfilled' ? settled[0].value : undefined;
+      const text = settled[1].status === 'fulfilled' ? settled[1].value : '';
+      const steps = settled[2].status === 'fulfilled' ? settled[2].value : [];
+      // A failed text promise can be a generic NoOutputGeneratedError. Keep
+      // the original stream error and any completed steps/usage instead.
+      streamError ??= settled.find(result => result.status === 'rejected')?.reason;
       if (streamError) {
         const partialUsage = actualModelId
           ? measuredInvocationUsage(
@@ -2937,8 +2945,10 @@ function normalizeMeasuredUsage(
     inputTokens: tokenCount(usage.inputTokens, 'usageByModel.inputTokens'),
     outputTokens: tokenCount(usage.outputTokens, 'usageByModel.outputTokens')
   }));
-  if (normalized.reduce((sum, usage) => sum + usage.inputTokens, 0) !== measuredInput || normalized.reduce((sum, usage) => sum + usage.outputTokens, 0) !== measuredOutput) {
-    throw new Error('usageByModel totals do not match measured provider token usage');
+  const stepInput = normalized.reduce((sum, usage) => sum + usage.inputTokens, 0);
+  const stepOutput = normalized.reduce((sum, usage) => sum + usage.outputTokens, 0);
+  if (stepInput !== measuredInput || stepOutput !== measuredOutput) {
+    throw new Error(`usageByModel totals do not match measured provider token usage (steps=${normalized.length}, input=${stepInput}/${measuredInput}, output=${stepOutput}/${measuredOutput})`);
   }
   return normalized;
 }

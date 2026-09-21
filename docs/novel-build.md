@@ -243,3 +243,7 @@ The build's `maxTokens` is cumulative across requests and retries. It is not a c
 
 
 During selective replanning, a surviving scene may temporarily refer to an invalidated predecessor. Artifact writes accept that pending dependency only if its exact key is declared in a validated or accepted chapter brief. Invented keys still fail. Diagnostics continue to report the missing scene until its replacement is persisted, and planning completion still requires the complete scene set.
+
+Artifact edits defer graph materialization while accepted dependencies are incomplete. This also covers repair after a previous planning gate accepted the whole plan; validated replacements can be saved without prematurely creating a partial graph. Explicit graph materialization and plan acceptance still reject missing accepted dependencies.
+
+Authorized durable workers receive AUTO execution instructions. Their mutations remain fenced by the task's scope, current lease, authorization and budgets; interactive inference still defaults to manual approval.
