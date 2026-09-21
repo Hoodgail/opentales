@@ -51,7 +51,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm eval
-      # The full worker integration (including the 104-scene build) already ran
-      # in pnpm test. Coverage thresholds target the pure safety modules.
-      - run: pnpm --dir packages/backend test:critical-coverage --exclude '**/NovelBuildWorker.integration.test.ts'
+      # The production-length fixture already runs above. Keep every shorter
+      # integration case here: they supply the database coverage gates.
+      - run: pnpm --dir packages/backend test:critical-coverage --testNamePattern '^(?!.*runs a production 85k/32-chapter/104-scene novel)'
       - run: pnpm build
