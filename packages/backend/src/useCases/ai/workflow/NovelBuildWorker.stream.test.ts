@@ -58,7 +58,7 @@ describe('durable worker failed stream evidence', () => {
     });
     const input = {
       resolveModel: async () => ({ provider: 'test.chat' }),
-      rubric: 'scene-quality-v1', observableResult: {}, deterministicChecks: {}, evidencePack: {},
+      rubric: 'scene-quality-v1', observableResult: {}, deterministicChecks: {}, evidencePack: { artifacts: [] },
       abortSignal: new AbortController().signal,
       contract: { objective: 'Evaluate the scene', acceptanceCriteria: [], modelPolicy: { preferred: 'test-model' },
         budget: { maxInputTokens: 10000, maxOutputTokens: 4000 }, metadata: {} }
@@ -66,5 +66,27 @@ describe('durable worker failed stream evidence', () => {
     await expect(defaultJudgeExecutor(input)).rejects.toMatchObject({
       message: 'Quota exceeded', statusCode: 429, inputTokens: 0, outputTokens: 0
     });
+  });
+
+  it.each(['known-artifact', 'invented-artifact'])('constrains repair choices and rejects invalid fallback targets: %s', async id => {
+    const result = { scores: { completeness: 0.5, causality: 0.5, coherence: 0.5, contract: 0.5 }, feedback: 'Allocate the missing illustration.', evidence: [], repairArtifactIds: [id] };
+    streamText.mockImplementation(options => {
+      const schema = options.tools.reportJudgeResult.inputSchema;
+      expect(schema.safeParse({ ...result, repairArtifactIds: ['known-artifact'] }).success).toBe(true);
+      expect(schema.safeParse({ ...result, repairArtifactIds: ['invented-artifact'] }).success).toBe(false);
+      return {
+        totalUsage: Promise.resolve({ inputTokens: 100, outputTokens: 30 }), text: Promise.resolve(JSON.stringify(result)),
+        steps: Promise.resolve([]), finishReason: Promise.resolve('stop')
+      };
+    });
+    const input = {
+      resolveModel: async () => ({ provider: 'test.chat' }), rubric: 'complete-book-plan-v1', observableResult: {}, deterministicChecks: {},
+      evidencePack: { artifacts: [{ id: 'known-artifact', key: 'chapter-1', type: 'chapter-brief', content: '{}' }] },
+      abortSignal: new AbortController().signal,
+      contract: { objective: 'Evaluate the plan', acceptanceCriteria: [], modelPolicy: { preferred: 'test-model' },
+        budget: { maxInputTokens: 10000, maxOutputTokens: 4000 }, metadata: {} }
+    } as unknown as BuildJudgeExecutorInput;
+    if (id === 'known-artifact') expect((await defaultJudgeExecutor(input)).result.repairArtifactIds).toEqual([id]);
+    else await expect(defaultJudgeExecutor(input)).rejects.toMatchObject({ message: expect.stringContaining('exact supplied artifact ID'), inputTokens: 100, outputTokens: 30 });
   });
 });

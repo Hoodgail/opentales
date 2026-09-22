@@ -48,6 +48,15 @@ const {
 const { isLegacyLogicalReference, referenceVariants } = await import('../../novelBuild/NovelBuildUseCase.js');
 
 describe('durable Novel Build execution contract', () => {
+  it('preserves chapter genre and illustration allocations required by an illustrated serial', () => {
+    const chapter = { chapterKey: 'chapter-1', number: 1, title: 'Night Shift', purpose: 'Open the diner.', sceneKeys: ['scene-1'], threadRefs: [], entryState: {}, exitState: {}, genre: 'noir', illustrationDirections: ['Wide low-angle view of the counter; two workers lean over a map under blue dawn light.'] };
+    expect(ARTIFACT_CONTENT_SCHEMAS['chapter-brief'].parse(chapter)).toEqual(chapter);
+    expect(ARTIFACT_CONTENT_SCHEMAS['chapter-brief'].safeParse({ ...chapter, illustrationDirections: [''] }).success).toBe(false);
+    const planner = PLANNING_TASK_TEMPLATES.find(task => task.key === 'chapter-briefs')!;
+    expect(objectiveForTask(planner as any, 'Write an illustrated serial.', { target: {} })).toContain('illustrationDirections');
+    expect(objectiveForTask({ ...planner, type: 'draft-scene-unit' } as any, 'Write an illustrated serial.', { target: {} })).toContain('Only in its final declared scene');
+  });
+
   it('uses a bounded manuscript-sized deadline in the actual worker and honors explicit overrides', async () => {
     const task = { id: 'deadline-task', type: 'line-edit', assignedAgent: 'reviser', scopeUnitIds: Array.from({ length: 110 }, (_, i) => `scene-${i}`), executionPolicy: {} };
     expect(defaultTaskBudget(task as any).maxDurationMs).toBe(110 * 45_000);

@@ -14,7 +14,7 @@
     Wrench,
     Workflow
   } from 'lucide-svelte';
-  import { tick } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import type {
     AuthorizeBuildRunInput,
     BuildCheckpoint,
@@ -39,6 +39,7 @@
   import BuildTaskInspector from './BuildTaskInspector.svelte';
   import BuildManuscriptWorkspace from './BuildManuscriptWorkspace.svelte';
   import NovelBuildStart from './NovelBuildStart.svelte';
+  import { buildExecutionStatus } from './buildExecutionStatus';
 
   interface Props {
     run: BuildRun | null;
@@ -134,6 +135,12 @@
   let handledBuildRequest = $state(0);
   let actionDialog: HTMLElement | undefined = $state();
   let actionReturnFocus: HTMLElement | null = null;
+  let now = $state(Date.now());
+  const executionStatus = $derived(buildExecutionStatus(run, now));
+  onMount(() => {
+    const timer = setInterval(() => { now = Date.now(); }, 1000);
+    return () => clearInterval(timer);
+  });
   const selectedTask = $derived(run?.tasks.find((task) => task.id === selectedTaskId) ?? run?.tasks.find((task) => task.status === 'running') ?? null);
   const exhaustedFailedTask = $derived(run?.tasks.find((task) => task.status === 'failed' && task.attempts >= task.maxAttempts) ?? null);
   const checkpointReview = $derived(Boolean(run?.currentPhase.startsWith('checkpoint-review:')));
@@ -325,6 +332,15 @@
 
     {#if error}<div class="flex shrink-0 items-center gap-2 border-b border-destructive/30 bg-destructive/8 px-3 py-2 text-[11px] text-destructive-foreground" role="alert"><AlertTriangle class="size-3.5" />{error}</div>{/if}
     {#if run.lastError}<div class="flex shrink-0 items-center gap-2 border-b border-destructive/30 bg-destructive/8 px-3 py-2 text-[11px] text-destructive-foreground"><AlertTriangle class="size-3.5" />{run.lastError}</div>{/if}
+    {#if executionStatus?.kind === 'provider-wait'}
+      <div class="shrink-0 border-b border-amber-400/30 bg-amber-400/5 px-3 py-2 text-[11px]" role="status" aria-label="Build execution status">
+        <p class="font-medium">Waiting for provider retry window</p>
+        <p>No model call is running. Next eligible retry: <time datetime={executionStatus.retryAt}>{new Date(executionStatus.retryAt).toLocaleString()}</time> for {executionStatus.task.key}. The worker will retry automatically when available; saved work is retained.</p>
+        {#if executionStatus.task.lastError}<p class="mt-1 text-muted-foreground">{executionStatus.task.lastError}</p>{/if}
+      </div>
+    {:else if executionStatus?.kind === 'queued'}
+      <div class="shrink-0 border-b border-border px-3 py-2 text-[11px] text-muted-foreground" role="status" aria-label="Build execution status">Queued for worker. No task is currently running. If this persists, check that the backend worker is healthy.</div>
+    {/if}
     {#if checkpointReview}
       <div class="flex shrink-0 flex-wrap items-center gap-2 border-b border-accent/30 bg-accent/6 px-3 py-2 text-[11px]">
         <Milestone class="size-3.5 shrink-0 text-accent" />

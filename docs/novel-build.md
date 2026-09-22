@@ -56,6 +56,12 @@ Workers claim ready tasks with expiring fenced leases and heartbeat during execu
 
 Pause and cancel abort local executions and invalidate their lease authority. A late provider response cannot mutate state after pause, expiry, reassignment, or cancellation. Failed or over-budget attempts compensate provisional artifacts, story-state versions, and manuscript heads before retry or escalation.
 
+Provider retry deadlines are persisted. The Build workspace distinguishes an active task from a provider retry window and a task queued for a worker; a phase label alone does not mean inference is running.
+
+The independent planning judge may identify exact artifact IDs that need correction. Before manuscript materialization, the worker can atomically rerun those planning producers and their dependents once within the planning gate's revision allowance. Unrelated artifacts remain intact. Feedback is untrusted context, not new author authority; unknown IDs, pinned artifacts, exhausted repair allowances, or an existing manuscript cannot authorize automatic replanning. The repaired plan must pass a fresh independent evaluation. A second failure remains actionable rather than starting an unlimited regeneration loop.
+
+After a scene passes review without changes, canon re-extraction can reuse its earlier validated extraction only when the exact manuscript heads and full current ledger fingerprint still match. Missing provenance, changed prose, or any ledger change requires fresh extraction. Completion rechecks the proof under the run lock. Diagnostics and quality gates still execute; reuse is recorded in the trace with zero model usage.
+
 ## Context and model routing
 
 Each inference is rendered once in layers A–F:
@@ -68,6 +74,8 @@ Each inference is rendered once in layers A–F:
 6. output schema and rubric.
 
 Manuscript, attachment, imported, and public-web content is serialized as untrusted data. Context uses build-branch prose, causal predecessors, facts valid at the target story position, current entity state, timeline, active threads, open loops, directives, pins, and prior evaluation feedback.
+
+Chapter briefs support explicit `genre` and `illustrationDirections` for author-requested illustrated serials. The planner allocates these per chapter; only that chapter's final scene appends the prose illustration briefs. These optional fields do not generate image assets or imply that every story needs illustrations.
 
 Model routing is configured with `AI_MODEL_ROUTING_JSON`. The worker automatically fetches the open [models.dev catalog](https://models.dev/api.json), converts its per-million-token USD prices to currency micro-units, and keeps them in an in-memory cache for six hours by default. Expired entries are conditionally refreshed; a temporary network failure reuses the last in-memory snapshot for five minutes while continuing to retry. The cache is never persisted across backend restarts.
 
@@ -164,6 +172,8 @@ Worker-only claim, heartbeat, completion, trace, evaluation, branch patch, and t
 External MCP agents receive parallel user-facing operations rather than worker credentials: `createBuildUnit`, `updateBuildUnit`, `invalidateBuildUnit`, `reorderBuildUnits`, `compileBuild`, `compareBuildManuscript`, and the build-review tools. These call the same public use cases with project permissions, idempotency keys, and build/unit/head revisions. They are intended for explicit repair, review, and handoff; they cannot claim tasks, forge evaluator results, or write through a worker lease.
 
 ## Verification
+
+See [full-length readiness](novel-build-readiness.md) for the current live-validation limitations and release gates. The historical [reliability audit](novel-build-validation.md) documents the earlier short-story run, not completed full-length validation.
 
 Run the release checks:
 

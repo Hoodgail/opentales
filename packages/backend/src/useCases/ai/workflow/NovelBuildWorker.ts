@@ -8,6 +8,7 @@ import { ProjectExportUseCase } from '../../exportImport/ProjectExportUseCase.js
 import { NovelBuildUseCase, revisionBudgetIteration, collectJsonReferences, referenceVariants } from '../../novelBuild/NovelBuildUseCase.js';
 import { StoryStateUseCase } from '../../novelBuild/StoryStateUseCase.js';
 import { BuildManuscriptUseCase } from '../../novelBuild/BuildManuscriptUseCase.js';
+import { captureCanonSnapshot, validateCanonReuse, type CanonReuse } from '../../novelBuild/canonReuse.js';
 import {
   ARTIFACT_CONTENT_SCHEMAS,
   stableHash,
@@ -53,6 +54,7 @@ const workerResultSchema = z.object({
 const judgeResultSchema = z.object({
   scores: z.record(z.string(), z.number().min(0).max(1)).refine((scores) => Object.keys(scores).length > 0, 'At least one rubric score is required'),
   feedback: z.string(),
+  repairArtifactIds: z.array(z.string().min(1)).max(200).optional(),
   evidence: z.array(z.object({ type: z.string(), id: z.string().optional(), summary: z.string() })).max(200).default([])
 });
 const AGGREGATE_ARTIFACT_TASK_TYPES = new Set([
@@ -160,6 +162,7 @@ interface ClaimedTask {
 }
 
 interface TaskExecution {
+  canonReuse?: CanonReuse;
   result: WorkerResult;
   traceId: string;
   trace: PendingTrace;
@@ -591,8 +594,9 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     );
     const stopHeartbeat = this.startTaskHeartbeat(claimed, controller);
     try {
+      const reuse = await this.reusableCanon(claimed);
       const execution = await raceWithAbort(
-        deterministicExecutionTask(claimed.task)
+        reuse ? this.executeCanonReuse(claimed, reuse) : deterministicExecutionTask(claimed.task)
           ? this.executeDeterministicTask(claimed)
           : this.executeModelTask(claimed, controller.signal),
         controller.signal
@@ -790,6 +794,27 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     return { result, traceId: trace.id, trace, contextArtifactIds: [], inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - started, toolCalls, toolResults };
   }
 
+  private async reusableCanon(claimed: ClaimedTask): Promise<CanonReuse | null> {
+    if (claimed.task.type !== 'extract-scene-canon' || !claimed.task.key.endsWith(':reextract-canon')) return null;
+    const source = await this.prisma.buildTask.findFirst({ where: {
+      buildRunId: claimed.run.id, key: claimed.task.key.replace(/:reextract-canon$/, ':canon'), status: 'DONE'
+    } });
+    if (!source) return null;
+    const trace = await this.prisma.buildTrace.findFirst({ where: { taskId: source.id, status: 'COMPLETED', attempt: source.attempts }, orderBy: { startedAt: 'desc' } });
+    if (!trace) return null;
+    const reuse = { sourceTaskId: source.id, sourceTraceId: trace.id };
+    return await validateCanonReuse(this.prisma, claimed.run.id, claimed.scopeUnitIds, reuse) ? reuse : null;
+  }
+
+  private async executeCanonReuse(claimed: ClaimedTask, canonReuse: CanonReuse): Promise<TaskExecution> {
+    const trace = await this.startTrace(claimed, null, null, [], 0);
+    return {
+      canonReuse, traceId: trace.id, trace, contextArtifactIds: [], inputTokens: 0, outputTokens: 0, latencyMs: 0,
+      toolCalls: [], toolResults: [],
+      result: { ...basicResult(true, 'canonDeltaRequired', 'Reused validated canon: manuscript heads and the complete ledger are unchanged.'), evidence: [{ type: 'build-trace', id: canonReuse.sourceTraceId, summary: 'Exact source-head and ledger fingerprint match; final diagnostics still run.' }] }
+    };
+  }
+
   private async executeModelTask(claimed: ClaimedTask, abortSignal: AbortSignal): Promise<TaskExecution> {
     const started = Date.now();
     const contract = await this.contractFor(claimed);
@@ -820,9 +845,10 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       rejectedTools: boundedText(JSON.stringify((Array.isArray(previousFailure.toolResults) ? previousFailure.toolResults : [])
         .filter(result => jsonRecord(jsonRecord(result).output).ok === false)), 8_000)
     }) : '';
+    const repairFeedback = jsonRecord(claimed.task.executionPolicy).planningRepairFeedback;
     const brainstormData = [serializeUntrustedData('build-brainstorm', {
       storyText: claimed.run.brainstorm
-    }), retryData].filter(Boolean).join('\n\n');
+    }), retryData, repairFeedback ? serializeUntrustedData('planning-repair-feedback', repairFeedback) : ''].filter(Boolean).join('\n\n');
     const ownerAuthority = JSON.stringify({
       objective: claimed.run.objective,
       buildTarget: jsonRecord(claimed.run.manifest).target ?? null,
@@ -1127,6 +1153,10 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
     stopHeartbeat: () => Promise<void>
   ): Promise<void> {
     const validation = await this.validateTaskResult(claimed, execution);
+    const candidateCanonSnapshot = claimed.task.type === 'extract-scene-canon' && validation.passed
+      ? await captureCanonSnapshot(this.prisma, claimed.run.id, claimed.scopeUnitIds) : null;
+    const canonSnapshot = candidateCanonSnapshot && Object.entries(candidateCanonSnapshot.unitHeads)
+      .every(([id, head]) => claimed.baselineUnitHeads[id] === head) ? candidateCanonSnapshot : null;
     const acceptance = jsonRecord(claimed.task.acceptanceCriteria);
     const rubric = typeof acceptance.rubric === 'string' ? acceptance.rubric : null;
     const judge = rubric || claimed.task.qualityThreshold !== null || (allowsUnchangedReview(claimed.task) && validation.passed)
@@ -1193,7 +1223,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       modelParameters: traceModelParameters(execution.trace.claimed.task, execution.trace.price),
       toolCalls: jsonSafe(execution.toolCalls) as JsonValue,
       toolResults: jsonSafe(execution.toolResults) as JsonValue,
-      outputs: jsonSafe({ candidate: execution.result, judge: judge?.result ?? null }) as JsonValue,
+      outputs: jsonSafe({ candidate: execution.result, judge: judge?.result ?? null, ...(canonSnapshot ? { canonSnapshot } : {}), ...(execution.canonReuse ? { canonReuse: execution.canonReuse } : {}) }) as JsonValue,
       validatorResults: jsonSafe(validation) as JsonValue,
       inputTokens: totalInputTokens,
       outputTokens: totalOutputTokens,
@@ -1227,6 +1257,25 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
       return;
     }
     if (claimed.task.type === 'quality-gate' && disposition !== 'accept') {
+      const repairIds = uniqueStrings(judge?.result.repairArtifactIds ?? []);
+      if (claimed.task.key === 'planning-quality-gate' && repairIds.length
+        && revisionBudgetIteration(claimed.task) < claimed.task.maxRevisionIterations) {
+        const artifacts = await this.prisma.storyArtifact.findMany({ where: {
+          id: { in: repairIds }, buildRunId: claimed.run.id, invalidatedAt: null, status: { in: ['VALIDATED', 'ACCEPTED'] },
+          task: { phase: 'planning', status: 'DONE', type: { startsWith: 'create-' } }
+        }, select: { taskId: true } });
+        if (artifacts.length === repairIds.length && artifacts[0]?.taskId) {
+          const currentRun = await this.prisma.buildRun.findUniqueOrThrow({ where: { id: claimed.run.id } });
+          await this.builds.rerun(requiredUserId(claimed.run), claimed.run.projectId, claimed.run.id, artifacts[0].taskId, {
+            idempotencyKey: `planning-repair:${execution.traceId}`, expectedRevision: currentRun.revision,
+            reason: 'Independent planning judge requested one scoped repair before regrading.'
+          }, { waitForAbort: false, planningRepair: {
+            gateTaskId: claimed.task.id, sourceTraceId: execution.traceId, artifactIds: repairIds,
+            feedback: boundedText(judge!.result.feedback, 12_000)
+          } });
+          return;
+        }
+      }
       const graph = await this.prisma.buildTask.findMany({ where: { buildRunId: claimed.run.id } });
       const byId = new Map(graph.map((task) => [task.id, task]));
       const ancestorIds = new Set<string>();
@@ -1284,7 +1333,7 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         runGeneration: claimed.lease.runGeneration,
         expectedRevision: claimed.task.revision,
         outputArtifactIds: execution.result.artifactIds,
-        result: jsonSafe({ traceId: execution.traceId, evaluation: validation, result: execution.result, revisionRequired }) as JsonValue,
+        result: jsonSafe({ traceId: execution.traceId, evaluation: validation, result: execution.result, revisionRequired, ...(execution.canonReuse ? { canonReuse: execution.canonReuse } : {}) }) as JsonValue,
         qualityScore: score
       });
       return;
@@ -1809,7 +1858,11 @@ export class NovelBuildWorker implements NovelBuildWorkerHandle {
         this.prisma.timelineEvent.count({ where: { buildRunId: claimed.run.id, sourceTaskId: claimed.task.id, isCurrent: true, invalidatedAt: null } }),
         this.prisma.openLoop.count({ where: { buildRunId: claimed.run.id, sourceTaskId: claimed.task.id, isCurrent: true, invalidatedAt: null } })
       ]);
-      checks.canonDeltaRequired = sourceUnitIds.length > 0 && facts + states + events + loops > 0;
+      const units = await this.prisma.buildManuscriptUnit.findMany({ where: { id: { in: sourceUnitIds }, buildRunId: claimed.run.id, invalidatedAt: null }, select: { id: true, branch: { select: { headVersionId: true } } } });
+      checks.canonSourceHeadsCurrent = units.length === sourceUnitIds.length && units.every(unit => unit.branch.headVersionId === claimed.baselineUnitHeads[unit.id]);
+      checks.canonDeltaRequired = execution.canonReuse
+        ? await validateCanonReuse(this.prisma, claimed.run.id, sourceUnitIds, execution.canonReuse)
+        : sourceUnitIds.length > 0 && facts + states + events + loops > 0;
     }
     if (acceptance.manuscriptUnitDraftRequired === true) {
       const units = await this.prisma.buildManuscriptUnit.findMany({
@@ -2224,6 +2277,12 @@ export function objectiveForTask(task: BuildTask, buildObjective: string, manife
       : '',
     task.type === 'create-chapter-briefs'
       ? `Across all ${target.targetChapterCount} briefs, declare exactly ${target.targetSceneCount} globally unique sceneKeys in total. Chapter allocations may be uneven, but their sum must match this exact target. Count the combined allocation before persisting the final batch.`
+      : '',
+    task.type === 'create-chapter-briefs'
+      ? 'Map every chapter-specific author requirement into each brief, not only the global narrative contract. When requested, set genre explicitly and allocate the required number of illustrationDirections with composition, camera, pose and lighting. Use explicit calendar dates in entryState/exitState for stories spanning multiple nights; a clock reset must not imply a causal predecessor happens later.'
+      : '',
+    task.type === 'draft-scene-unit'
+      ? 'Follow the chapter brief’s genre and other chapter-specific requirements. Only in its final declared scene, append the allocated illustrationDirections as clearly labeled prose briefs after the scene; do not append them to every scene or invent image files.'
       : '',
     task.type === 'create-timeline'
       ? 'Build the planning timeline from the complete supplied scene-plan artifacts. Manuscript units and extracted canon timelines do not exist yet at this stage; sceneRef should reference the exact scene-plan artifact, not an invented manuscript unit. Keep events concise: use ordered timestamps or relative markers, exact scene references, and causal dependencies. Do not repeat full scene prose or chapter synopses inside chronology fields. Persist the timeline and report its returned artifact ID; the worker runs deterministic lint after your report.'
@@ -2650,11 +2709,13 @@ export async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Prom
   const scoreShape = Object.fromEntries(
     rubricDimensions(input.rubric).map((dimension) => [dimension, z.number().describe(`Score ${dimension} from 0 to 1`)] as const)
   );
+  const repairIds = input.evidencePack.artifacts.map(artifact => artifact.id);
   const reportJudgeResult = tool({
     description: 'Submit every required rubric score from 0 to 1, concise feedback, and observable evidence.',
     inputSchema: z.object({
       scores: z.object(scoreShape),
       feedback: z.string().default(''),
+      repairArtifactIds: z.array(repairIds.length ? z.enum(repairIds as [string, ...string[]]) : z.never()).max(200).optional().describe('Planning review only: select exact supplied artifact IDs that need correction. One representative ID per producer suffices (e.g. first chapter brief); its producer regenerates all its outputs. Never list guessed IDs.'),
       evidence: z.array(z.object({
         type: z.string().default('judge'),
         id: z.string().optional(),
@@ -2668,6 +2729,7 @@ export async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Prom
       'Score only the supplied rubric and observable evidence. Check prose tense, POV, character identities, and world rules against the supplied story brief and narrative contract. Do not expose hidden reasoning.',
       'A bounded artifact body may be truncated for transport; use artifactCoverage to determine whether the required corpus is complete and do not fail solely because individual bodies are bounded.',
       'For planning review, declared open questions are review surfaces, not automatic defects; lower scores only when an unresolved item prevents causal execution or violates the owner contract.',
+      'When a planning plan needs repair, include repairArtifactIds with exact supplied artifact IDs that must change, and specific corrections in feedback. One representative artifact per producer is sufficient: select the first chapter brief for chapter-wide changes, not all chapter IDs. Include all affected source producers, not artifacts cited merely as positive evidence. The worker may rerun only those producers and their dependents within its existing revision budget. Never invent an ID or request broader authorization.',
       'A runStoryLint call with buildRunId and omitted or empty chapterIds is build-wide.',
       'You are producing the required independent evaluation now; never require a pre-existing MODEL evaluation.',
       'Call reportJudgeResult exactly once with every required score dimension, concise feedback, and observable evidence.'
@@ -2719,6 +2781,7 @@ export async function defaultJudgeExecutor(input: BuildJudgeExecutorInput): Prom
   let result: z.infer<typeof judgeResultSchema>;
   try {
     result = extractJudgeResult(toolResults, toolCalls, text);
+    if (result.repairArtifactIds?.some(id => !repairIds.includes(id))) throw new Error('Independent judge repair target must be an exact supplied artifact ID');
   } catch (error) {
     const failure = new Error(
       `${error instanceof Error ? error.message : 'Independent judge result was invalid'} `
@@ -2827,7 +2890,7 @@ export function normalizeJudgeResultCandidate(value: unknown): z.infer<typeof ju
       summary: summary.trim()
     }];
   });
-  return judgeResultSchema.parse({ scores, feedback, evidence });
+  return judgeResultSchema.parse({ scores, feedback, evidence, ...(candidate.repairArtifactIds !== undefined ? { repairArtifactIds: candidate.repairArtifactIds } : {}) });
 }
 
 export function renderJudgePrompt(input: Pick<BuildJudgeExecutorInput, 'rubric' | 'contract' | 'deterministicChecks' | 'observableResult' | 'evidencePack'>): string {

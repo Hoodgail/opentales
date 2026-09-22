@@ -187,6 +187,8 @@ const chapterBriefSchema = z
     title: trimmedString('Chapter title', 1_000),
     actKey: z.string().trim().min(1).max(500).optional(),
     purpose: trimmedString('Chapter purpose', 10_000),
+    genre: z.string().trim().min(1).max(500).optional().describe('Explicit chapter genre when the author requests genre rotation.'),
+    illustrationDirections: z.array(trimmedString('Illustration direction', 5_000)).max(20).optional().describe('Author-requested prose illustration briefs, allocated after this chapter’s final scene. Include composition, camera, pose and lighting; do not generate images.'),
     povRef: referenceSchema.optional(),
     sceneKeys: stringList,
     threadRefs: z.array(referenceSchema).max(1_000),

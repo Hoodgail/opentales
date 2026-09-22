@@ -1,5 +1,6 @@
 import { Prisma, type BuildTask, type PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { validateCanonReuse } from './canonReuse.js';
 import type {
   ApplyBuildWritingPatchInput,
   ApplyBuildWritingPatchResult,
@@ -472,6 +473,15 @@ export class NovelBuildUseCase {
       });
       assertExpectedRevision(task.revision, input.expectedRevision);
       const outputArtifactIds = unique(input.outputArtifactIds ?? []);
+      // Recheck reuse under the same run lock as completion, closing the gap
+      // between the worker's read and a concurrent prose/ledger edit.
+      const canonReuse = isJsonObjectValue(input.result) && isJsonObjectValue(input.result.canonReuse) ? input.result.canonReuse : null;
+      if (canonReuse && (task.type !== 'extract-scene-canon'
+        || typeof canonReuse.sourceTaskId !== 'string' || typeof canonReuse.sourceTraceId !== 'string'
+        || canonReuse.sourceTaskId === task.id
+        || !await validateCanonReuse(tx, buildRunId, task.scopeUnitIds, { sourceTaskId: canonReuse.sourceTaskId, sourceTraceId: canonReuse.sourceTraceId }))) {
+        throw new HttpError(409, 'Canon reuse proof is stale; manuscript or ledger changed. Run fresh extraction.');
+      }
       await this.validateTaskCompletion(tx, buildRunId, task, outputArtifactIds, input.qualityScore);
       if (task.type === 'quality-gate' && task.key.startsWith('scene:')) {
         if (task.scopeUnitIds.length !== 1) throw new HttpError(409, 'Scene quality gate must be scoped to exactly one manuscript unit');
@@ -712,11 +722,14 @@ export class NovelBuildUseCase {
     buildRunId: string,
     taskId: string,
     input: BuildLifecycleInput,
-    options: { waitForAbort?: boolean; consumeRevisionIteration?: boolean } = {}
+    options: { waitForAbort?: boolean; consumeRevisionIteration?: boolean; planningRepair?: {
+      gateTaskId: string; sourceTraceId: string; artifactIds: string[]; feedback: string;
+    } } = {}
   ): Promise<BuildTaskActionResult> {
     await this.access.assertPermission(userId, projectId, 'project:write');
     let invalidatedTaskIds: string[] = [];
-    await this.runMutation(projectId, buildRunId, `rerun:${taskId}`, input, async (tx, run) => {
+    const mutationInput = options.planningRepair ? { ...input, planningRepair: options.planningRepair } : input;
+    await this.runMutation(projectId, buildRunId, `rerun:${taskId}`, mutationInput, async (tx, run) => {
       assertExpectedRevision(run.revision, input.expectedRevision);
       if (TERMINAL_RUN_STATUSES.has(run.status)) throw new HttpError(409, `Cannot rerun a ${run.status.toLowerCase()} build`);
       const target = await this.repository.getTask(tx, buildRunId, taskId);
@@ -724,7 +737,30 @@ export class NovelBuildUseCase {
         throw new HttpError(409, 'Task revision iteration budget is exhausted');
       }
       const tasks = await tx.buildTask.findMany({ where: { buildRunId } });
-      invalidatedTaskIds = transitiveDownstream(tasks, taskId);
+      const rootIds = new Set([taskId]);
+      const repair = options.planningRepair;
+      if (repair) {
+        const gate = tasks.find(task => task.id === repair.gateTaskId && task.key === 'planning-quality-gate' && task.type === 'quality-gate');
+        if (!gate || revisionBudgetIteration(gate) >= gate.maxRevisionIterations) throw new HttpError(409, 'Planning repair iteration budget is exhausted');
+        if (await tx.buildManuscriptUnit.count({ where: { buildRunId, invalidatedAt: null } })) throw new HttpError(409, 'Automatic planning repair cannot invalidate an existing manuscript');
+        const trace = await tx.buildTrace.findFirst({ where: { id: repair.sourceTraceId, taskId: gate.id, buildRunId, status: 'COMPLETED', attempt: gate.attempts } });
+        if (!trace) throw new HttpError(409, 'Planning repair requires the current independent evaluation trace');
+        const requested = unique(repair.artifactIds);
+        const artifacts = await tx.storyArtifact.findMany({ where: {
+          id: { in: requested }, buildRunId, invalidatedAt: null, status: { in: ['VALIDATED', 'ACCEPTED'] }
+        }, select: { id: true, taskId: true } });
+        if (!requested.length || artifacts.length !== requested.length) throw new HttpError(409, 'Planning repair references stale or missing artifacts');
+        const pinned = (await tx.buildDirective.findFirst({ where: { buildRunId }, orderBy: { createdAt: 'desc' }, select: { pinnedArtifactIds: true } }))?.pinnedArtifactIds ?? [];
+        if (requested.some(id => pinned.includes(id))) throw new HttpError(409, 'Planning repair cannot change pinned artifacts');
+        for (const artifact of artifacts) {
+          const producer = tasks.find(task => task.id === artifact.taskId);
+          if (!producer || producer.phase !== 'planning' || producer.status !== 'DONE' || !producer.type.startsWith('create-')
+            || !transitiveDownstream(tasks, producer.id).includes(gate.id)) throw new HttpError(409, 'Planning repair must target completed planning producers upstream of its gate');
+          rootIds.add(producer.id);
+        }
+        if (!artifacts.some(artifact => artifact.taskId === taskId)) throw new HttpError(409, 'Planning repair root must produce a rejected artifact');
+      }
+      invalidatedTaskIds = unique([...rootIds].flatMap(id => transitiveDownstream(tasks, id)));
       const invalidatedTasks = tasks.filter((task) => invalidatedTaskIds.includes(task.id));
       const releasedTokens = invalidatedTasks.reduce((sum, task) => sum + task.reservedTokens, 0);
       const releasedCostMicros = invalidatedTasks.reduce((sum, task) => sum + task.reservedCostMicros, 0);
@@ -759,7 +795,8 @@ export class NovelBuildUseCase {
         const outsideDependenciesDone = task.dependencyIds
           .filter((dependencyId) => !invalidatedSet.has(dependencyId))
           .every((dependencyId) => byId.get(dependencyId)?.status === 'DONE');
-        const nextStatus = taskIdToReset === taskId && outsideDependenciesDone ? 'READY' : 'BLOCKED';
+        const nextStatus = rootIds.has(taskIdToReset) && outsideDependenciesDone
+          && !task.dependencyIds.some(id => invalidatedSet.has(id)) ? 'READY' : 'BLOCKED';
         if (nextStatus === 'BLOCKED' && (task.status === 'RUNNING' || task.status === 'REVIEW')) {
           // Release execution before reblocking a descendant. Both transitions and
           // the lease fence below commit atomically in this rerun transaction.
@@ -777,7 +814,8 @@ export class NovelBuildUseCase {
             revisionIteration: { increment: 1 },
             executionPolicy: {
               ...(isJsonObjectValue(task.executionPolicy) ? task.executionPolicy : {}),
-              ...(!options.consumeRevisionIteration || task.id !== target.id ? { revisionIterationBaseline: task.revisionIteration + 1 } : {})
+              ...((repair ? task.id !== repair.gateTaskId : !options.consumeRevisionIteration || task.id !== target.id) ? { revisionIterationBaseline: task.revisionIteration + 1 } : {}),
+              ...(repair ? { planningRepairFeedback: { sourceTraceId: repair.sourceTraceId, feedback: repair.feedback } } : {})
             } as Prisma.InputJsonValue,
             outputArtifactIds: task.outputArtifactIds.filter((artifactId) => pinnedArtifactIds.includes(artifactId)),
             progress: 0,
