@@ -8,6 +8,7 @@ import { resumeRunnableBuilds } from '../src/useCases/ai/workflow/NovelBuildWork
 import { ProjectExportUseCase } from '../src/useCases/exportImport/ProjectExportUseCase.js';
 import { ProjectAiSettingsUseCase } from '../src/useCases/ai/ProjectAiSettingsUseCase.js';
 import { encryptSecret } from '../src/utils/secretBox.js';
+import { assertValidationDatabase, atomicValidationWrite, resolveValidationRunId, validationExitCode } from '../src/utils/liveBuildExecution.js';
 
 // Run only against a migrated disposable database. Credentials stay in the environment.
 const apiKey = process.env.LIVE_API_KEY;
@@ -30,12 +31,20 @@ const targetCharacterCount = integerSetting('LIVE_CHARACTERS', 2);
 const maxCostMicros = integerSetting('LIVE_MAX_COST_MICROS', 200_000_000);
 const brainstorm = process.env.LIVE_BRAINSTORM_FILE ? await readFile(process.env.LIVE_BRAINSTORM_FILE, 'utf8') : 'At a coastal radio station scheduled for demolition at dawn, Mara receives a recording of her late father asking her to keep transmitting. Her practical brother Ivo arrives to disconnect the power. The signal is an old emergency relay, not a ghost. Together they must choose what to save before the tide floods the transmitter room. End with a concrete costly choice, a repaired relationship, and no supernatural reversal.';
 const objective = process.env.LIVE_OBJECTIVE ?? `Write a complete polished ${targetWordCount}-word story in ${targetChapterCount} chapters and ${targetSceneCount} causal scenes. Use specific sensory details, restrained emotion, natural dialogue, and a resolved ending. Planning must serve the actual finished prose.`;
+assertValidationDatabase(process.env.DATABASE_URL, process.env.LIVE_EXPECT_DATABASE);
 const prisma = new PrismaClient();
 const output = process.env.LIVE_OUTPUT_DIR ?? '/tmp/opentales-live-result';
 await mkdir(output, { recursive: true });
+let stopRequested = false;
+const requestStop = () => { stopRequested = true; };
+process.on('SIGTERM', requestStop);
+process.on('SIGINT', requestStop);
+let heartbeatTimer: NodeJS.Timeout | undefined;
+let heartbeatWrite: Promise<void> | undefined;
 try {
   const suffix = randomUUID();
-  let buildRunId = process.env.LIVE_BUILD_ID;
+  let buildRunId = await resolveValidationRunId(output, process.env.LIVE_BUILD_ID, process.env.LIVE_REQUIRE_BUILD_ID === '1');
+  const resumedRun = Boolean(buildRunId);
   if (!buildRunId) {
     const user = await prisma.user.create({ data: { username: `live-${suffix}`, email: `${suffix}@example.test`, passwordHash: 'no-login' } });
     const org = await prisma.org.create({ data: { slug: `live-${suffix}`, name: 'Live build validation', memberships: { create: { userId: user.id, role: 'OWNER' } } } });
@@ -51,17 +60,17 @@ try {
       maxTokens, maxCostMicros
     });
     buildRunId = run.id;
-    await writeFile(`${output}/run-id.txt`, buildRunId);
     console.log(JSON.stringify({ buildRunId }));
   }
   const existingRun = await prisma.buildRun.findUniqueOrThrow({ where: { id: buildRunId } });
+  await atomicValidationWrite(`${output}/run-id.txt`, buildRunId);
   const terminalRun = ['COMPLETED', 'CANCELLED'].includes(existingRun.status);
   if (!terminalRun) {
     // Rehydrate fixture credentials from the environment after restoring a
     // checkpoint. Snapshots must not need the old runtime encryption secret.
     await new ProjectAiSettingsUseCase(prisma).update(existingRun.authorizedById ?? existingRun.createdById!, existingRun.projectId, { model, baseUrl, apiKey });
   }
-  if (!terminalRun && process.env.LIVE_BUILD_ID && process.env.LIVE_MAX_TOKENS) {
+  if (!terminalRun && resumedRun && process.env.LIVE_MAX_TOKENS && maxTokens !== existingRun.maxTokens) {
     const builds = new NovelBuildUseCase(prisma);
     const current = await builds.get(existingRun.authorizedById ?? existingRun.createdById!, existingRun.projectId, buildRunId);
     await builds.authorize(existingRun.authorizedById ?? existingRun.createdById!, existingRun.projectId, buildRunId, {
@@ -85,17 +94,46 @@ try {
       reason: 'Explicit live validation rerun after correcting the implementation; invalidate dependent outputs.'
     });
   }
+  // Native PostgreSQL staging can report progress while a long provider call is
+  // in flight. This opt-in is disabled in the embedded PGlite test harness.
+  const runId = buildRunId;
+  async function writeHeartbeat() {
+    const run = await prisma.buildRun.findUniqueOrThrow({ where: { id: runId }, select: {
+      status: true, currentPhase: true, tokensUsed: true, maxTokens: true, costMicrosUsed: true, lastError: true
+    } });
+    const tasks = await prisma.buildTask.findMany({ where: { buildRunId: runId }, select: {
+      key: true, status: true, attempts: true, retryAfterAt: true
+    } });
+    await atomicValidationWrite(`${output}/heartbeat.json`, JSON.stringify({
+      recordedAt: new Date().toISOString(), buildRunId: runId, model,
+      sourceRevision: process.env.LIVE_SOURCE_REVISION ?? null, ...run,
+      done: tasks.filter(task => task.status === 'DONE').length, total: tasks.length,
+      active: tasks.filter(task => task.status === 'RUNNING'),
+      waiting: tasks.filter(task => task.status === 'READY')
+    }, null, 2));
+  }
+  if (process.env.LIVE_HEARTBEAT_SECONDS) {
+    await writeHeartbeat();
+    heartbeatTimer = setInterval(() => {
+      if (!heartbeatWrite) heartbeatWrite = writeHeartbeat()
+        .catch(() => { console.error(JSON.stringify({ event: 'validation-heartbeat-failed', buildRunId: runId })); })
+        .finally(() => { heartbeatWrite = undefined; });
+    }, integerSetting('LIVE_HEARTBEAT_SECONDS', 30) * 1000);
+    heartbeatTimer.unref();
+  }
   let completed = false;
+  let finalStatus: string | null = null;
   for (let sweep = 0; sweep < integerSetting('LIVE_MAX_SWEEPS', 10000); sweep++) {
-    if (process.env.LIVE_STOP_FILE && await access(process.env.LIVE_STOP_FILE).then(() => true, () => false)) {
+    if (stopRequested || (process.env.LIVE_STOP_FILE && await access(process.env.LIVE_STOP_FILE).then(() => true, () => false))) {
       console.log(JSON.stringify({ buildRunId, stoppedAtTaskBoundary: true }));
       break;
     }
     const count = await resumeRunnableBuilds(prisma, { buildRunIds: [buildRunId], maxTasksPerSweep: 1 });
     const run = await prisma.buildRun.findUniqueOrThrow({ where: { id: buildRunId } });
+    finalStatus = run.status;
     const tasks = await prisma.buildTask.findMany({ where: { buildRunId }, orderBy: { createdAt: 'asc' }, select: { key: true, status: true, attempts: true, lastError: true } });
     console.log(JSON.stringify({ status: run.status, phase: run.currentPhase, done: tasks.filter(t => t.status === 'DONE').length, total: tasks.length, errors: tasks.filter(t => t.lastError).map(t => ({ key: t.key, error: t.lastError })), lastError: run.lastError }));
-    await writeFile(`${output}/report.json`, JSON.stringify({ buildRunId, model, status: run.status, phase: run.currentPhase, lastError: run.lastError, tokensUsed: run.tokensUsed, maxTokens: run.maxTokens, accountingCostMicros: run.costMicrosUsed, tasks }, null, 2));
+    await atomicValidationWrite(`${output}/report.json`, JSON.stringify({ recordedAt: new Date().toISOString(), sourceRevision: process.env.LIVE_SOURCE_REVISION ?? null, buildRunId, model, status: run.status, phase: run.currentPhase, lastError: run.lastError, tokensUsed: run.tokensUsed, maxTokens: run.maxTokens, accountingCostMicros: run.costMicrosUsed, tasks }, null, 2));
     if (['COMPLETED', 'FAILED', 'PAUSED', 'CANCELLED'].includes(run.status)) {
       const units = await prisma.buildManuscriptUnit.findMany({ where: { buildRunId }, orderBy: { order: 'asc' }, include: { branch: { include: { headVersion: true } } } });
       const chapterOrder = new Map(units.filter(unit => unit.kind === 'CHAPTER').map(unit => [unit.id, unit.chapterNumber ?? unit.order]));
@@ -124,14 +162,23 @@ try {
         assert.equal(createHash('sha256').update(bytes).digest('hex'), artifact.checksum);
         await writeFile(`${output}/story.txt`, bytes);
         const modelsUsed = (await prisma.buildTrace.findMany({ where: { buildRunId, model: { not: null } }, distinct: ['model'], select: { model: true } })).map(trace => trace.model);
-        await writeFile(`${output}/verification.json`, JSON.stringify({ buildRunId, model, modelsUsed, words, scenes: scenes.length, tasks: tasks.length, compilationId: compilation.id, exportChecksum: artifact.checksum, tokensUsed: run.tokensUsed, accountingCostMicros: run.costMicrosUsed }, null, 2));
+        await atomicValidationWrite(`${output}/verification.json`, JSON.stringify({ verifiedAt: new Date().toISOString(), sourceRevision: process.env.LIVE_SOURCE_REVISION ?? null, buildRunId, model, modelsUsed, words, scenes: scenes.length, tasks: tasks.length, compilationId: compilation.id, exportChecksum: artifact.checksum, tokensUsed: run.tokensUsed, accountingCostMicros: run.costMicrosUsed }, null, 2));
         completed = true;
-      } else process.exitCode = 1;
+      }
       break;
     }
     if (!count) await new Promise(resolve => setTimeout(resolve, 2000));
   }
-  if (!completed) process.exitCode = 1;
+  if (process.env.LIVE_HEARTBEAT_SECONDS) {
+    await heartbeatWrite;
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    await writeHeartbeat();
+  }
+  process.exitCode = validationExitCode(completed, process.env.LIVE_SUPERVISED === '1', finalStatus);
 } finally {
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  await heartbeatWrite;
+  process.off('SIGTERM', requestStop);
+  process.off('SIGINT', requestStop);
   await prisma.$disconnect();
 }
