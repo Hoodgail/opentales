@@ -35,7 +35,7 @@ const acceptanceCriterionSchema = z.object({
 });
 
 const taskBudgetSchema = z.object({
-  maxInputTokens: z.number().int().min(256).max(1_000_000).default(24_000),
+  maxInputTokens: z.number().int().min(256).max(2_000_000_000).default(24_000),
   maxOutputTokens: z.number().int().min(128).max(250_000).default(8_000),
   maxToolCalls: z.number().int().min(1).max(1_000).default(16),
   maxCostUsd: z.number().nonnegative().optional(),

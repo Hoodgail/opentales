@@ -1,0 +1,108 @@
+# An isolated acceptance environment. Never use the production Compose project.
+name: ${VALIDATION_PROJECT:-opentales-novel-validation}
+
+x-worker: &worker
+  image: opentales-novel-validation:${VALIDATION_REVISION:?Set the exact checked-out commit SHA}
+  build:
+    context: ../..
+    dockerfile: packages/backend/Dockerfile
+  profiles: [acceptance]
+  init: true
+  restart: "on-failure:3"
+  stop_grace_period: 2m
+  mem_limit: 1536m
+  cpus: 1.0
+  command: [sh, -c, "pnpm exec prisma migrate deploy && exec node dist/scripts/live-novel-build.js"]
+  labels:
+    traefik.enable: "false"
+    org.opencontainers.image.revision: ${VALIDATION_REVISION}
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+x-live-environment: &live-environment
+  NODE_ENV: production
+  TZ: UTC
+  JWT_SECRET: ${VALIDATION_JWT_SECRET:?Supply a staging-only encryption secret}
+  LIVE_API_KEY: ${LIVE_API_KEY:?Supply the authorized test provider key privately}
+  LIVE_BASE_URL: ${LIVE_BASE_URL:?Supply the authorized test provider URL}
+  LIVE_SOURCE_REVISION: ${VALIDATION_REVISION}
+  LIVE_REQUIRE_BUILD_ID: "1"
+  LIVE_SUPERVISED: "1"
+  LIVE_HEARTBEAT_SECONDS: "30"
+  LIVE_OUTPUT_DIR: /validation/result
+  ASSETS_DIR: /validation/assets
+
+x-database: &database
+  image: postgres:18-alpine
+  restart: unless-stopped
+  mem_limit: 512m
+  cpus: 0.5
+  labels:
+    traefik.enable: "false"
+  healthcheck:
+    test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+    interval: 5s
+    timeout: 5s
+    retries: 20
+
+services:
+  gemini-db:
+    <<: *database
+    environment:
+      POSTGRES_USER: opentales
+      POSTGRES_PASSWORD: ${GEMINI_DB_PASSWORD:?Supply a URL-safe random staging password}
+      POSTGRES_DB: opentales_validation_gemini
+    volumes:
+      - gemini-db:/var/lib/postgresql
+    networks: [gemini]
+  luna-db:
+    <<: *database
+    environment:
+      POSTGRES_USER: opentales
+      POSTGRES_PASSWORD: ${LUNA_DB_PASSWORD:?Supply a URL-safe random staging password}
+      POSTGRES_DB: opentales_validation_luna
+    volumes:
+      - luna-db:/var/lib/postgresql
+    networks: [luna]
+  gemini:
+    <<: *worker
+    environment:
+      <<: *live-environment
+      DATABASE_URL: postgresql://opentales:${GEMINI_DB_PASSWORD}@gemini-db:5432/opentales_validation_gemini?connection_limit=5
+      LIVE_EXPECT_DATABASE: opentales_validation_gemini
+      LIVE_MODEL: gemini-3.8-flash-high
+      LIVE_BUILD_ID: ${GEMINI_BUILD_ID:?Supply the restored Gemini run ID}
+      LIVE_MAX_TOKENS: ${GEMINI_MAX_TOKENS:-150000000}
+    depends_on:
+      gemini-db:
+        condition: service_healthy
+    volumes:
+      - gemini-output:/validation
+    networks: [gemini]
+  luna:
+    <<: *worker
+    environment:
+      <<: *live-environment
+      DATABASE_URL: postgresql://opentales:${LUNA_DB_PASSWORD}@luna-db:5432/opentales_validation_luna?connection_limit=5
+      LIVE_EXPECT_DATABASE: opentales_validation_luna
+      LIVE_MODEL: gpt-5.6-luna
+      LIVE_BUILD_ID: ${LUNA_BUILD_ID:?Supply the restored Luna run ID}
+      LIVE_MAX_TOKENS: ${LUNA_MAX_TOKENS:-150000000}
+    depends_on:
+      luna-db:
+        condition: service_healthy
+    volumes:
+      - luna-output:/validation
+    networks: [luna]
+
+networks:
+  gemini:
+  luna:
+volumes:
+  gemini-db:
+  luna-db:
+  gemini-output:
+  luna-output:

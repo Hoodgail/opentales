@@ -605,6 +605,43 @@ describeDatabase('Novel Build correction-wave invariants', () => {
       title: 'Revised Opening', content: 'REVISED CANONICAL OPENING', goal: 'New exact goal', tension: 0.77, writerNotes: 'Frozen writer note'
     });
   });
+  it('repairs a declared scene dependency gap without accepting invented keys or hiding final diagnostics', async () => {
+    const run = await builds.create(ownerId, projectId, {
+      idempotencyKey: `dependency-repair:${randomUUID()}`, brainstorm: 'Repair a missing causal predecessor.', autonomyMode: 'assist',
+      targetChapterCount: 1, targetSceneCount: 2, targetCharacterCount: 1
+    });
+    const firstContent = scenePlan(characterId);
+    const secondContent = { ...firstContent, sceneKey: 'scene-2', ordinal: 2, dependencies: ['scene-1'] };
+    const initial = await story.applyArtifactBatch(ownerId, projectId, run.id, {
+      idempotencyKey: 'dependency-repair:initial', expectedBuildRevision: run.revision,
+      operations: [
+        { op: 'create', artifact: { type: 'chapter-brief', key: 'chapter-1', title: 'Chapter', status: 'accepted', content: { ...chapterBrief(), sceneKeys: ['scene-1', 'scene-2'] } } },
+        { op: 'create', artifact: { type: 'scene-plan', key: 'scene-1', title: 'First', status: 'accepted', content: firstContent } },
+        { op: 'create', artifact: { type: 'scene-plan', key: 'scene-2', title: 'Second', status: 'accepted', content: secondContent } }
+      ]
+    }, { allowTaskBinding: false });
+    const first = initial.artifacts.find(a => a.key === 'scene-1')!;
+    const second = initial.artifacts.find(a => a.key === 'scene-2')!;
+    const invalidated = await story.applyArtifactBatch(ownerId, projectId, run.id, {
+      idempotencyKey: 'dependency-repair:invalidate', expectedBuildRevision: initial.buildRevision,
+      operations: [{ op: 'invalidate', artifactId: first.id, expectedVersion: first.version }]
+    }, { allowTaskBinding: false });
+    expect((await story.diagnostics(ownerId, projectId, run.id)).diagnostics.some(d => d.code === 'missing-scene-dependency')).toBe(true);
+    await expect(prisma.$transaction(tx => builds.materializeChapterGraphsInTransaction(tx, run.id))).rejects.toThrow('missing accepted scene');
+    await expect(story.applyArtifactBatch(ownerId, projectId, run.id, {
+      idempotencyKey: 'dependency-repair:invented', expectedBuildRevision: invalidated.buildRevision,
+      operations: [{ op: 'replace', artifactId: second.id, expectedVersion: second.version, artifact: {
+        type: 'scene-plan', key: 'scene-2', title: 'Invalid', status: 'validated', content: { ...secondContent, dependencies: ['invented'] }
+      } }]
+    }, { allowTaskBinding: false })).rejects.toThrow('missing dependency');
+    const repaired = await story.applyArtifactBatch(ownerId, projectId, run.id, {
+      idempotencyKey: 'dependency-repair:restore', expectedBuildRevision: invalidated.buildRevision,
+      operations: [{ op: 'create', artifact: { type: 'scene-plan', key: 'scene-1', title: 'Repaired first', status: 'validated', content: firstContent } }]
+    }, { allowTaskBinding: false });
+    expect(repaired.artifacts.some(a => a.key === 'scene-1' && a.version === 2)).toBe(true);
+    expect((await story.diagnostics(ownerId, projectId, run.id)).diagnostics.some(d => d.code === 'missing-scene-dependency')).toBe(false);
+  });
+
 });
 
 function chapterBrief() {

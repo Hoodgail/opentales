@@ -11,7 +11,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     services:
       postgres:
         image: postgres:16-alpine
@@ -51,5 +51,18 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm eval
-      - run: pnpm --dir packages/backend test:critical-coverage
+      # The production-length fixture already runs above. Keep every shorter
+      # integration case here: they supply the database coverage gates.
+      - run: pnpm --dir packages/backend test:critical-coverage --testNamePattern '^(?!.*runs a production 85k/32-chapter/104-scene novel)'
       - run: pnpm build
+      - name: Validate isolated acceptance deployment configuration
+        env:
+          VALIDATION_REVISION: ${{ github.sha }}
+          VALIDATION_JWT_SECRET: ci-validation-only
+          GEMINI_DB_PASSWORD: ci-validation-only
+          LUNA_DB_PASSWORD: ci-validation-only
+          LIVE_API_KEY: unused-ci-placeholder
+          LIVE_BASE_URL: http://127.0.0.1:1/v1
+          GEMINI_BUILD_ID: ci-gemini-placeholder
+          LUNA_BUILD_ID: ci-luna-placeholder
+        run: docker compose -f deploy/novel-build/compose.yml --profile acceptance config --quiet

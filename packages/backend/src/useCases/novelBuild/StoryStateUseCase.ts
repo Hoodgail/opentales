@@ -73,7 +73,7 @@ import {
   stableStringify,
   validateArtifactContent
 } from './schemas.js';
-import { NovelBuildUseCase } from './NovelBuildUseCase.js';
+import { NovelBuildUseCase, referenceVariants, collectJsonReferences } from './NovelBuildUseCase.js';
 import { abortBuildRunExecutions } from '../ai/workflow/BuildExecutionRegistry.js';
 import { getProjectInclude, toManuscriptProject } from '../projects/projectMapper.js';
 import { createStoryDiagnosticsResult } from './diagnostics/index.js';
@@ -147,7 +147,7 @@ export class StoryStateUseCase {
         );
       }
       await this.validateArtifactCrossLinks(tx, projectId, buildRunId);
-      const createdChapterTaskIds = await this.buildUseCase.materializeChapterGraphsInTransaction(tx, buildRunId);
+      const createdChapterTaskIds = await this.buildUseCase.materializeChapterGraphsInTransaction(tx, buildRunId, { deferIncomplete: true });
       await this.rewireArtifactConsumers(tx, buildRunId, replacementMap);
       await this.builds.refreshReadyTasks(tx, buildRunId);
       const updated = await tx.buildRun.update({ where: { id: buildRunId }, data: { revision: { increment: 1 } }, select: { revision: true } });
@@ -544,7 +544,11 @@ export class StoryStateUseCase {
             order: scene.order,
             title: scene.title,
             status: scene.status === 'ACCEPTED' ? 'final' : scene.status === 'REVIEW' ? 'review' : scene.status === 'DRAFTING' ? 'in-progress' : 'planned',
-            povCharacterId: scene.povCharacterId,
+            // Isolated builds reference character bibles before canonical
+            // Character rows exist. Keep those identities in diagnostics
+            // without writing artifact IDs into canonical foreign keys.
+            povCharacterId: scene.povCharacterId ?? (isObject(metadata.povRef)
+              ? stringValue(metadata.povRef.id) ?? stringValue(metadata.povRef.key) : null),
             locationId: scene.locationId,
             storyDate: scene.storyDate,
             storyTime: scene.storyTime,
@@ -630,9 +634,12 @@ export class StoryStateUseCase {
       const replacementTaskId = internalTask?.id ?? (allowTaskBinding ? operation.artifact.taskId ?? old.taskId : null);
       await this.assertArtifactTask(tx, buildRunId, replacementTaskId);
       const status = operation.artifact.status ?? 'draft';
+      // Compensation can reactivate an older version while preserving newer
+      // invalidated history. Never reuse a version number from that history.
+      const latest = await tx.storyArtifact.findFirst({ where: { buildRunId, type: old.type, key: old.key }, orderBy: { version: 'desc' }, select: { version: true } });
       const replacement = await tx.storyArtifact.create({ data: {
         projectId, buildRunId, taskId: replacementTaskId, type: old.type, key: old.key,
-        title: required(operation.artifact.title, 'Artifact title', 1_000), version: old.version + 1,
+        title: required(operation.artifact.title, 'Artifact title', 1_000), version: (latest?.version ?? old.version) + 1,
         schemaVersion: operation.artifact.schemaVersion ?? STORY_SCHEMA_VERSION, status: toPrismaArtifactStatus(status),
         content: content as Prisma.InputJsonValue, contentHash: stableHash(content), replacesArtifactId: old.id,
         acceptedAt: status === 'accepted' ? new Date() : null
@@ -969,11 +976,21 @@ export class StoryStateUseCase {
     });
     const briefs = new Set<string>();
     const scenes = new Set<string>();
+    const declaredScenes = new Set<string>();
     const characters = new Set<string>();
+    const locations = new Set<string>();
+    const canonicalLocations = await tx.location.findMany({ where: { projectId }, select: { id: true, name: true } });
+    for (const location of canonicalLocations) for (const key of [location.id, location.name].flatMap(referenceVariants)) locations.add(key);
     for (const artifact of artifacts) {
       const content = artifact.content as JsonObject;
-      if (artifact.type === 'CHAPTER_BRIEF') briefs.add(typeof content.chapterKey === 'string' ? content.chapterKey : artifact.key);
+      if (artifact.type === 'CHAPTER_BRIEF') {
+        briefs.add(typeof content.chapterKey === 'string' ? content.chapterKey : artifact.key);
+        if (artifact.status === 'VALIDATED' || artifact.status === 'ACCEPTED') for (const key of stringArray(content.sceneKeys)) declaredScenes.add(key);
+      }
       if (artifact.type === 'SCENE_PLAN') scenes.add(typeof content.sceneKey === 'string' ? content.sceneKey : artifact.key);
+      if (artifact.type === 'WORLD_BIBLE' && Array.isArray(content.geography)) {
+        for (const entry of content.geography.filter(isObject)) for (const key of [entry.key, entry.name].flatMap(referenceVariants)) locations.add(key);
+      }
       if (artifact.type === 'CHARACTER_BIBLE') {
         for (const key of [artifact.id, artifact.key, content.characterKey, content.name, ...stringArray(content.aliases)]) {
           if (typeof key === 'string') characters.add(key);
@@ -982,9 +999,15 @@ export class StoryStateUseCase {
     }
     for (const artifact of artifacts) {
       const content = artifact.content as JsonObject;
+      for (const ref of collectJsonReferences(content)) if (ref.type === 'location' && ![ref.id, ref.key].flatMap(referenceVariants).some(key => locations.has(key))) {
+        throw new HttpError(409, `Artifact '${artifact.key}' references missing location '${ref.key ?? ref.id}'. Copy an exact world-bible geography key or canonical location ID; the world-bible artifact ID is not a location.`);
+      }
       if (artifact.type === 'SCENE_PLAN') {
         if (typeof content.chapterKey !== 'string' || !briefs.has(content.chapterKey)) throw new HttpError(409, `Scene plan '${artifact.key}' references missing chapter brief '${String(content.chapterKey)}'`);
-        for (const dependency of stringArray(content.dependencies)) if (!scenes.has(dependency)) throw new HttpError(409, `Scene plan '${artifact.key}' references missing dependency '${dependency}'`);
+        // Replanning can temporarily remove a producer while its consumers remain.
+        // Exact allocations authorize these pending references during writes;
+        // diagnostics and the planning gate still require persisted scene plans.
+        for (const dependency of stringArray(content.dependencies)) if (!scenes.has(dependency) && !declaredScenes.has(dependency)) throw new HttpError(409, `Scene plan '${artifact.key}' references missing dependency '${dependency}'`);
       }
       // Act architecture is produced before chapter briefs, so its declared chapter
       // keys are forward references. The planning quality gate validates that the
@@ -992,7 +1015,7 @@ export class StoryStateUseCase {
       // Dossiers can name characters produced by later batches/shards. Downstream
       // artifacts must use the completed character corpus, including exact artifact IDs.
       if (artifact.type !== 'CHARACTER_BIBLE') {
-        for (const ref of collectReferences(content)) if (ref.type === 'character' && !characters.has(ref.id) && !characters.has(ref.key ?? '')) {
+        for (const ref of collectJsonReferences(content)) if (ref.type === 'character' && !characters.has(ref.id) && !characters.has(ref.key ?? '')) {
           const exists = await tx.character.findFirst({ where: { id: ref.id, projectId }, select: { id: true } });
           if (!exists) throw new HttpError(409, `Artifact '${artifact.key}' references missing character '${ref.id}'. Copy an exact character-bible id or characterKey.`);
         }

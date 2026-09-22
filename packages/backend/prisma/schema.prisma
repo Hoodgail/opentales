@@ -1373,6 +1373,7 @@ model BuildTask {
   reservedCostMicros    Int             @default(0)
   leaseExpiresAt        DateTime?
   heartbeatAt           DateTime?
+  retryAfterAt          DateTime?
   startedAt             DateTime?
   completedAt           DateTime?
   failedAt              DateTime?

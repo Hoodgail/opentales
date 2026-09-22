@@ -235,7 +235,9 @@ export function buildWorkspaceTools(
         offset: z.number().int().nonnegative().default(0)
       }).strict(),
       execute: async ({ buildRunId, ...input }) => {
-        const page = await new StoryStateUseCase(prisma).listArtifacts(context.userId, context.projectId, buildRunId, input);
+        const page = await new StoryStateUseCase(prisma).listArtifacts(context.userId, context.projectId, buildRunId, {
+          ...input, statuses: input.statuses ?? ['draft', 'validated', 'accepted']
+        });
         return {
           ...page,
           items: page.items.map(({ content: _content, ...artifact }) => artifact)

@@ -56,6 +56,12 @@ Workers claim ready tasks with expiring fenced leases and heartbeat during execu
 
 Pause and cancel abort local executions and invalidate their lease authority. A late provider response cannot mutate state after pause, expiry, reassignment, or cancellation. Failed or over-budget attempts compensate provisional artifacts, story-state versions, and manuscript heads before retry or escalation.
 
+Provider retry deadlines are persisted. The Build workspace distinguishes an active task from a provider retry window and a task queued for a worker; a phase label alone does not mean inference is running.
+
+The independent planning judge may identify exact artifact IDs that need correction. Before manuscript materialization, the worker can atomically rerun those planning producers and their dependents once within the planning gate's revision allowance. Unrelated artifacts remain intact. Feedback is untrusted context, not new author authority; unknown IDs, pinned artifacts, exhausted repair allowances, or an existing manuscript cannot authorize automatic replanning. The repaired plan must pass a fresh independent evaluation. A second failure remains actionable rather than starting an unlimited regeneration loop.
+
+After a scene passes review without changes, canon re-extraction can reuse its earlier validated extraction only when the exact manuscript heads and full current ledger fingerprint still match. Missing provenance, changed prose, or any ledger change requires fresh extraction. Completion rechecks the proof under the run lock. Diagnostics and quality gates still execute; reuse is recorded in the trace with zero model usage.
+
 ## Context and model routing
 
 Each inference is rendered once in layers A–F:
@@ -68,6 +74,8 @@ Each inference is rendered once in layers A–F:
 6. output schema and rubric.
 
 Manuscript, attachment, imported, and public-web content is serialized as untrusted data. Context uses build-branch prose, causal predecessors, facts valid at the target story position, current entity state, timeline, active threads, open loops, directives, pins, and prior evaluation feedback.
+
+Chapter briefs support explicit `genre` and `illustrationDirections` for author-requested illustrated serials. The planner allocates these per chapter; only that chapter's final scene appends the prose illustration briefs. These optional fields do not generate image assets or imply that every story needs illustrations.
 
 Model routing is configured with `AI_MODEL_ROUTING_JSON`. The worker automatically fetches the open [models.dev catalog](https://models.dev/api.json), converts its per-million-token USD prices to currency micro-units, and keeps them in an in-memory cache for six hours by default. Expired entries are conditionally refreshed; a temporary network failure reuses the last in-memory snapshot for five minutes while continuing to retry. The cache is never persisted across backend restarts.
 
@@ -165,6 +173,8 @@ External MCP agents receive parallel user-facing operations rather than worker c
 
 ## Verification
 
+See [full-length readiness](novel-build-readiness.md) for the current live-validation limitations and release gates. The historical [reliability audit](novel-build-validation.md) documents the earlier short-story run, not completed full-length validation.
+
 Run the release checks:
 
 ```bash
@@ -202,4 +212,68 @@ The command creates an isolated test project, runs the actual worker and provide
 
 For explicit test-budget changes, set `LIVE_MAX_TOKENS` (default 5,000,000). On an existing run, this calls the normal authorization endpoint with the existing scope and unchanged cost cap before continuing; it does not mark tasks complete.
 
+To stop a long validation run cleanly after its current task, configure `LIVE_STOP_FILE` and create that file. The runner exits unsuccessfully because validation is incomplete, while preserving the runnable build for `LIVE_BUILD_ID` resume. Remove the stop file before resuming. Task reports include token usage, the authorized token limit, and accounting cost.
+
+Completed runs can be verified again without reauthorizing them. Verification selects an export from the latest compilation and checks that its scene snapshots match the current saved writing versions before checking the downloaded checksum.
+
+For a larger supplied brainstorm, set `LIVE_BRAINSTORM_FILE` to a UTF-8 text file. `LIVE_TITLE`, `LIVE_OBJECTIVE`, `LIVE_TARGET_WORDS`, `LIVE_MIN_WORDS`, `LIVE_MAX_WORDS`, `LIVE_CHAPTERS`, `LIVE_SCENES`, and `LIVE_CHARACTERS` configure the new build. For example, use 32 chapters, 110 scenes, 20 characters, and a 40,000-word target with a 32,000–48,000-word range. Verification uses the persisted run's targets, including on resume. `LIVE_MAX_COST_MICROS` sets the new run's cost cap (default 200,000,000). To compare providers in parallel, use separate disposable databases and separate output directories; never run two workers against the same fixture run.
+
+Scene planning receives a complete structural index of the relevant persisted chapter briefs, separate from truncated prose excerpts. A scene shard uses its chapter's declared scene keys and count, rather than assuming an even distribution. The worker retains build-scoped artifact listing and reading under strict skill filtering. Missing or oversized structural input fails before inference instead of asking the author to reconstruct existing data.
+
+Artifact replacement increments the producer task revision. Heartbeats refresh that revision and retry a bounded revision conflict while retaining the original lease token and generation checks. Completion refreshes the revision after stopping heartbeats, so a worker can revise its own artifact without losing an otherwise valid lease. A delayed integration fixture exercises replacements on both sides of a real heartbeat.
+
+Failed-attempt compensation invalidates all artifact versions created in that attempt and restores only predecessors outside the failed attempt. Replacement versions advance beyond all retained history, including invalidated versions. Interrupted calls without finalized usage are conservatively charged against their reservation; trace pricing metadata marks `chargedReservedCeiling` even when catalog pricing is available. Those charges are budget accounting estimates, not provider invoices.
+
+Large beat plans allocate `beat-1` through `beat-N` before model generation. Shards write only their assigned range, use the same artifact key and `beatKey`, and may link forward only to this declared corpus. Later shards depend on the previous shard, so causal inputs and rerun invalidation follow the graph. Descriptive beat names belong in `title`. Aggregate failures report concrete counts or invalid keys instead of a generic failed-check message. `LIVE_RERUN_TASK` also accepts comma-separated task keys when repairing multiple independent shards from an older run.
+
+Scene dependencies must likewise name scene keys declared in the persisted chapter briefs, including forward references. The write tool rejects undeclared dependencies before they enter the planning corpus.
+
+Chapter briefs are accepted only when their combined scene allocation matches the build's exact scene target, with globally unique scene keys and consecutive chapter numbers. The final brief batch is validated before persistence, completion rechecks the invariant, and scene-shard context rejects older invalid allocations before inference. A 32-chapter plan with three scenes per chapter therefore cannot silently proceed toward a 110-scene build.
+
 The runner uses the same automatic models.dev pricing loader, cache, alias resolution, and optional `AI_MODEL_PRICING_JSON` overrides as production. It no longer injects fixed test prices. Unresolved prices pause a cost-bounded run before inference. Historical validation totals recorded with fixed test rates are not retroactively changed. Run PostgreSQL-backed CI as well: embedded database validation does not prove production concurrency behavior.
+
+Chapter-scoped scene planning falls back to a 128,000-token input allowance when model limits are unknown; catalog-sized windows supersede that fallback and explicit user caps remain authoritative. Its unknown-route output fallback is 32,000 tokens for structured multi-scene writes and reasoning; known routes use their catalog output allowance. Whole-build token and cost limits still apply. Provider-limit failures retain tool-call evidence and roll back attempt writes. The live regression uses the observed 100,881-token conversation rather than only tiny synthetic usage.
+
+Failed-attempt recovery also invalidates every ledger version created by that attempt, including versions already superseded within it. It restores only pre-attempt predecessors, so repeated canon/state/timeline/loop/thread updates cannot leave intermediate failed values active. The regression covers both a newly introduced fact and replacement of an existing fact.
+
+Whole-book timeline generation uses the aggregate artifact fallback (256,000 input / 64,000 output tokens per invocation) when catalog limits are unavailable. Known routes use catalog allowances. Its prompt keeps individual timeline entries concise.
+
+
+## Model context and cumulative budgets
+
+Novel Build resolves `limit.context`, `limit.input`, and `limit.output` from the same cached models.dev catalog used for pricing. Official model IDs and catalog-declared reasoning aliases share these limits. Price-only operator overrides retain catalog limits. An ambiguous relay alias uses the smallest known window; a route with unknown capacity falls back to the task's existing input budget instead of assuming a million-token model.
+
+The available request input is the smallest supported input across the worker's configured fallback routes, after reserving output. The independent judge uses its own window. Context packing also reserves space for instructions, serialized tool schemas, and tool history. Skill section sizes and the former 80K assembler ceiling do not cap Novel Build context. Current build artifacts, character identities, world rules, temporally valid canon, and prior scene prose are supplied in full when the available request budget permits. Invalidated artifacts and future character states are excluded intentionally. Large records are not reduced to 500-character excerpts before packing. Character identities, location keys, and chapter scene allocations have protected indexes.
+
+If the actual available budget is insufficient, priority packing reports truncation and retains retrieval identifiers; workers can read the complete persisted records. Tool history is checked before subsequent model requests and is never silently discarded. Context-size estimates are approximate, not provider tokenizer counts. A larger context reduces missing evidence but does not guarantee factual consistency, so reference validation and manuscript quality gates remain required.
+
+`BuildTrace.inputs.contextCoverage` records the resolved window, request input allowance, estimated tool-schema size, context budget, per-section packing results, truncation, and task invocation limits. `contextTokenCount` measures the packed context; provider usage measures the complete request including repeated context across tool exchanges. These are different quantities.
+
+The build's `maxTokens` is cumulative across requests and retries. It is not a context-window setting. Using a large context repeatedly can consume a 5M budget quickly. Each tool-loop request checks remaining build tokens and priced cost; increasing context capacity does not remove these limits.
+
+
+During selective replanning, a surviving scene may temporarily refer to an invalidated predecessor. Artifact writes accept that pending dependency only if its exact key is declared in a validated or accepted chapter brief. Invented keys still fail. Diagnostics continue to report the missing scene until its replacement is persisted, and planning completion still requires the complete scene set.
+
+Artifact edits defer graph materialization while accepted dependencies are incomplete. This also covers repair after a previous planning gate accepted the whole plan; validated replacements can be saved without prematurely creating a partial graph. Explicit graph materialization and plan acceptance still reject missing accepted dependencies.
+
+Authorized durable workers receive AUTO execution instructions. Their mutations remain fenced by the task's scope, current lease, authorization and budgets; interactive inference still defaults to manual approval.
+
+Provider HTTP 429 responses persist a `retryAfterAt` deadline instead of immediately consuming every task attempt. Workers and the public claim boundary both honor it. `Retry-After` is preferred; explicit quota-reset durations are recognized, with a one-minute fallback. Retry counts remain bounded. Rejected HTTP requests do not incur a fabricated inference reservation charge; completed earlier tool-loop requests still count. A missing-usage disconnect remains conservatively accounted. Apply the `20260921000000_build_retry_cooldown` migration before deploying this version.
+
+The writer and independent judge each use their own model window. A smaller judge no longer compresses the writer's evidence; the judge's own input/output and remaining-run budget are checked separately. Provider stream errors and completed usage remain available even when the SDK's text promise rejects with a generic no-output error.
+
+Some OpenAI-compatible relays report reasoning separately: `total_tokens = prompt_tokens + completion_tokens + reasoning_tokens`. This exact convention is normalized before the SDK discards the provider total. Standard totals that already include reasoning remain unchanged. Streaming and non-streaming SDK-boundary tests prevent both omitted reasoning and double counting.
+
+The production-size database test executes all 32 chapters and 104 scenes through the real worker, revisions, current-head compilation and checksum-verified export using deterministic model responses. This validates workflow mechanics, not the literary quality or availability of a real provider. The independent live-provider builds remain a separate requirement.
+
+Manuscript-wide revisers budget a read and a write per scoped unit plus reporting/repair calls, and inspection cannot consume the calls reserved for persisting those units. Whole-manuscript critics and revisers receive a default deadline of 45 seconds per scoped unit, with a 15-minute floor and two-hour ceiling. The worker timer and task contract use the same deadline; an explicit policy duration still overrides it.
+
+Connection failures and HTTP 503 responses without a retry hint wait one minute before another bounded attempt, avoiding immediate retry exhaustion.
+
+When every reachable execution route has catalog output limits, workers reserve the smallest published allowance (up to the task-contract ceiling) rather than imposing smaller static defaults. This includes reasoning tokens. Static 32K/64K defaults apply only when route limits are incomplete. Author-specified caps remain authoritative, and mixed fallback routes use their shared safe limit. Regression cases retain both observed timeline (51,775) and setup/payoff (35,936) token responses and verify explicit lower caps still roll back writes.
+
+Setup/payoff-map workers receive a protected index of every typed setup/payoff reference and plot-thread `setupPayoffKeys` entry. A candidate map must cover those identifiers before its batch can be saved. The final planning audit independently checks the same logical references, so legacy incomplete maps still cannot pass acceptance.
+
+Timeline prerequisite diagnostics accept the same current record IDs and stable keys as canon writes. Stable keys survive re-extraction into a new event version. Missing or invalidated prerequisites and reversed chronology still fail; historical IDs are not silently redirected.
+
+A passing prose critique does not skip the downstream revision when current deterministic diagnostics contain errors. The independent judge's score remains unchanged in its evaluation; the completion receipt separately records that revision is required. Final diagnostic and quality gates still enforce acceptance.

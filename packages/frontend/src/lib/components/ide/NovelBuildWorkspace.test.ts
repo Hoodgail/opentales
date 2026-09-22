@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BuildRun, BuildTask } from '@opentales/sdk';
 import NovelBuildWorkspace from './NovelBuildWorkspace.svelte';
+import { buildExecutionStatus } from './buildExecutionStatus';
 
 afterEach(() => cleanup());
 
@@ -59,6 +60,30 @@ function callbacks() {
 }
 
 describe('NovelBuildWorkspace exhausted failure recovery', () => {
+  it('shows the provider retry deadline and retains the reason instead of implying active work', () => {
+    const task = { ...exhaustedTask, status: 'ready' as const, attempts: 1, retryAfterAt: '2099-01-01T00:00:00.000Z', lastError: 'Provider quota exhausted' };
+    render(NovelBuildWorkspace, { run: { ...failedRun, status: 'drafting', tasks: [task], lastError: null }, brainstorms: [], ...callbacks() });
+    const status = screen.getByRole('status', { name: 'Build execution status' });
+    expect(status.textContent).toContain('Waiting for provider retry window');
+    expect(status.textContent).toContain('Provider quota exhausted');
+    expect(status.querySelector('time')?.getAttribute('datetime')).toBe(task.retryAfterAt);
+  });
+
+  it('only describes the whole build as waiting when all ready tasks are cooling down', () => {
+    const now = Date.parse('2026-09-22T00:00:00Z');
+    const task = { ...exhaustedTask, status: 'ready' as const, retryAfterAt: '2026-09-22T01:00:00Z' };
+    const run = { ...failedRun, status: 'drafting' as const, tasks: [task] };
+    expect(buildExecutionStatus(run, now)?.kind).toBe('provider-wait');
+    expect(buildExecutionStatus(run, Date.parse(task.retryAfterAt))).toEqual({ kind: 'queued' });
+    expect(buildExecutionStatus({ ...run, tasks: [task, { ...task, id: 'due', retryAfterAt: null }] }, now)).toEqual({ kind: 'queued' });
+    expect(buildExecutionStatus({ ...run, tasks: [{ ...task, retryAfterAt: 'invalid' }] }, now)).toEqual({ kind: 'queued' });
+    expect(buildExecutionStatus({ ...run, tasks: [task, { ...task, id: 'running', status: 'running' }] }, now)).toBeNull();
+    expect(buildExecutionStatus({ ...run, status: 'paused' }, now)).toBeNull();
+    expect(buildExecutionStatus({ ...run, authorizedAt: null }, now)).toBeNull();
+    expect(buildExecutionStatus({ ...run, tasks: [] }, now)).toBeNull();
+    expect(buildExecutionStatus(null, now)).toBeNull();
+  });
+
   it('routes the run-level action through explicit boundary-rerun confirmation', async () => {
     const actions = callbacks();
     render(NovelBuildWorkspace, { run: failedRun, brainstorms: [], ...actions });

@@ -6,6 +6,7 @@ import { HttpError } from '../../http/HttpError.js';
 import { decryptSecret } from '../../utils/secretBox.js';
 import { bareCodexModelId, isCodexModelAllowed } from './codexModels.js';
 import { createCodexFetch } from './codexProvider.js';
+import { withCompatibleUsage } from './compatibleUsage.js';
 
 export type AiModel = Parameters<typeof generateText>[0]['model'];
 
@@ -37,7 +38,7 @@ export async function loadAiModelForProject(
       baseURL: settings.baseUrl ?? 'https://api.openai.com/v1',
       apiKey: settings.apiKey ? decryptSecret(settings.apiKey) : undefined
     });
-    return provider(model);
+    return withCompatibleUsage(provider(model));
   }
   if (settings.providerKind === 'GITHUB_COPILOT') {
     if (!settings.apiKey) throw new HttpError(400, 'GitHub Copilot is not connected for this project');
@@ -48,7 +49,7 @@ export async function loadAiModelForProject(
       apiKey: token,
       fetch: copilotFetch(token)
     } as Parameters<typeof createOpenAICompatible>[0] & { fetch: typeof fetch });
-    return provider(model);
+    return withCompatibleUsage(provider(model));
   }
   if (settings.providerKind === 'CODEX') {
     if (!settings.apiKey) throw new HttpError(400, 'Codex is not connected for this project');

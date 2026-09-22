@@ -3,6 +3,7 @@ import {
   makeCleanDiagnosticsFixture,
   entityState,
   artifact,
+  timelineEvent,
   makeFalsePositiveDiagnosticsFixture,
   makeTruePositiveDiagnosticsFixture
 } from './__fixtures__/storyDiagnosticsFixtures.js';
@@ -14,6 +15,26 @@ import {
 } from './index.js';
 
 describe('StoryDiagnosticsEngine', () => {
+  it('resolves timeline prerequisites by stable key or current ID while rejecting stale, missing and reversed events', () => {
+    const input = makeCleanDiagnosticsFixture();
+    const cause = timelineEvent({ id: 'database-event-v2', key: 'event-1', title: 'Diner opens', sortOrder: 1, version: 2 });
+    const effect = timelineEvent({ id: 'database-event-2', key: 'event-2', title: 'Gus arrives', sortOrder: 2, dependencyIds: ['event-1'] });
+    input.timelineEvents = [{ ...cause, id: 'database-event-v1', version: 1, isCurrent: false }, cause, effect];
+    const errors = () => runStoryDiagnostics(input).filter(item => item.code.includes('timeline-prerequisite'));
+    expect(errors()).toEqual([]);
+    effect.dependencyIds = [cause.id];
+    expect(errors()).toEqual([]);
+    effect.dependencyIds = ['database-event-v1'];
+    expect(errors().map(item => item.code)).toEqual(['missing-timeline-prerequisite']);
+    effect.dependencyIds = ['missing-event'];
+    expect(errors().map(item => item.code)).toEqual(['missing-timeline-prerequisite']);
+    effect.dependencyIds = [cause.key];
+    cause.sortOrder = 3;
+    expect(errors().map(item => item.code)).toEqual(['timeline-prerequisite-after-event']);
+    cause.invalidatedAt = '2026-09-21T00:00:00.000Z';
+    expect(errors().map(item => item.code)).toEqual(['missing-timeline-prerequisite']);
+  });
+
   it('returns no diagnostics for a coherent, conservatively annotated snapshot', () => {
     expect(runStoryDiagnostics(makeCleanDiagnosticsFixture())).toEqual([]);
   });

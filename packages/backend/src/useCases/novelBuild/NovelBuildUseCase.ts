@@ -1,5 +1,6 @@
 import { Prisma, type BuildTask, type PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { validateCanonReuse } from './canonReuse.js';
 import type {
   ApplyBuildWritingPatchInput,
   ApplyBuildWritingPatchResult,
@@ -51,7 +52,8 @@ import {
   normalizeBuildInput,
   stableHash,
   type TaskTemplate,
-  validateArtifactContent
+  validateArtifactContent,
+  validateChapterSceneAllocation
 } from './schemas.js';
 
 const TERMINAL_RUN_STATUSES = new Set(['COMPLETED', 'CANCELLED']);
@@ -345,6 +347,7 @@ export class NovelBuildUseCase {
         where: {
           buildRunId,
           status: 'READY',
+          OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: new Date() } }],
           ...(input.taskTypes?.length ? { type: { in: input.taskTypes } } : {})
         },
         orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }]
@@ -470,6 +473,15 @@ export class NovelBuildUseCase {
       });
       assertExpectedRevision(task.revision, input.expectedRevision);
       const outputArtifactIds = unique(input.outputArtifactIds ?? []);
+      // Recheck reuse under the same run lock as completion, closing the gap
+      // between the worker's read and a concurrent prose/ledger edit.
+      const canonReuse = isJsonObjectValue(input.result) && isJsonObjectValue(input.result.canonReuse) ? input.result.canonReuse : null;
+      if (canonReuse && (task.type !== 'extract-scene-canon'
+        || typeof canonReuse.sourceTaskId !== 'string' || typeof canonReuse.sourceTraceId !== 'string'
+        || canonReuse.sourceTaskId === task.id
+        || !await validateCanonReuse(tx, buildRunId, task.scopeUnitIds, { sourceTaskId: canonReuse.sourceTaskId, sourceTraceId: canonReuse.sourceTraceId }))) {
+        throw new HttpError(409, 'Canon reuse proof is stale; manuscript or ledger changed. Run fresh extraction.');
+      }
       await this.validateTaskCompletion(tx, buildRunId, task, outputArtifactIds, input.qualityScore);
       if (task.type === 'quality-gate' && task.key.startsWith('scene:')) {
         if (task.scopeUnitIds.length !== 1) throw new HttpError(409, 'Scene quality gate must be scoped to exactly one manuscript unit');
@@ -507,7 +519,8 @@ export class NovelBuildUseCase {
           }
         });
       }
-      if (['critique-chapter', 'critique-scene'].includes(task.type) && input.qualityScore !== undefined && task.qualityThreshold !== null && input.qualityScore >= task.qualityThreshold) {
+      const revisionRequired = isJsonObjectValue(input.result) && input.result.revisionRequired === true;
+      if (!revisionRequired && ['critique-chapter', 'critique-scene'].includes(task.type) && input.qualityScore !== undefined && task.qualityThreshold !== null && input.qualityScore >= task.qualityThreshold) {
         const revision = await tx.buildTask.findFirst({ where: { buildRunId, dependencyIds: { has: task.id }, type: { in: ['revise-chapter', 'revise-scene-unit'] }, status: 'BLOCKED' } });
         if (revision) {
           await this.repository.transitionTask(tx, revision, {
@@ -568,6 +581,7 @@ export class NovelBuildUseCase {
   ): Promise<BuildTaskActionResult> {
     await this.access.assertPermission(userId, projectId, 'project:write');
     validateWorker(input.workerId);
+    if (input.retryAfterMs !== undefined && (!Number.isSafeInteger(input.retryAfterMs) || input.retryAfterMs < 0 || input.retryAfterMs > 86_400_000)) throw new HttpError(400, 'retryAfterMs must be an integer from 0 to 86400000');
     const result = await this.repository.transaction(async (tx) => {
       await this.repository.lockRun(tx, projectId, buildRunId);
       const replay = await tx.buildTaskTransition.findUnique({ where: { taskId_idempotencyKey: { taskId, idempotencyKey: input.idempotencyKey } } });
@@ -599,6 +613,7 @@ export class NovelBuildUseCase {
           reservedTokens: 0,
           reservedCostMicros: 0,
           failedAt: retryable ? null : new Date(),
+          retryAfterAt: retryable && input.retryAfterMs ? new Date(Date.now() + input.retryAfterMs) : null,
           lastError: input.error
         }
       });
@@ -628,34 +643,38 @@ export class NovelBuildUseCase {
     if (!task) throw new HttpError(404, 'Build task not found for attempt compensation');
     const artifacts = await tx.storyArtifact.findMany({ where: { buildRunId, taskId, createdAt: { gte: attemptBoundary }, invalidatedAt: null }, select: { id: true, replacesArtifactId: true } });
     if (artifacts.length) {
+      const attemptArtifactIds = new Set(artifacts.map(artifact => artifact.id));
       await tx.storyArtifact.updateMany({ where: { id: { in: artifacts.map((artifact) => artifact.id) } }, data: { status: 'INVALIDATED', invalidatedAt: new Date() } });
-      for (const replacedId of artifacts.flatMap((artifact) => artifact.replacesArtifactId ? [artifact.replacesArtifactId] : [])) {
+      // Restore only the version before this attempt, never intermediate
+      // replacements from the failed attempt (which would create multiple heads).
+      for (const replacedId of new Set(artifacts.flatMap((artifact) => artifact.replacesArtifactId && !attemptArtifactIds.has(artifact.replacesArtifactId) ? [artifact.replacesArtifactId] : []))) {
         const replaced = await tx.storyArtifact.findUnique({ where: { id: replacedId }, select: { acceptedAt: true } });
         if (replaced) await tx.storyArtifact.update({ where: { id: replacedId }, data: { status: replaced.acceptedAt ? 'ACCEPTED' : 'VALIDATED', invalidatedAt: null } });
       }
     }
     const restorePrevious = async <T extends { id: string; supersedesId: string | null }>(rows: T[], invalidate: (ids: string[]) => Promise<unknown>, restore: (ids: string[]) => Promise<unknown>) => {
       if (!rows.length) return;
+      const attemptIds = new Set(rows.map(row => row.id));
       await invalidate(rows.map((row) => row.id));
-      const previous = [...new Set(rows.flatMap((row) => row.supersedesId ? [row.supersedesId] : []))];
+      const previous = [...new Set(rows.flatMap((row) => row.supersedesId && !attemptIds.has(row.supersedesId) ? [row.supersedesId] : []))];
       if (previous.length) await restore(previous);
     };
-    await restorePrevious((await tx.canonFact.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary }, isCurrent: true }, select: { id: true, supersedesFactId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesFactId })),
+    await restorePrevious((await tx.canonFact.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary } }, select: { id: true, supersedesFactId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesFactId })),
       (ids) => tx.canonFact.updateMany({ where: { id: { in: ids } }, data: { isCurrent: false, status: 'INVALIDATED', invalidatedAt: new Date() } }),
       (ids) => tx.canonFact.updateMany({ where: { id: { in: ids }, invalidatedAt: null }, data: { isCurrent: true } }));
-    await restorePrevious((await tx.entityState.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary }, isCurrent: true }, select: { id: true, supersedesStateId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesStateId })),
+    await restorePrevious((await tx.entityState.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary } }, select: { id: true, supersedesStateId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesStateId })),
       (ids) => tx.entityState.updateMany({ where: { id: { in: ids } }, data: { isCurrent: false, status: 'INVALIDATED', invalidatedAt: new Date() } }),
       (ids) => tx.entityState.updateMany({ where: { id: { in: ids }, invalidatedAt: null }, data: { isCurrent: true } }));
-    await restorePrevious((await tx.timelineEvent.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary }, isCurrent: true }, select: { id: true, supersedesEventId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesEventId })),
+    await restorePrevious((await tx.timelineEvent.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary } }, select: { id: true, supersedesEventId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesEventId })),
       (ids) => tx.timelineEvent.updateMany({ where: { id: { in: ids } }, data: { isCurrent: false, invalidatedAt: new Date() } }),
       (ids) => tx.timelineEvent.updateMany({ where: { id: { in: ids }, invalidatedAt: null }, data: { isCurrent: true } }));
-    await restorePrevious((await tx.openLoop.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary }, isCurrent: true }, select: { id: true, supersedesLoopId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesLoopId })),
+    await restorePrevious((await tx.openLoop.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary } }, select: { id: true, supersedesLoopId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesLoopId })),
       (ids) => tx.openLoop.updateMany({ where: { id: { in: ids } }, data: { isCurrent: false, status: 'INVALIDATED', invalidatedAt: new Date() } }),
       (ids) => tx.openLoop.updateMany({ where: { id: { in: ids }, invalidatedAt: null }, data: { isCurrent: true } }));
-    await restorePrevious((await tx.setupPayoffLink.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary }, isCurrent: true }, select: { id: true, supersedesLinkId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesLinkId })),
+    await restorePrevious((await tx.setupPayoffLink.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary } }, select: { id: true, supersedesLinkId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesLinkId })),
       (ids) => tx.setupPayoffLink.updateMany({ where: { id: { in: ids } }, data: { isCurrent: false, status: 'INVALIDATED', invalidatedAt: new Date() } }),
       (ids) => tx.setupPayoffLink.updateMany({ where: { id: { in: ids }, invalidatedAt: null }, data: { isCurrent: true } }));
-    await restorePrevious((await tx.plotThread.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary }, isCurrent: true }, select: { id: true, supersedesThreadId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesThreadId })),
+    await restorePrevious((await tx.plotThread.findMany({ where: { buildRunId, sourceTaskId: taskId, createdAt: { gte: attemptBoundary } }, select: { id: true, supersedesThreadId: true } })).map((row) => ({ id: row.id, supersedesId: row.supersedesThreadId })),
       (ids) => tx.plotThread.updateMany({ where: { id: { in: ids } }, data: { isCurrent: false, status: 'INVALIDATED', invalidatedAt: new Date() } }),
       (ids) => tx.plotThread.updateMany({ where: { id: { in: ids }, invalidatedAt: null }, data: { isCurrent: true } }));
     if (task.scopeUnitIds.length) {
@@ -703,11 +722,14 @@ export class NovelBuildUseCase {
     buildRunId: string,
     taskId: string,
     input: BuildLifecycleInput,
-    options: { waitForAbort?: boolean; consumeRevisionIteration?: boolean } = {}
+    options: { waitForAbort?: boolean; consumeRevisionIteration?: boolean; planningRepair?: {
+      gateTaskId: string; sourceTraceId: string; artifactIds: string[]; feedback: string;
+    } } = {}
   ): Promise<BuildTaskActionResult> {
     await this.access.assertPermission(userId, projectId, 'project:write');
     let invalidatedTaskIds: string[] = [];
-    await this.runMutation(projectId, buildRunId, `rerun:${taskId}`, input, async (tx, run) => {
+    const mutationInput = options.planningRepair ? { ...input, planningRepair: options.planningRepair } : input;
+    await this.runMutation(projectId, buildRunId, `rerun:${taskId}`, mutationInput, async (tx, run) => {
       assertExpectedRevision(run.revision, input.expectedRevision);
       if (TERMINAL_RUN_STATUSES.has(run.status)) throw new HttpError(409, `Cannot rerun a ${run.status.toLowerCase()} build`);
       const target = await this.repository.getTask(tx, buildRunId, taskId);
@@ -715,7 +737,30 @@ export class NovelBuildUseCase {
         throw new HttpError(409, 'Task revision iteration budget is exhausted');
       }
       const tasks = await tx.buildTask.findMany({ where: { buildRunId } });
-      invalidatedTaskIds = transitiveDownstream(tasks, taskId);
+      const rootIds = new Set([taskId]);
+      const repair = options.planningRepair;
+      if (repair) {
+        const gate = tasks.find(task => task.id === repair.gateTaskId && task.key === 'planning-quality-gate' && task.type === 'quality-gate');
+        if (!gate || revisionBudgetIteration(gate) >= gate.maxRevisionIterations) throw new HttpError(409, 'Planning repair iteration budget is exhausted');
+        if (await tx.buildManuscriptUnit.count({ where: { buildRunId, invalidatedAt: null } })) throw new HttpError(409, 'Automatic planning repair cannot invalidate an existing manuscript');
+        const trace = await tx.buildTrace.findFirst({ where: { id: repair.sourceTraceId, taskId: gate.id, buildRunId, status: 'COMPLETED', attempt: gate.attempts } });
+        if (!trace) throw new HttpError(409, 'Planning repair requires the current independent evaluation trace');
+        const requested = unique(repair.artifactIds);
+        const artifacts = await tx.storyArtifact.findMany({ where: {
+          id: { in: requested }, buildRunId, invalidatedAt: null, status: { in: ['VALIDATED', 'ACCEPTED'] }
+        }, select: { id: true, taskId: true } });
+        if (!requested.length || artifacts.length !== requested.length) throw new HttpError(409, 'Planning repair references stale or missing artifacts');
+        const pinned = (await tx.buildDirective.findFirst({ where: { buildRunId }, orderBy: { createdAt: 'desc' }, select: { pinnedArtifactIds: true } }))?.pinnedArtifactIds ?? [];
+        if (requested.some(id => pinned.includes(id))) throw new HttpError(409, 'Planning repair cannot change pinned artifacts');
+        for (const artifact of artifacts) {
+          const producer = tasks.find(task => task.id === artifact.taskId);
+          if (!producer || producer.phase !== 'planning' || producer.status !== 'DONE' || !producer.type.startsWith('create-')
+            || !transitiveDownstream(tasks, producer.id).includes(gate.id)) throw new HttpError(409, 'Planning repair must target completed planning producers upstream of its gate');
+          rootIds.add(producer.id);
+        }
+        if (!artifacts.some(artifact => artifact.taskId === taskId)) throw new HttpError(409, 'Planning repair root must produce a rejected artifact');
+      }
+      invalidatedTaskIds = unique([...rootIds].flatMap(id => transitiveDownstream(tasks, id)));
       const invalidatedTasks = tasks.filter((task) => invalidatedTaskIds.includes(task.id));
       const releasedTokens = invalidatedTasks.reduce((sum, task) => sum + task.reservedTokens, 0);
       const releasedCostMicros = invalidatedTasks.reduce((sum, task) => sum + task.reservedCostMicros, 0);
@@ -750,7 +795,8 @@ export class NovelBuildUseCase {
         const outsideDependenciesDone = task.dependencyIds
           .filter((dependencyId) => !invalidatedSet.has(dependencyId))
           .every((dependencyId) => byId.get(dependencyId)?.status === 'DONE');
-        const nextStatus = taskIdToReset === taskId && outsideDependenciesDone ? 'READY' : 'BLOCKED';
+        const nextStatus = rootIds.has(taskIdToReset) && outsideDependenciesDone
+          && !task.dependencyIds.some(id => invalidatedSet.has(id)) ? 'READY' : 'BLOCKED';
         if (nextStatus === 'BLOCKED' && (task.status === 'RUNNING' || task.status === 'REVIEW')) {
           // Release execution before reblocking a descendant. Both transitions and
           // the lease fence below commit atomically in this rerun transaction.
@@ -768,7 +814,8 @@ export class NovelBuildUseCase {
             revisionIteration: { increment: 1 },
             executionPolicy: {
               ...(isJsonObjectValue(task.executionPolicy) ? task.executionPolicy : {}),
-              ...(!options.consumeRevisionIteration || task.id !== target.id ? { revisionIterationBaseline: task.revisionIteration + 1 } : {})
+              ...((repair ? task.id !== repair.gateTaskId : !options.consumeRevisionIteration || task.id !== target.id) ? { revisionIterationBaseline: task.revisionIteration + 1 } : {}),
+              ...(repair ? { planningRepairFeedback: { sourceTraceId: repair.sourceTraceId, feedback: repair.feedback } } : {})
             } as Prisma.InputJsonValue,
             outputArtifactIds: task.outputArtifactIds.filter((artifactId) => pinnedArtifactIds.includes(artifactId)),
             progress: 0,
@@ -784,6 +831,7 @@ export class NovelBuildUseCase {
             failedAt: null,
             cancelledAt: null,
             invalidatedAt: now,
+            retryAfterAt: null,
             lastError: null
           }
         });
@@ -938,6 +986,7 @@ export class NovelBuildUseCase {
             failedAt: null,
             cancelledAt: null,
             invalidatedAt: now,
+            retryAfterAt: null,
             lastError: null
           }
         });
@@ -1213,6 +1262,13 @@ export class NovelBuildUseCase {
         const maxCount = explicitMax ?? (aggregateProducer && spec && typeof spec.maxCount === 'number' ? spec.maxCount : 1);
         if (produced.length < minCount || produced.length > maxCount) {
           throw new HttpError(409, `Task produced ${produced.length} ${type} artifacts; required range is ${minCount}-${maxCount}`);
+        }
+        if (type === 'chapter-brief' && task.type === 'create-chapter-briefs') {
+          const target = isJsonObjectValue(manifest.target) ? manifest.target : {};
+          if (typeof target.targetChapterCount === 'number' && typeof target.targetSceneCount === 'number') {
+            try { validateChapterSceneAllocation(produced.map(artifact => artifact.content), target.targetChapterCount, target.targetSceneCount); }
+            catch (error) { throw new HttpError(409, error instanceof Error ? error.message : 'Invalid chapter scene allocation'); }
+          }
         }
       }
     } else if (requiredTypes.length) {
@@ -1538,7 +1594,7 @@ export class NovelBuildUseCase {
     return done === task.dependencyIds.length;
   }
 
-  async materializeChapterGraphsInTransaction(tx: NovelBuildTx, buildRunId: string): Promise<string[]> {
+  async materializeChapterGraphsInTransaction(tx: NovelBuildTx, buildRunId: string, options: { deferIncomplete?: boolean } = {}): Promise<string[]> {
     const run = await tx.buildRun.findUniqueOrThrow({ where: { id: buildRunId } });
     const [briefs, plans] = await Promise.all([
       tx.storyArtifact.findMany({
@@ -1581,6 +1637,11 @@ export class NovelBuildUseCase {
       chapterScenes.forEach((scene, index) => localSceneOrder.set(scene.sceneKey, index));
     }
     const sceneKeys = new Set(sceneRecords.map((scene) => scene.sceneKey));
+    // Artifact edits can temporarily invalidate one accepted predecessor while
+    // its surviving consumers remain accepted. Save the repair, but do not
+    // materialize a partial graph. Explicit materialization and plan acceptance
+    // still require every dependency to be accepted and present.
+    if (options.deferIncomplete && sceneRecords.some(scene => scene.dependencies.some(dependency => !sceneKeys.has(dependency)))) return [];
     for (const scene of sceneRecords) for (const dependency of scene.dependencies) if (!sceneKeys.has(dependency)) throw new HttpError(409, `Scene '${scene.sceneKey}' depends on missing accepted scene '${dependency}'`);
     assertAcyclicScenePlans(sceneRecords);
     const created: string[] = [];
@@ -2102,7 +2163,7 @@ function numericJson(value: JsonValue | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function collectJsonReferences(value: JsonValue): Array<{ type: string; id: string; key?: string }> {
+export function collectJsonReferences(value: JsonValue): Array<{ type: string; id: string; key?: string }> {
   const references: Array<{ type: string; id: string; key?: string }> = [];
   const visit = (node: JsonValue) => {
     if (Array.isArray(node)) return node.forEach(visit);
@@ -2112,6 +2173,10 @@ function collectJsonReferences(value: JsonValue): Array<{ type: string; id: stri
       id: node.id,
       ...(typeof node.key === 'string' ? { key: node.key } : {})
     });
+    for (const id of stringArray(node.setupPayoffKeys)) references.push({ type: 'setup-payoff', id });
+    for (const field of ['characterPresentIds', 'characterReferencedIds']) {
+      for (const id of stringArray(node[field])) references.push({ type: 'character', id });
+    }
     Object.values(node).forEach(visit);
   };
   visit(value);

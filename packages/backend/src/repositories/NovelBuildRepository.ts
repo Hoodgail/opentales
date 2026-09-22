@@ -355,12 +355,20 @@ export class NovelBuildRepository {
     const chapterCheckpoints = tasks.filter((task) => task.key.startsWith('chapter:') && task.key.endsWith(':checkpoint'));
     const unblocked: string[] = [];
     for (const task of tasks) {
-      if (task.status !== 'BLOCKED') continue;
+      if (task.status !== 'BLOCKED' && task.status !== 'READY') continue;
       const dependenciesDone = task.dependencyIds.every((id) => byId.get(id)?.status === 'DONE');
       const barrierReady = task.type !== 'drafting-complete-barrier'
         || (chapterCheckpoints.length > 0 && chapterCheckpoints.every((chapterTask) => chapterTask.status === 'DONE'));
       if (!dependenciesDone || !barrierReady) continue;
       const dependencyOutputs = uniqueStrings(task.dependencyIds.flatMap((id) => byId.get(id)?.outputArtifactIds ?? []));
+      // A replan preserves the task row, but its old input versions are no longer
+      // valid. Bind only current inputs plus the completed producers' outputs.
+      const retainedInputs = task.inputArtifactIds.length ? await tx.storyArtifact.findMany({
+        where: { id: { in: task.inputArtifactIds }, buildRunId, invalidatedAt: null, status: { in: ['VALIDATED', 'ACCEPTED'] } },
+        select: { id: true }
+      }) : [];
+      const retainedIds = new Set(retainedInputs.map(artifact => artifact.id));
+      const inputArtifactIds = uniqueStrings([...task.inputArtifactIds.filter(id => retainedIds.has(id)), ...dependencyOutputs]);
       if (dependencyOutputs.length) {
         const validOutputs = await tx.storyArtifact.count({
           where: { id: { in: dependencyOutputs }, buildRunId, invalidatedAt: null, status: { in: ['VALIDATED', 'ACCEPTED'] } }
@@ -369,11 +377,39 @@ export class NovelBuildRepository {
           throw new HttpError(409, `Task '${task.key}' dependency outputs are missing, invalidated, or unvalidated`);
         }
       }
+      let allocation: Prisma.BuildTaskUpdateInput = {};
+      if (task.type === 'create-scene-plan-shard') {
+        const policy = task.executionPolicy as Record<string, unknown>;
+        const briefs = await tx.storyArtifact.findMany({ where: {
+          id: { in: inputArtifactIds },
+          buildRunId, type: 'CHAPTER_BRIEF', invalidatedAt: null, status: { in: ['VALIDATED', 'ACCEPTED'] }
+        } });
+        const ordered = briefs.map(brief => ({ brief, content: brief.content as Record<string, unknown> }))
+          .sort((a, b) => Number(a.content.number) - Number(b.content.number));
+        const assigned = ordered.filter(({ content }) => content.number === policy.chapterNumber);
+        if (assigned.length !== 1) throw new HttpError(409, `Scene shard '${task.key}' requires exactly one validated chapter brief for chapter ${policy.chapterNumber}`);
+        const sceneKeys = assigned[0]!.content.sceneKeys;
+        if (!Array.isArray(sceneKeys) || !sceneKeys.length || sceneKeys.some(key => typeof key !== 'string' || !key.trim()) || new Set(sceneKeys).size !== sceneKeys.length) {
+          throw new HttpError(409, `Chapter ${policy.chapterNumber} must declare nonempty unique sceneKeys before scene planning`);
+        }
+        const startOrdinal = 1 + ordered.filter(({ content }) => Number(content.number) < Number(policy.chapterNumber))
+          .reduce((sum, { content }) => sum + (Array.isArray(content.sceneKeys) ? content.sceneKeys.length : 0), 0);
+        allocation = {
+          executionPolicy: { ...policy, count: sceneKeys.length, startOrdinal } as Prisma.InputJsonValue,
+          acceptanceCriteria: { ...(task.acceptanceCriteria as Record<string, unknown>), minOutputCount: sceneKeys.length, maxOutputCount: sceneKeys.length } as Prisma.InputJsonValue
+        };
+      }
+      if (task.status === 'READY') {
+        if (JSON.stringify(inputArtifactIds) !== JSON.stringify(task.inputArtifactIds)) {
+          await tx.buildTask.update({ where: { id: task.id }, data: { ...allocation, inputArtifactIds, revision: { increment: 1 } } });
+        }
+        continue;
+      }
       await this.transitionTask(tx, task, {
         status: 'READY',
         idempotencyKey: `scheduler:${task.revision}:ready`,
         reason: 'All task dependencies completed',
-        data: { inputArtifactIds: uniqueStrings([...task.inputArtifactIds, ...dependencyOutputs]) }
+        data: { ...allocation, inputArtifactIds }
       });
       unblocked.push(task.id);
     }
