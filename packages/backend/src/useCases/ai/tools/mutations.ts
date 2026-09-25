@@ -26,7 +26,7 @@ import type {
   UpdateSceneInput,
   UpdateSubmissionInput
 } from '@opentales/sdk';
-import { tool, type Tool } from 'ai';
+import { tool, type AgentTool as Tool } from './shared.js';
 import { z } from 'zod';
 import { HttpError } from '../../../http/HttpError.js';
 import { ProjectAccessRepository } from '../../../repositories/ProjectAccessRepository.js';

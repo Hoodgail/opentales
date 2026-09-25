@@ -183,6 +183,24 @@ export function createCodexFetch(
   transportFetch: typeof fetch = fetch,
   now: () => number = Date.now
 ): typeof fetch {
+  const prepare = createCodexRequestPreparer(prisma, projectId, transportFetch, now);
+  return async (input, init) => {
+    const prepared = await prepare(input, init);
+    return transportFetch(prepared.url, prepared.init);
+  };
+}
+
+/**
+ * Resolves (and refreshes) the project's Codex credentials, then rewrites an
+ * outbound model request for the ChatGPT Codex subscription endpoint. Shared by
+ * the fetch wrapper above and the OpenCode `http.request` hook.
+ */
+export function createCodexRequestPreparer(
+  prisma: PrismaClient,
+  projectId: string,
+  transportFetch: typeof fetch = fetch,
+  now: () => number = Date.now
+): (input: Parameters<typeof fetch>[0], init?: RequestInit) => Promise<{ url: URL; init: RequestInit }> {
   const sessionId = randomUUID();
   return async (input, init) => {
     const credentials = await resolveCodexCredentials(prisma, projectId, transportFetch, now);
@@ -209,11 +227,14 @@ export function createCodexFetch(
       if (residency) headers.set('x-openai-internal-codex-residency', residency);
     }
 
-    return transportFetch(url, {
-      ...init,
-      headers,
-      body: rewrite ? shapeCodexRequestBody(init?.body) : init?.body
-    });
+    return {
+      url,
+      init: {
+        ...init,
+        headers,
+        body: rewrite ? shapeCodexRequestBody(init?.body) : init?.body
+      }
+    };
   };
 }
 

@@ -12,7 +12,12 @@ function session(id: string): AiAgentSessionSummary {
     title: id === "session-1" ? "First session" : "Active session",
     approvalMode: id === "session-2" ? "auto" : "manual",
     status: "idle",
-    messageCount: 2,
+    parentId: null,
+    agent: "writer",
+    model: null,
+    outcome: null,
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
     createdAt: "2026-08-25T00:00:00.000Z",
     updatedAt: "2026-08-25T00:00:00.000Z",
   };

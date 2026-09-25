@@ -6,3 +6,9 @@ allowBuilds:
   electron: true
   esbuild: true
   prisma: true
+  # OpenCode native optionals: the embedded agent host disables the file
+  # watcher and shell tools, and msgpackr falls back to pure JS.
+  '@parcel/watcher': false
+  msgpackr-extract: false
+  tree-sitter-bash: false
+  tree-sitter-powershell: false

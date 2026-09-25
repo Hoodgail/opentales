@@ -762,271 +762,261 @@ export interface AiToolManifest {
   tools: AiToolDescriptor[];
 }
 
-export type AiAgentSessionStatus = "idle" | "running" | "cancelled" | "error";
+// ─── Agent sessions (OpenCode V2 harness) ──────────────────────────────────
+//
+// Agent sessions are OpenCode sessions running inside the backend's embedded
+// OpenCode host, one workspace per project. These types are a stable,
+// JSON-friendly projection of OpenCode's session/message/event model.
+
+export type AiAgentSessionStatus = "idle" | "running" | "retrying" | "error";
 export type AiAgentApprovalMode = "manual" | "auto";
-export type AiToolCallStatus =
-  | "pending-approval"
-  | "approved"
-  | "rejected"
-  | "running"
-  | "executed"
-  | "error";
-export type AiAgentSessionEventType =
-  | "session"
-  | "prompt-queued"
-  | "prompt-started"
-  | "text-delta"
-  | "tool-call"
-  | "tool-result"
-  | "tool-approval"
-  | "question-asked"
-  | "question-answered"
-  | "subtask-started"
-  | "subtask-finished"
-  | "prompt-finished"
-  | "error";
 
-export interface AiAgentMessage {
-  id: string;
-  role: "user" | "assistant" | "system" | "tool";
-  content: string;
-  model?: string | null;
-  attachments?: AiAgentAttachment[];
-  createdAt: string;
+export interface AiAgentTokenUsage {
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
 }
 
-export interface AiAgentSubtaskPart {
-  sessionId: string;
-  /** Provider tool-call identity for correlating task lifecycle parts. */
-  toolCallId?: string | null;
-  description: string;
-  subagentType: string;
-  status: "running" | "completed" | "cancelled" | "error";
-  output?: unknown;
-  outputTruncated?: boolean;
-  outputBytes?: number;
-  error?: string | null;
-}
-
-export type AiAgentTimelineChronology = "exact" | "approximate" | "mixed";
-
-/** Describes the fidelity and server-side windowing of `AiAgentSession.timeline`. */
-export interface AiAgentTimelineInfo {
-  mode: AiAgentTimelineChronology;
-  truncated: boolean;
-  earliestSequence: number | null;
-  hasMoreBefore: boolean;
-  /** Cursor for loading older best-effort legacy history after the initial snapshot. */
-  legacyCursor?: string | null;
-}
-
-interface AiAgentSessionPartBase {
-  id: string;
-  sequence: number;
-  promptId: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/**
- * A durable, ordered projection of an agent session. Contiguous assistant text
- * is deliberately split around tool and subtask activity so consumers can
- * render the conversation in the order it actually happened.
- */
-export type AiAgentSessionPart =
-  | (AiAgentSessionPartBase & {
-      kind: "message";
-      message: AiAgentMessage;
-    })
-  | (AiAgentSessionPartBase & {
-      kind: "text";
-      messageId: string;
-      content: string;
-      streaming: boolean;
-    })
-  | (AiAgentSessionPartBase & {
-      kind: "tool-call" | "tool-result";
-      toolCall: AiAgentToolCall;
-    })
-  | (AiAgentSessionPartBase & {
-      kind: "task";
-      task: AiAgentSubtaskPart;
-    });
-
-export interface GetAiAgentTimelineInput {
-  /** Return durable parts with sequence values strictly below this cursor. */
-  beforeSequence?: number;
-  /** Requested page size; the server may clamp this to its configured maximum. */
-  limit?: number;
-  /** Opaque cursor used only for best-effort pre-sequencing legacy history. */
-  legacyCursor?: string;
-}
-
-export interface AiAgentTimelinePage {
-  parts: AiAgentSessionPart[];
-  timelineInfo: AiAgentTimelineInfo;
-  nextBeforeSequence: number | null;
-  nextLegacyCursor?: string | null;
-  hasMore: boolean;
-  limitation?: "legacy-history-best-effort";
-}
-
-export interface AiAgentQueuedPrompt {
-  id: string;
-  prompt: string;
-  model?: string | null;
-  attachments?: AiAgentAttachment[];
-  status: "queued" | "running" | "completed" | "cancelled" | "error";
-  createdAt: string;
-}
-
-export interface AiAgentAttachment {
-  id: string;
-  name: string;
-  mimeType: string;
-  kind: AssetKind;
-  sizeBytes: number;
-  url?: string;
-  assetId?: string;
-  reference?: AiAgentProjectReference;
-}
-
-export interface AiAgentAttachmentInput extends AiAgentAttachment {
-  base64?: string;
-}
-
-export type AiAgentProjectReferenceType =
-  | "folder"
-  | "doc"
-  | "asset"
-  | "chapter"
-  | "character"
-  | "location"
-  | "act"
-  | "structure"
-  | "obstacle";
-
-export interface AiAgentProjectReference {
-  type: AiAgentProjectReferenceType;
-  id: string;
-  path?: string;
-  startLine?: number;
-  endLine?: number;
-}
-
-export interface AiAgentContextUsage {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  maxTokens: number;
-  percentage: number;
-  model: string | null;
-}
-
-export interface AiAgentToolCall {
-  id: string;
-  toolCallId: string | null;
-  toolName: string;
-  input: unknown;
-  inputTruncated?: boolean;
-  inputBytes?: number;
-  status: AiToolCallStatus;
-  output: unknown;
-  /** True when `output` is a bounded preview; fetch the tool-call detail for the full value. */
-  outputTruncated?: boolean;
-  outputBytes?: number;
-  error: string | null;
-  createdAt: string;
-  decidedAt: string | null;
-}
-
-export interface AiAgentSession {
-  id: string;
-  projectId: string;
-  title: string;
-  approvalMode?: AiAgentApprovalMode;
-  status: AiAgentSessionStatus;
-  activePromptId: string | null;
-  queue: AiAgentQueuedPrompt[];
-  messages: AiAgentMessage[];
-  toolCalls: AiAgentToolCall[];
-  timeline?: AiAgentSessionPart[];
-  timelineInfo?: AiAgentTimelineInfo;
-  pendingToolCalls: AiAgentToolCall[];
-  /** @deprecated Historical field; current sessions are not bound to a build. */
-  activeBuildRunId?: string | null;
-  contextUsage: AiAgentContextUsage | null;
-  error: string | null;
-  updatedAt: string;
+export interface AiAgentModelRef {
+  providerId: string;
+  modelId: string;
+  /** OpenTales model string as configured in project AI settings. */
+  model: string;
 }
 
 export interface AiAgentSessionSummary {
   id: string;
   projectId: string;
+  /** Parent session for subagent (child) sessions; null for root sessions. */
+  parentId: string | null;
   title: string;
-  approvalMode?: AiAgentApprovalMode;
+  agent: string | null;
+  model: AiAgentModelRef | null;
+  approvalMode: AiAgentApprovalMode;
   status: AiAgentSessionStatus;
-  messageCount: number;
-  updatedAt: string;
+  outcome: "succeeded" | "failed" | "interrupted" | null;
+  cost: number;
+  tokens: AiAgentTokenUsage;
   createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiAgentFileAttachment {
+  name: string | null;
+  mime: string;
+  /** data: URI or remote URI. */
+  uri: string;
+}
+
+export type AiAgentToolState =
+  | { status: "streaming"; input: string }
+  | { status: "running"; input: Record<string, unknown>; metadata?: Record<string, unknown> }
+  | { status: "completed"; input: Record<string, unknown>; output: string; metadata?: Record<string, unknown> }
+  | { status: "error"; input: Record<string, unknown>; error: string; output?: string; metadata?: Record<string, unknown> };
+
+export type AiAgentPart =
+  | { type: "text"; text: string }
+  | { type: "reasoning"; text: string }
+  | {
+      type: "tool";
+      /** Provider tool call id; stable key for streaming updates. */
+      id: string;
+      name: string;
+      state: AiAgentToolState;
+      /** Child session id when this tool is a `subagent` delegation. */
+      childSessionId?: string | null;
+      startedAt: string | null;
+      completedAt: string | null;
+    };
+
+export type AiAgentMessage =
+  | {
+      id: string;
+      role: "user";
+      text: string;
+      files: AiAgentFileAttachment[];
+      createdAt: string;
+    }
+  | {
+      id: string;
+      role: "assistant";
+      agent: string;
+      model: AiAgentModelRef | null;
+      parts: AiAgentPart[];
+      finish: string | null;
+      error: string | null;
+      cost: number;
+      tokens: AiAgentTokenUsage | null;
+      createdAt: string;
+      completedAt: string | null;
+    }
+  | {
+      id: string;
+      role: "system";
+      kind: "skill" | "synthetic" | "system" | "compaction" | "agent" | "model" | "idle";
+      text: string;
+      createdAt: string;
+    };
+
+export interface AiAgentPermissionRequest {
+  id: string;
+  sessionId: string;
+  /** OpenTales mutation tool being proposed, e.g. `updateChapter`. */
+  toolName: string;
+  toolInput: Record<string, unknown>;
+  toolCallId: string | null;
+  messageId: string | null;
+  message: string | null;
+}
+
+export interface AiQuestionOption {
+  value: string;
+  label: string;
+  description?: string;
+}
+
+export interface AiQuestionField {
+  key: string;
+  title: string;
+  description?: string;
+  /** `string` fields accept one choice (plus custom text); `multiselect` accepts many. */
+  type: "string" | "multiselect" | "boolean" | "number" | "integer";
+  options: AiQuestionOption[];
+  custom: boolean;
+}
+
+export interface AiAgentQuestion {
+  id: string;
+  sessionId: string;
+  title: string;
+  toolCallId: string | null;
+  fields: AiQuestionField[];
+}
+
+export interface AiAgentSession extends AiAgentSessionSummary {
+  messages: AiAgentMessage[];
+  /** Messages older than `messages[0]` exist; page with `getAiAgentMessages`. */
+  hasEarlierMessages: boolean;
+  earlierCursor: string | null;
+  permissions: AiAgentPermissionRequest[];
+  questions: AiAgentQuestion[];
+  /** Queued prompts not yet delivered to the model. */
+  queue: Array<{ id: string; text: string; delivery: "steer" | "queue" }>;
+  error: string | null;
+}
+
+export interface AiAgentMessagePage {
+  messages: AiAgentMessage[];
+  cursor: string | null;
+  hasMore: boolean;
+}
+
+export interface AiAgentInfo {
+  id: string;
+  name: string;
+  description: string | null;
+  mode: "primary" | "subagent" | "all";
+  color: string | null;
+}
+
+export interface AiAgentSkillInfo {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
+export interface AiAgentCapabilities {
+  agents: AiAgentInfo[];
+  skills: AiAgentSkillInfo[];
+  tools: AiToolDescriptor[];
+  defaultAgent: string;
+  model: string;
 }
 
 export interface CreateAiAgentSessionInput {
   title?: string;
   approvalMode?: AiAgentApprovalMode;
+  agent?: string;
 }
 
 export interface UpdateAiAgentSessionInput {
-  approvalMode: AiAgentApprovalMode;
-}
-
-export interface QueueAiAgentPromptInput {
-  prompt: string;
+  approvalMode?: AiAgentApprovalMode;
+  title?: string;
+  agent?: string;
   model?: string;
-  attachments?: AiAgentAttachmentInput[];
+}
+
+export interface AiAgentPromptAttachmentInput {
+  name: string;
+  mimeType: string;
+  /** Base64 file data. */
+  base64: string;
+}
+
+export interface AiAgentProjectReference {
+  type:
+    | "folder"
+    | "doc"
+    | "asset"
+    | "chapter"
+    | "character"
+    | "location"
+    | "act"
+    | "structure"
+    | "obstacle";
+  id: string;
+  path?: string;
+  label?: string;
+  startLine?: number;
+  endLine?: number;
+}
+
+export interface SendAiAgentPromptInput {
+  text: string;
+  /** Primary agent to run; defaults to the session's current agent. */
+  agent?: string;
+  /** OpenTales model string override for this and later turns. */
+  model?: string;
+  attachments?: AiAgentPromptAttachmentInput[];
+  /** Project items the prompt mentions; resolved into context for the agent. */
+  references?: AiAgentProjectReference[];
+  /** Skills to activate for this prompt. */
+  skills?: string[];
   /**
-   * If true, cancels the active generation and runs this prompt next.
+   * `steer` (default) delivers at the next model step, redirecting an active
+   * run; `queue` waits until the current run finishes.
    */
-  interrupt?: boolean;
+  delivery?: "steer" | "queue";
 }
 
-export interface AiAgentSessionEvent {
-  type: AiAgentSessionEventType;
-  /** Omitted for high-frequency incremental patches such as text deltas. */
-  session?: AiAgentSession;
-  data?: unknown;
-}
-
-export interface ApproveAiToolCallInput {
-  approved: boolean;
-}
-
-export interface ApproveAiToolCallsInput {
-  toolCallIds: string[];
-  approved: boolean;
-}
-
-export interface AiQuestionOption {
-  label: string;
-  description?: string;
-  recommended?: boolean;
-}
-
-export interface AiQuestionPrompt {
-  question: string;
-  header: string;
-  options: AiQuestionOption[];
-  multiple?: boolean;
-  custom?: boolean;
-}
-
-export interface AskUserToolInput {
-  questions: AiQuestionPrompt[];
+export interface ReplyAiPermissionInput {
+  decision: "once" | "always" | "reject";
+  message?: string;
 }
 
 export interface AnswerAiQuestionInput {
-  answers: string[][];
+  /** Answers keyed by question field `key`. */
+  answers: Record<string, string | string[] | boolean | number>;
 }
+
+/** Live event pushed over the agent SSE stream for a project. */
+export type AiAgentStreamEvent =
+  | { type: "connected"; sessions: AiAgentSessionSummary[] }
+  | { type: "session.updated"; session: AiAgentSessionSummary }
+  | { type: "session.deleted"; sessionId: string }
+  | { type: "message.updated"; sessionId: string; message: AiAgentMessage }
+  | { type: "text.delta"; sessionId: string; messageId: string; index: number; delta: string }
+  | { type: "reasoning.delta"; sessionId: string; messageId: string; index: number; delta: string }
+  | { type: "tool.updated"; sessionId: string; messageId: string; part: Extract<AiAgentPart, { type: "tool" }> }
+  | { type: "permission.asked"; request: AiAgentPermissionRequest }
+  | { type: "permission.replied"; sessionId: string; requestId: string; decision: string }
+  | { type: "question.asked"; question: AiAgentQuestion }
+  | { type: "question.closed"; sessionId: string; questionId: string }
+  | { type: "status"; sessionId: string; status: AiAgentSessionStatus; error?: string | null; retry?: { attempt: number; message: string } | null }
+  | { type: "usage"; sessionId: string; cost: number; tokens: AiAgentTokenUsage }
+  | { type: "heartbeat" };
 
 export interface OrgMember {
   userId: string;

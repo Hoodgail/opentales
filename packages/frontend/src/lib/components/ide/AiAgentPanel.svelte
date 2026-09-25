@@ -1,127 +1,92 @@
 <script lang="ts">
   import {
-    Check,
+    ArrowLeft,
+    ArrowUp,
+    AtSign,
+    BookOpenText,
     CircleStop,
+    Feather,
+    GitBranch,
+    Hand,
     Loader2,
     Paperclip,
-    Send,
+    Plus,
+    RotateCw,
+    Settings2,
+    ShieldCheck,
     Sparkles,
     X,
+    Zap,
   } from "lucide-svelte";
   import { tick, untrack } from "svelte";
   import type {
     AiAgentApprovalMode,
-    AiAgentAttachmentInput,
-    AiAgentProjectReferenceType,
-    AiAgentToolCall,
-    AssetKind,
+    AiAgentPermissionRequest,
+    AiAgentProjectReference,
+    AiAgentPromptAttachmentInput,
   } from "@opentales/sdk";
-  import { timelineRevision } from "$lib/ai-agent-timeline";
+  import { buildApprovalDoc } from "$lib/ai-approval";
   import {
-    deleteAiApprovalDoc,
-    setAiApprovalDoc,
-  } from "$lib/data/ai-approval-docs";
+    extractLineRange,
+    projectReferenceSuggestions,
+    type AutocompleteItem,
+  } from "$lib/ai-mentions";
+  import { deleteAiApprovalDoc, setAiApprovalDoc } from "$lib/data/ai-approval-docs";
+  import { agent } from "$lib/stores/agent.svelte";
   import { ai } from "$lib/stores/ai.svelte";
   import { manuscript } from "$lib/stores/manuscript.svelte";
-  import AiAgentMessages from "./AiAgentMessages.svelte";
+  import { cn } from "$lib/utils";
+  import AgentApprovalSlip from "./agent/AgentApprovalSlip.svelte";
+  import AgentQuestionCard from "./agent/AgentQuestionCard.svelte";
+  import AgentTranscript from "./agent/AgentTranscript.svelte";
   import AiSessionMenu from "./AiSessionMenu.svelte";
-  import PanelHeader from "./PanelHeader.svelte";
+
+  const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 
   let prompt = $state("");
   let scrollEl: HTMLDivElement | undefined = $state();
   let textareaEl: HTMLTextAreaElement | undefined = $state();
   let fileInputEl: HTMLInputElement | undefined = $state();
-  let selectedModel = $state("");
-  let attachments = $state<AiAgentAttachmentInput[]>([]);
-  let uploadingAttachment = $state(false);
+  let attachments = $state<AiAgentPromptAttachmentInput[]>([]);
+  let references = $state<Array<AiAgentProjectReference & { key: string }>>([]);
+  let pinned = $state(true);
+  let autoConfirm = $state(false);
+  let modelDraft = $state<string | null>(null);
   let autocompleteOpen = $state(false);
   let autocompleteQuery = $state("");
   let autocompleteStart = $state(0);
-  let selectedAutocompleteIndex = $state(0);
-  let transcriptPinnedToEnd = $state(true);
-  let promptSubmitting = $state(false);
-  let stopSubmitting = $state(false);
-  let modeUpdating = $state(false);
-  let autoModeConfirmOpen = $state(false);
+  let autocompleteIndex = $state(0);
 
   const projectId = $derived(manuscript.projectId);
-  const session = $derived(ai.session);
-  const isRunning = $derived(session?.status === "running");
-  const hasActiveWork = $derived(
-    isRunning ||
-      Boolean(
-        session?.queue.some(
-          (item) => item.status === "queued" || item.status === "running",
-        ),
-      ),
-  );
-  const primaryActionIsStop = $derived(
-    stopSubmitting || (hasActiveWork && (!prompt.trim() || promptSubmitting)),
-  );
-  const approvalMode = $derived<AiAgentApprovalMode>(
-    session?.approvalMode ?? "manual",
-  );
-  const modeControlDisabled = $derived(
-    !session ||
-      hasActiveWork ||
-      promptSubmitting ||
-      ai.sessionLoading ||
-      modeUpdating,
-  );
   const aiEnabled = $derived(ai.settings?.enabled ?? false);
-  const modelOptions = $derived(modelChoices(ai.settings?.model));
-  const activeModel = $derived(
-    selectedModel || ai.settings?.model || modelOptions[0],
-  );
-  const transcriptRevision = $derived(timelineRevision(session));
-  const pendingToolCalls = $derived(
-    session?.pendingToolCalls?.filter(
-      (tc) => tc.status === "pending-approval" && tc.toolName !== "askUser",
-    ) ?? [],
+  const root = $derived(agent.activeSession);
+  const viewed = $derived(agent.viewedSession);
+  const inChild = $derived(agent.viewStack.length > 0);
+  const running = $derived(viewed?.status === "running" || viewed?.status === "retrying");
+  const rootRunning = $derived(root?.status === "running" || root?.status === "retrying");
+  const mode = $derived<AiAgentApprovalMode>(root?.approvalMode ?? "manual");
+  const caps = $derived(agent.capabilities);
+  const primaryAgents = $derived(caps?.agents.filter((a) => a.mode !== "subagent") ?? []);
+  const subagents = $derived(caps?.agents.filter((a) => a.mode !== "primary") ?? []);
+  const currentAgent = $derived(root?.agent ?? caps?.defaultAgent ?? "writer");
+  const currentModel = $derived(root?.model?.model ?? caps?.model ?? ai.settings?.model ?? "");
+  const permissions = $derived(root?.permissions ?? []);
+  const questions = $derived(root?.questions ?? []);
+  const retry = $derived(viewed ? agent.retryFor(viewed.id) : null);
+  const totalTokens = $derived(
+    root ? root.tokens.input + root.tokens.output + root.tokens.reasoning : 0,
   );
   const autocompleteItems = $derived(
-    autocompleteOpen ? projectReferenceSuggestions(autocompleteQuery) : [],
+    autocompleteOpen ? projectReferenceSuggestions(autocompleteQuery, projectId) : [],
   );
-  const activeAutocompleteId = $derived(
-    autocompleteOpen && autocompleteItems[selectedAutocompleteIndex]
-      ? `ai-project-context-option-${selectedAutocompleteIndex}`
-      : undefined,
+  const canSend = $derived(Boolean(prompt.trim()) && !agent.sending && !inChild);
+  const transcriptRevision = $derived(
+    viewed
+      ? `${viewed.id}:${viewed.messages.length}:${viewed.messages.at(-1)?.role === "assistant" ? JSON.stringify((viewed.messages.at(-1) as { parts: unknown[] }).parts).length : 0}:${permissions.length}:${questions.length}`
+      : "",
   );
 
-  // Auto-scroll on new content
-  $effect(() => {
-    const settingsModel = ai.settings?.model;
-    if (settingsModel && !selectedModel) selectedModel = settingsModel;
-  });
-
-  $effect(() => {
-    const _ = session?.id;
-    autoModeConfirmOpen = false;
-  });
-
-  $effect(() => {
-    const _ = transcriptRevision;
-    if (!transcriptPinnedToEnd) return;
-    void tick().then(() => {
-      if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
-    });
-  });
-
-  function handleTranscriptScroll() {
-    if (!scrollEl) return;
-    const distanceFromEnd =
-      scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
-    transcriptPinnedToEnd = distanceFromEnd < 48;
-  }
-
-  function pinTranscriptToEnd() {
-    transcriptPinnedToEnd = true;
-    void tick().then(() => {
-      if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
-    });
-  }
-
-  // Hydrate session + start stream when project is loaded and AI is enabled
+  // ── lifecycle ─────────────────────────────────────────────────────────
   $effect(() => {
     ai.setProjectContext(projectId);
   });
@@ -135,1438 +100,710 @@
   $effect(() => {
     const pid = projectId;
     if (!pid || !aiEnabled) return;
-    let cancelled = false;
     untrack(() => {
-      void (async () => {
-        const sessionGeneration = ai.sessionGeneration;
-        const selectedSessionId = await ai.loadSessions(pid);
-        if (cancelled || sessionGeneration !== ai.sessionGeneration) return;
-        const loaded = await ai.loadSession(
-          pid,
-          selectedSessionId ?? undefined,
-        );
-        if (cancelled) return;
-        await Promise.all([
-          ai.loadToolManifest(pid),
-          ai.loadFileTree(pid),
-          ai.loadSkills(pid),
-        ]);
-        if (cancelled || !loaded) return;
-        void ai.startStream(pid, loaded.id);
-      })();
+      void agent.initialize(pid);
+      void ai.loadFileTree(pid);
     });
-
-    return () => {
-      cancelled = true;
-      ai.stopStream();
-    };
+    return () => agent.stopStream();
   });
 
-  async function send() {
-    if (!projectId || !prompt.trim() || promptSubmitting || stopSubmitting)
+  $effect(() => {
+    const _ = transcriptRevision;
+    if (!pinned) return;
+    void tick().then(() => {
+      if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+    });
+  });
+
+  // Refresh the manuscript when the agent finishes changing project data.
+  let wasRunning = false;
+  $effect(() => {
+    const now = rootRunning;
+    if (wasRunning && !now && projectId && root?.approvalMode) {
+      void manuscript.refreshProject(projectId);
+      void ai.loadFileTree(projectId);
+    }
+    wasRunning = now;
+  });
+
+  function onScroll() {
+    if (!scrollEl) return;
+    pinned = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 56;
+  }
+
+  function pin() {
+    pinned = true;
+    void tick().then(() => {
+      if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+    });
+  }
+
+  // ── actions ───────────────────────────────────────────────────────────
+  async function send(delivery: "steer" | "queue" = rootRunning ? "queue" : "steer") {
+    if (!canSend) return;
+    const text = prompt.trim();
+    const payload = {
+      text,
+      delivery,
+      attachments: attachments.length ? attachments : undefined,
+      references: references.length
+        ? references.map(({ key: _key, ...ref }) => ref)
+        : undefined,
+    };
+    prompt = "";
+    const sentAttachments = attachments;
+    const sentReferences = references;
+    attachments = [];
+    references = [];
+    pin();
+    const ok = await agent.send(payload);
+    if (!ok) {
+      prompt = text;
+      attachments = sentAttachments;
+      references = sentReferences;
+    }
+  }
+
+  async function newSession() {
+    const created = await agent.createSession({ approvalMode: mode });
+    if (created) {
+      pin();
+      await tick();
+      textareaEl?.focus();
+    }
+  }
+
+  async function setMode(next: AiAgentApprovalMode) {
+    if (!root || next === mode) return;
+    if (next === "auto" && !autoConfirm) {
+      autoConfirm = true;
       return;
-    const queuedPrompt = prompt.trim();
-    const queuedAttachments = [...attachments];
-    promptSubmitting = true;
-    try {
-      const succeeded = await ai.queuePrompt(projectId, queuedPrompt, false, {
-        model: activeModel,
-        attachments: queuedAttachments,
-      });
-      if (!succeeded) return;
-      prompt = "";
-      attachments = [];
-      pinTranscriptToEnd();
-    } finally {
-      promptSubmitting = false;
     }
+    autoConfirm = false;
+    await agent.updateSession(root.id, { approvalMode: next });
   }
 
-  async function cancel() {
-    if (!projectId || stopSubmitting) return;
-    stopSubmitting = true;
-    try {
-      await ai.cancelSession(projectId);
-    } finally {
-      stopSubmitting = false;
+  async function setAgent(id: string) {
+    if (!root) {
+      await agent.createSession({ agent: id, approvalMode: mode });
+      return;
     }
+    await agent.updateSession(root.id, { agent: id });
   }
 
-  async function approve(toolCallId: string) {
-    if (!projectId) return;
-    const pid = projectId;
-    const succeeded = await ai.approveToolCall(pid, toolCallId, true);
-    if (!succeeded) return;
-    await manuscript.refreshProject(pid);
-    deleteAiApprovalDoc(toolCallId);
-    await manuscript.closeTab(`tab-ai-approval-${toolCallId}`);
+  async function commitModel() {
+    const next = modelDraft?.trim();
+    modelDraft = null;
+    if (!root || !next || next === currentModel) return;
+    await agent.updateSession(root.id, { model: next });
+  }
+
+  function reviewDiff(request: AiAgentPermissionRequest) {
+    const doc = buildApprovalDoc(request);
+    const fallback = {
+      targetLabel: request.toolName,
+      title: `AI: ${request.toolName}`,
+      panes: [
+        {
+          id: "raw",
+          title: "Proposed input",
+          description: "Tool payload",
+          original: "",
+          modified: JSON.stringify(request.toolInput, null, 2),
+          language: "json",
+        },
+      ],
+    };
+    const built = doc ?? fallback;
+    setAiApprovalDoc({ id: request.id, sessionId: request.sessionId, request, ...built });
+    void manuscript.openTab({
+      id: `tab-ai-approval-${request.id}`,
+      type: "ai-approval",
+      refId: request.id,
+      title: built.title,
+    });
+  }
+
+  async function decide(request: AiAgentPermissionRequest, decision: "once" | "always" | "reject") {
+    const ok = await agent.replyPermission(request, decision);
+    if (!ok) return;
+    deleteAiApprovalDoc(request.id);
+    await manuscript.closeTab(`tab-ai-approval-${request.id}`);
   }
 
   async function approveAll() {
-    if (!projectId || pendingToolCalls.length === 0) return;
-    const pid = projectId;
-    const toolCallIds = pendingToolCalls.map((tc) => tc.id);
-    const succeeded = await ai.approveToolCalls(pid, toolCallIds, true);
-    if (!succeeded) return;
-    await manuscript.refreshProject(pid);
-    for (const toolCallId of toolCallIds) {
-      deleteAiApprovalDoc(toolCallId);
-      await manuscript.closeTab(`tab-ai-approval-${toolCallId}`);
-    }
+    for (const request of [...permissions]) await decide(request, "once");
   }
 
-  async function reject(toolCallId: string) {
-    if (!projectId) return;
-    const succeeded = await ai.approveToolCall(projectId, toolCallId, false);
-    if (!succeeded) return;
-    deleteAiApprovalDoc(toolCallId);
-    await manuscript.closeTab(`tab-ai-approval-${toolCallId}`);
-  }
-
-  async function submitQuestion(tc: AiAgentToolCall, answers: string[][]) {
-    if (!projectId) return;
-    await ai.answerQuestion(projectId, tc.id, answers);
-  }
-
-  async function loadToolCallDetail(tc: AiAgentToolCall) {
-    if (!projectId) throw new Error("No active project");
-    return ai.loadToolCallDetail(projectId, tc.id, session?.id ?? undefined);
-  }
-
-  async function loadEarlierActivity() {
-    if (!projectId || !session) return;
-    const previousHeight = scrollEl?.scrollHeight ?? 0;
-    const previousTop = scrollEl?.scrollTop ?? 0;
-    const loaded = await ai.loadEarlierTimeline(projectId, session.id);
-    if (!loaded) return;
-    await tick();
-    if (scrollEl) {
-      scrollEl.scrollTop =
-        previousTop + (scrollEl.scrollHeight - previousHeight);
-    }
-  }
-
-  function handleKey(e: KeyboardEvent) {
-    if (e.isComposing) return;
-    if (autocompleteOpen) {
-      if (e.key === "ArrowDown" || (e.ctrlKey && e.key.toLowerCase() === "n")) {
-        e.preventDefault();
-        selectedAutocompleteIndex = Math.min(
-          selectedAutocompleteIndex + 1,
-          Math.max(autocompleteItems.length - 1, 0),
-        );
+  // ── composer: keyboard, mentions, attachments ─────────────────────────
+  function handleKey(event: KeyboardEvent) {
+    if (event.isComposing) return;
+    if (autocompleteOpen && autocompleteItems.length) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        autocompleteIndex = Math.min(autocompleteIndex + 1, autocompleteItems.length - 1);
         return;
       }
-      if (e.key === "ArrowUp" || (e.ctrlKey && e.key.toLowerCase() === "p")) {
-        e.preventDefault();
-        selectedAutocompleteIndex = Math.max(selectedAutocompleteIndex - 1, 0);
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        autocompleteIndex = Math.max(autocompleteIndex - 1, 0);
         return;
       }
-      if (e.key === "Enter" || e.key === "Tab") {
-        const item = autocompleteItems[selectedAutocompleteIndex];
-        if (item) {
-          e.preventDefault();
-          insertAutocompleteItem(item);
-          return;
-        }
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        insertMention(autocompleteItems[autocompleteIndex]);
+        return;
       }
-      if (e.key === "Escape") {
-        e.preventDefault();
+      if (event.key === "Escape") {
+        event.preventDefault();
         closeAutocomplete();
         return;
       }
     }
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      void send();
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void send(event.altKey ? "queue" : rootRunning ? "queue" : "steer");
     }
-  }
-
-  function handlePromptInput(event: Event) {
-    prompt = (event.currentTarget as HTMLTextAreaElement).value;
-    updateAutocomplete();
-  }
-
-  function handlePromptClick() {
-    updateAutocomplete();
+    if (event.key === "Escape" && rootRunning) void agent.interrupt();
   }
 
   function updateAutocomplete() {
     if (!textareaEl) return;
-    const offset = textareaEl.selectionStart ?? prompt.length;
-    const text = prompt.slice(0, offset);
-    const idx = text.lastIndexOf("@");
-    if (idx === -1) {
-      closeAutocomplete();
-      return;
-    }
-    const before = idx === 0 ? undefined : prompt[idx - 1];
-    const between = text.slice(idx + 1);
-    if ((before === undefined || /\s/.test(before)) && !/\s/.test(between)) {
-      autocompleteStart = idx;
-      autocompleteQuery = between;
+    const cursor = textareaEl.selectionStart ?? prompt.length;
+    const before = prompt.slice(0, cursor);
+    const at = before.lastIndexOf("@");
+    const query = at === -1 ? "" : before.slice(at + 1);
+    const boundary = at <= 0 || /\s/.test(prompt[at - 1] ?? "");
+    if (at !== -1 && boundary && !/\s/.test(query)) {
       autocompleteOpen = true;
-      selectedAutocompleteIndex = 0;
-    } else {
-      closeAutocomplete();
-    }
+      autocompleteStart = at;
+      autocompleteQuery = query;
+      autocompleteIndex = 0;
+    } else closeAutocomplete();
   }
 
   function closeAutocomplete() {
     autocompleteOpen = false;
     autocompleteQuery = "";
-    selectedAutocompleteIndex = 0;
+    autocompleteIndex = 0;
   }
 
-  async function handleFiles(files: FileList | null) {
-    if (!projectId || !files?.length) return;
-    uploadingAttachment = true;
-    try {
-      for (const file of Array.from(files)) {
-        const uploaded = await ai.uploadAttachment(projectId, file, {
-          kind: assetKindForFile(file),
-          filename: file.name,
-        });
-        if (!uploaded) continue;
-        attachments = [
-          ...attachments,
-          {
-            id: uploaded.id,
-            assetId: uploaded.id,
-            name: file.name,
-            mimeType: uploaded.mimeType,
-            kind: uploaded.kind,
-            sizeBytes: uploaded.sizeBytes,
-            url: uploaded.url,
-          },
-        ];
-      }
-    } finally {
-      uploadingAttachment = false;
-      if (fileInputEl) fileInputEl.value = "";
-    }
-  }
-
-  function removeAttachment(id: string) {
-    attachments = attachments.filter((attachment) => attachment.id !== id);
-  }
-
-  type AutocompleteItem = {
-    id: string;
-    type: AiAgentProjectReferenceType;
-    label: string;
-    detail: string;
-    path?: string;
-    searchText: string;
-    scoreBoost?: number;
-  };
-
-  function insertAutocompleteItem(item: AutocompleteItem) {
+  function insertMention(item: AutocompleteItem) {
     if (!textareaEl) return;
-    const lineRange = extractLineRange(autocompleteQuery);
+    const range = extractLineRange(autocompleteQuery);
     const cursor = textareaEl.selectionStart ?? prompt.length;
-    const mention = `@${item.label}${lineRange.suffix} `;
+    const mention = `@${item.label}${range.suffix} `;
     prompt = `${prompt.slice(0, autocompleteStart)}${mention}${prompt.slice(cursor)}`;
-    const nextCursor = autocompleteStart + mention.length;
-    const attachmentId = `reference:${item.type}:${item.id}:${lineRange.suffix}`;
-    const existingIndex = attachments.findIndex(
-      (attachment) => attachment.id === attachmentId,
-    );
-    const attachment: AiAgentAttachmentInput = {
-      id: attachmentId,
-      name: `${item.label}${lineRange.suffix}`,
-      mimeType: "text/plain",
-      kind: "document",
-      sizeBytes: 0,
-      reference: {
-        type: item.type,
-        id: item.id,
-        path: item.path,
-        startLine: lineRange.startLine,
-        endLine: lineRange.endLine,
-      },
-    };
-    attachments =
-      existingIndex === -1
-        ? [...attachments, attachment]
-        : attachments.map((existing, index) =>
-            index === existingIndex ? attachment : existing,
-          );
+    const key = `${item.type}:${item.id}:${range.suffix}`;
+    if (!references.some((ref) => ref.key === key)) {
+      references = [
+        ...references,
+        {
+          key,
+          type: item.type,
+          id: item.id,
+          path: item.path,
+          label: `${item.label}${range.suffix}`,
+          startLine: range.startLine,
+          endLine: range.endLine,
+        },
+      ];
+    }
+    const next = autocompleteStart + mention.length;
     closeAutocomplete();
     void tick().then(() => {
       textareaEl?.focus();
-      textareaEl?.setSelectionRange(nextCursor, nextCursor);
+      textareaEl?.setSelectionRange(next, next);
     });
   }
 
-  function extractLineRange(query: string): {
-    suffix: string;
-    startLine?: number;
-    endLine?: number;
-  } {
-    const hashIndex = query.lastIndexOf("#");
-    if (hashIndex === -1) return { suffix: "" };
-    const linePart = query.slice(hashIndex + 1);
-    const match = linePart.match(/^(\d+)(?:-(\d*))?$/);
-    if (!match) return { suffix: "" };
-    const startLine = Number(match[1]);
-    const parsedEnd = match[2] ? Number(match[2]) : undefined;
-    const endLine = parsedEnd && startLine < parsedEnd ? parsedEnd : undefined;
-    return {
-      suffix: `#${startLine}${endLine ? `-${endLine}` : ""}`,
-      startLine,
-      endLine,
-    };
-  }
-
-  function projectReferenceSuggestions(rawQuery: string): AutocompleteItem[] {
-    const { baseQuery } = autocompleteQueryParts(rawQuery);
-    const items: AutocompleteItem[] = [
-      {
-        id: projectId ?? "structure",
-        type: "structure",
-        label: "story-structure",
-        detail: "Story structure",
-        searchText: "story structure logline outline climax obstacles plot",
-        scoreBoost: 3,
-      },
-      ...ai.fileTree.folders.map((folder) => ({
-        id: folder.id,
-        type: "folder" as const,
-        label: folder.path,
-        detail: "Folder",
-        path: folder.path,
-        searchText: `${folder.name} ${folder.path}`,
-        scoreBoost: 2,
-      })),
-      ...ai.fileTree.docs.map((doc) => ({
-        id: doc.id,
-        type: "doc" as const,
-        label: doc.path ?? doc.title,
-        detail: `Doc · ${doc.kind}`,
-        path: doc.path ?? doc.title,
-        searchText: `${doc.title} ${doc.path ?? ""} ${doc.kind}`,
-        scoreBoost: 4,
-      })),
-      ...ai.fileTree.assets.map((asset) => ({
-        id: asset.id,
-        type: "asset" as const,
-        label: asset.path,
-        detail: `Asset · ${asset.kind}`,
-        path: asset.path,
-        searchText: `${asset.name} ${asset.path} ${asset.kind} ${asset.mimeType}`,
-        scoreBoost: 1,
-      })),
-      ...manuscript.chapters.map((chapter) => ({
-        id: chapter.id,
-        type: "chapter" as const,
-        label: `chapters/${chapter.number}-${slugify(chapter.title)}`,
-        detail: `Chapter ${chapter.number}`,
-        searchText: `${chapter.title} chapter ${chapter.number} ${chapter.summary}`,
-        scoreBoost: 4,
-      })),
-      ...manuscript.characters.map((character) => ({
-        id: character.id,
-        type: "character" as const,
-        label: `characters/${slugify(character.name)}`,
-        detail: "Character",
-        searchText: `${character.name} ${character.role} ${character.traits.join(" ")}`,
-        scoreBoost: 3,
-      })),
-      ...manuscript.locations.map((location) => ({
-        id: location.id,
-        type: "location" as const,
-        label: `locations/${slugify(location.name)}`,
-        detail: "Location",
-        searchText: `${location.name} ${location.type}`,
-        scoreBoost: 3,
-      })),
-      ...manuscript.acts.map((act) => ({
-        id: act.id,
-        type: "act" as const,
-        label: `acts/${slugify(act.title)}`,
-        detail: "Act",
-        searchText: `${act.title} act`,
-        scoreBoost: 2,
-      })),
-      ...manuscript.structure.obstacles.map((obstacle) => ({
-        id: obstacle.id,
-        type: "obstacle" as const,
-        label: `obstacles/${slugify(obstacle.title)}`,
-        detail: `Obstacle · ${obstacle.type.toLowerCase()}`,
-        searchText: `${obstacle.title} ${obstacle.type}`,
-        scoreBoost: 2,
-      })),
-    ];
-    return items
-      .map((item) => ({ item, score: fuzzyScore(baseQuery, item) }))
-      .filter((entry) => entry.score > 0)
-      .sort((a, b) => {
-        if (a.score !== b.score) return b.score - a.score;
-        const aDepth = a.item.label.split("/").length;
-        const bDepth = b.item.label.split("/").length;
-        if (aDepth !== bDepth) return aDepth - bDepth;
-        return a.item.label.localeCompare(b.item.label);
-      })
-      .slice(0, 8)
-      .map((entry) => entry.item);
-  }
-
-  function autocompleteQueryParts(query: string): { baseQuery: string } {
-    const hashIndex = query.lastIndexOf("#");
-    if (hashIndex === -1) return { baseQuery: query };
-    const linePart = query.slice(hashIndex + 1);
-    return /^\d*(?:-\d*)?$/.test(linePart)
-      ? { baseQuery: query.slice(0, hashIndex) }
-      : { baseQuery: query };
-  }
-
-  function fuzzyScore(query: string, item: AutocompleteItem): number {
-    const q = query.trim().toLowerCase();
-    if (!q) return item.scoreBoost ?? 1;
-    const haystack = `${item.label} ${item.searchText}`.toLowerCase();
-    if (/[*?]/.test(q))
-      return globMatches(q, haystack) ? 200 + (item.scoreBoost ?? 0) : 0;
-    if (haystack.includes(q)) return 100 + q.length + (item.scoreBoost ?? 0);
-    let score = item.scoreBoost ?? 0;
-    let cursor = 0;
-    for (const char of q) {
-      const found = haystack.indexOf(char, cursor);
-      if (found === -1) return 0;
-      score += found === cursor ? 6 : 2;
-      cursor = found + 1;
+  async function handleFiles(files: FileList | null) {
+    if (!files?.length) return;
+    for (const file of Array.from(files)) {
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        agent.clearError();
+        continue;
+      }
+      const base64 = await fileToBase64(file);
+      attachments = [
+        ...attachments,
+        { name: file.name, mimeType: file.type || "application/octet-stream", base64 },
+      ];
     }
-    return score;
+    if (fileInputEl) fileInputEl.value = "";
   }
 
-  function globMatches(pattern: string, value: string): boolean {
-    const source = pattern
-      .split("")
-      .map((char) => {
-        if (char === "*") return ".*";
-        if (char === "?") return ".";
-        return char.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
-      })
-      .join("");
-    return new RegExp(source).test(value);
-  }
-
-  function slugify(value: string): string {
-    return (
-      value
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-|-$/g, "") || "untitled"
-    );
-  }
-
-  function assetKindForFile(file: File): AssetKind {
-    if (file.type.startsWith("image/")) return "image";
-    if (file.type.startsWith("audio/")) return "audio";
-    if (file.type.startsWith("video/")) return "video";
-    return "document";
-  }
-
-  function modelChoices(settingsModel: string | undefined): string[] {
-    const defaults = [
-      "openai/gpt-5.4",
-      "openai/gpt-5-mini",
-      "openai/gpt-4o",
-      "anthropic/claude-sonnet-4.5",
-      "google/gemini-3-pro-preview",
-    ];
-    return [
-      ...new Set(
-        [settingsModel, ...defaults].filter((value): value is string =>
-          Boolean(value),
-        ),
-      ),
-    ];
-  }
-
-  function formatUsage(value: number): string {
-    return new Intl.NumberFormat(undefined, {
-      notation: value >= 10_000 ? "compact" : "standard",
-    }).format(value);
-  }
-
-  function streamStatusLabel(): string {
-    if (ai.streamStatus === "connected") return "Connected";
-    if (ai.streamStatus === "connecting") return "Connecting";
-    if (ai.streamStatus === "reconnecting")
-      return `Reconnecting (${ai.reconnectAttempt}/${5})`;
-    return "Disconnected";
-  }
-
-  function streamDotClass(): string {
-    if (ai.streamStatus === "connected") return "bg-emerald-400";
-    if (ai.streamStatus === "connecting" || ai.streamStatus === "reconnecting")
-      return "motion-safe:animate-pulse bg-amber-400";
-    return "bg-muted-foreground";
-  }
-
-  async function createSession() {
-    if (!projectId) return;
-    const created = await ai.createSession(projectId, "New chat", approvalMode);
-    if (created) pinTranscriptToEnd();
-  }
-
-  async function setApprovalMode(mode: AiAgentApprovalMode) {
-    if (!projectId || modeControlDisabled || approvalMode === mode) return;
-    if (mode === "auto") {
-      autoModeConfirmOpen = true;
-      return;
-    }
-    autoModeConfirmOpen = false;
-    modeUpdating = true;
-    try {
-      await ai.updateSessionApprovalMode(projectId, "manual");
-    } finally {
-      modeUpdating = false;
-    }
-  }
-
-  async function enableAutoMode() {
-    if (!projectId || modeControlDisabled) return;
-    modeUpdating = true;
-    try {
-      const updated = await ai.updateSessionApprovalMode(projectId, "auto");
-      if (updated) autoModeConfirmOpen = false;
-    } finally {
-      modeUpdating = false;
-    }
-  }
-
-  async function selectSession(sessionId: string) {
-    if (!projectId) return;
-    pinTranscriptToEnd();
-    await ai.selectSession(projectId, sessionId);
-  }
-
-  function openTaskSession(sessionId: string) {
-    void selectSession(sessionId);
-  }
-
-  // Collapsible tool call rows
-  function toolLabel(name: string): string {
-    const map: Record<string, string> = {
-      listCharacters: "Listed characters",
-      readCharacter: "Read character",
-      listCharacterRelationships: "Listed relationships",
-      listChapters: "Listed chapters",
-      readChapter: "Read chapter",
-      listScenes: "Listed scenes",
-      grepChapter: "Searched chapter",
-      grepChapters: "Searched chapters",
-      grepProject: "Searched project",
-      listLocations: "Listed locations",
-      readLocation: "Read location",
-      listActs: "Listed acts",
-      listObstacles: "Listed obstacles",
-      listProjectDocs: "Listed docs",
-      readProjectDoc: "Read doc",
-      listProjectFiles: "Listed project files",
-      listProjectAiSkills: "Listed AI skills",
-      readProjectAiSkill: "Read AI skill",
-      listAssets: "Listed assets",
-      listMembers: "Listed members",
-      listSubmissions: "Listed submissions",
-      listTrash: "Listed trash",
-      listWritingVersions: "Listed writing versions",
-      readStoryStructure: "Read story structure",
-      getProjectStats: "Read project stats",
-      compareVersions: "Compared versions",
-      getSceneContext: "Read scene context",
-      searchStory: "Searched story",
-      findReferences: "Found references",
-      runStoryLint: "Checked story",
-      reportTaskResult: "Reported task result",
-      task: "Delegated task",
-      updateProject: "Update project",
-      updateProjectAiSettings: "Update AI settings",
-      askUser: "Ask user",
-      createAct: "Create act",
-      updateAct: "Update act",
-      deleteAct: "Delete act",
-      updateCharacter: "Update character",
-      createCharacter: "Create character",
-      deleteCharacter: "Delete character",
-      createCharacterRelationship: "Create relationship",
-      deleteCharacterRelationship: "Delete relationship",
-      createLocation: "Create location",
-      updateLocation: "Update location",
-      deleteLocation: "Delete location",
-      updateChapter: "Update chapter",
-      createChapter: "Create chapter",
-      deleteChapter: "Delete chapter",
-      restoreTrashChapter: "Restore chapter",
-      purgeTrashChapter: "Purge chapter",
-      createScene: "Create scene",
-      updateScene: "Update scene",
-      deleteScene: "Delete scene",
-      updateStoryStructure: "Update structure",
-      createObstacle: "Create obstacle",
-      updateObstacle: "Update obstacle",
-      deleteObstacle: "Delete obstacle",
-      createProjectDoc: "Create doc",
-      updateProjectDoc: "Update doc",
-      deleteProjectDoc: "Delete doc",
-      createSubmission: "Create submission",
-      mergeSubmission: "Merge submission",
-      declineSubmission: "Decline submission",
-      commentSubmission: "Comment submission",
-      uploadAsset: "Upload asset",
-      attachAsset: "Attach asset",
-      detachAsset: "Detach asset",
-      updateMemberRole: "Update member role",
-      removeMember: "Remove member",
-      createInvite: "Create invite",
-      revokeInvite: "Revoke invite",
-      acceptInvite: "Accept invite",
-      createBetaShareLink: "Create share link",
-      updateBetaShareLink: "Update share link",
-      revokeBetaShareLink: "Revoke share link",
-      postBetaShareComment: "Post share comment",
-    };
-    return map[name] ?? name;
-  }
-
-  function toolStatusLabel(status: AiAgentToolCall["status"]): string {
-    const map: Record<AiAgentToolCall["status"], string> = {
-      "pending-approval": "pending",
-      running: "running",
-      approved: "approved",
-      rejected: "rejected",
-      executed: "executed",
-      error: "failed",
-    };
-    return map[status];
-  }
-
-  type JsonRecord = Record<string, unknown>;
-
-  function inputRecord(input: unknown): JsonRecord {
-    return input && typeof input === "object" && !Array.isArray(input)
-      ? (input as JsonRecord)
-      : {};
-  }
-
-  function textInput(input: JsonRecord, key: string): string | undefined {
-    const value = input[key];
-    return typeof value === "string" ? value : undefined;
-  }
-
-  function stringArrayInput(
-    input: JsonRecord,
-    key: string,
-  ): string[] | undefined {
-    const value = input[key];
-    return Array.isArray(value) &&
-      value.every((item) => typeof item === "string")
-      ? value
-      : undefined;
-  }
-
-  function contentEditInput(
-    input: JsonRecord,
-  ):
-    | { oldString: string; newString: string; replaceAll?: boolean }
-    | undefined {
-    const value = input.contentEdit;
-    if (!value || typeof value !== "object" || Array.isArray(value))
-      return undefined;
-    const edit = value as JsonRecord;
-    const oldString = textInput(edit, "oldString");
-    const newString = textInput(edit, "newString");
-    if (oldString === undefined || newString === undefined) return undefined;
-    return {
-      oldString,
-      newString,
-      replaceAll:
-        typeof edit.replaceAll === "boolean" ? edit.replaceAll : undefined,
-    };
-  }
-
-  function applyContentEdit(
-    content: string,
-    edit: ReturnType<typeof contentEditInput>,
-  ): string {
-    if (!edit?.oldString) return content;
-    return edit.replaceAll
-      ? content.split(edit.oldString).join(edit.newString)
-      : content.replace(edit.oldString, edit.newString);
-  }
-
-  function displayValue(value: unknown): string {
-    if (Array.isArray(value)) return value.length ? value.join(", ") : "None";
-    if (typeof value === "string") return value.trim() || "Empty";
-    if (value === null || value === undefined) return "None";
-    return String(value);
-  }
-
-  function firstLine(value: string | undefined, fallback: string): string {
-    return (
-      value
-        ?.split("\n")
-        .find((line) => line.trim())
-        ?.trim() ?? fallback
-    );
-  }
-
-  function chapterMeta(input: {
-    title?: string;
-    status?: string;
-    povCharacterId?: string;
-    locationId?: string;
-  }) {
-    const pov =
-      manuscript.characters.find((c) => c.id === input.povCharacterId)?.name ??
-      input.povCharacterId;
-    const location =
-      manuscript.locations.find((l) => l.id === input.locationId)?.name ??
-      input.locationId;
-    return [
-      `Title: ${displayValue(input.title)}`,
-      `Status: ${displayValue(input.status)}`,
-      `POV: ${displayValue(pov)}`,
-      `Location: ${displayValue(location)}`,
-    ].join("\n");
-  }
-
-  function characterBasics(input: {
-    name?: string;
-    role?: string;
-    age?: string;
-    occupation?: string;
-    traits?: string[];
-  }) {
-    return [
-      `Name: ${displayValue(input.name)}`,
-      `Role: ${displayValue(input.role)}`,
-      `Age: ${displayValue(input.age)}`,
-      `Occupation: ${displayValue(input.occupation)}`,
-      `Traits: ${displayValue(input.traits)}`,
-    ].join("\n");
-  }
-
-  function docMeta(input: { title?: string; kind?: string }) {
-    return [
-      `Title: ${displayValue(input.title)}`,
-      `Kind: ${displayValue(input.kind)}`,
-    ].join("\n");
-  }
-
-  function buildApprovalDoc(tc: AiAgentToolCall) {
-    const input = inputRecord(tc.input);
-    const title = toolLabel(tc.toolName);
-
-    if (tc.toolName === "updateChapter") {
-      const chapter = manuscript.chapters.find(
-        (c) => c.id === textInput(input, "chapterId"),
-      );
-      if (!chapter) return null;
-      const contentEdit = contentEditInput(input);
-      const modified = {
-        title: textInput(input, "title") ?? chapter.title,
-        status: textInput(input, "status") ?? chapter.status,
-        povCharacterId:
-          textInput(input, "povCharacterId") ?? chapter.povCharacterId,
-        locationId: textInput(input, "locationId") ?? chapter.locationId,
-        summary: textInput(input, "summary") ?? chapter.summary,
-        content: applyContentEdit(chapter.content, contentEdit),
-      };
-      return {
-        targetLabel: chapter.title,
-        title: `AI: ${title}`,
-        panes: [
-          {
-            id: "chapter-meta",
-            title: "Chapter Details",
-            description: "Title, status, POV, and location",
-            original: chapterMeta(chapter),
-            modified: chapterMeta(modified),
-            language: "markdown",
-          },
-          {
-            id: "chapter-summary",
-            title: "Summary",
-            description: "Synopsis and intent for the chapter",
-            original: chapter.summary,
-            modified: modified.summary ?? "",
-            language: "markdown",
-          },
-          {
-            id: "chapter-content",
-            title: "Manuscript",
-            description: "Full chapter prose",
-            original: chapter.content,
-            modified: modified.content ?? "",
-            language: "markdown",
-          },
-        ],
-      };
-    }
-
-    if (tc.toolName === "createChapter") {
-      const modified = {
-        title: textInput(input, "title"),
-        status: textInput(input, "status"),
-        povCharacterId: textInput(input, "povCharacterId"),
-        locationId: textInput(input, "locationId"),
-        summary: textInput(input, "summary"),
-        content: textInput(input, "content"),
-      };
-      return {
-        targetLabel: textInput(input, "title") ?? "New chapter",
-        title: `AI: ${title}`,
-        panes: [
-          {
-            id: "chapter-meta",
-            title: "Chapter Details",
-            description: "Title, status, POV, and location",
-            original: "",
-            modified: chapterMeta(modified),
-            language: "markdown",
-          },
-          {
-            id: "chapter-summary",
-            title: "Summary",
-            description: "Synopsis and intent for the chapter",
-            original: "",
-            modified: modified.summary ?? "",
-            language: "markdown",
-          },
-          {
-            id: "chapter-content",
-            title: "Manuscript",
-            description: "Full chapter prose",
-            original: "",
-            modified: modified.content ?? "",
-            language: "markdown",
-          },
-        ],
-      };
-    }
-
-    if (tc.toolName === "updateCharacter") {
-      const character = manuscript.characters.find(
-        (c) => c.id === textInput(input, "characterId"),
-      );
-      if (!character) return null;
-      const modified = {
-        name: textInput(input, "name") ?? character.name,
-        role: textInput(input, "role") ?? character.role,
-        age: textInput(input, "age") ?? character.age,
-        occupation: textInput(input, "occupation") ?? character.occupation,
-        traits: stringArrayInput(input, "traits") ?? character.traits,
-        description: textInput(input, "description") ?? character.description,
-        appearance: textInput(input, "appearance") ?? character.appearance,
-        motivation: textInput(input, "motivation") ?? character.motivation,
-        arc: textInput(input, "arc") ?? character.arc,
-      };
-      return {
-        targetLabel: character.name,
-        title: `AI: ${title}`,
-        panes: [
-          {
-            id: "character-basics",
-            title: "Basics",
-            description: "Name, role, age, occupation, and traits",
-            original: characterBasics(character),
-            modified: characterBasics(modified),
-            language: "markdown",
-          },
-          {
-            id: "character-description",
-            title: "Description",
-            description: "Core identity and backstory notes",
-            original: character.description,
-            modified: modified.description ?? "",
-            language: "markdown",
-          },
-          {
-            id: "character-appearance",
-            title: "Appearance",
-            description: "Physical presentation and visual cues",
-            original: character.appearance,
-            modified: modified.appearance ?? "",
-            language: "markdown",
-          },
-          {
-            id: "character-motivation-arc",
-            title: "Motivation & Arc",
-            description: "Driving wants and transformation",
-            original: `## Motivation\n${character.motivation}\n\n## Character Arc\n${character.arc}`,
-            modified: `## Motivation\n${modified.motivation ?? ""}\n\n## Character Arc\n${modified.arc ?? ""}`,
-            language: "markdown",
-          },
-        ],
-      };
-    }
-
-    if (tc.toolName === "createCharacter") {
-      const modified = {
-        name: textInput(input, "name"),
-        role: textInput(input, "role"),
-        age: textInput(input, "age"),
-        occupation: textInput(input, "occupation"),
-        traits: stringArrayInput(input, "traits"),
-        description: textInput(input, "description"),
-        appearance: textInput(input, "appearance"),
-        motivation: textInput(input, "motivation"),
-        arc: textInput(input, "arc"),
-      };
-      return {
-        targetLabel: textInput(input, "name") ?? "New character",
-        title: `AI: ${title}`,
-        panes: [
-          {
-            id: "character-basics",
-            title: "Basics",
-            description: "Name, role, age, occupation, and traits",
-            original: "",
-            modified: characterBasics(modified),
-            language: "markdown",
-          },
-          {
-            id: "character-description",
-            title: "Description",
-            description: "Core identity and backstory notes",
-            original: "",
-            modified: modified.description ?? "",
-            language: "markdown",
-          },
-          {
-            id: "character-appearance",
-            title: "Appearance",
-            description: "Physical presentation and visual cues",
-            original: "",
-            modified: modified.appearance ?? "",
-            language: "markdown",
-          },
-          {
-            id: "character-motivation-arc",
-            title: "Motivation & Arc",
-            description: "Driving wants and transformation",
-            original: "",
-            modified: `## Motivation\n${modified.motivation ?? ""}\n\n## Character Arc\n${modified.arc ?? ""}`,
-            language: "markdown",
-          },
-        ],
-      };
-    }
-
-    if (tc.toolName === "updateProjectDoc") {
-      const doc = ai.docs.find((d) => d.id === textInput(input, "docId"));
-      if (!doc) return null;
-      const contentEdit = contentEditInput(input);
-      const modified = {
-        title: textInput(input, "title") ?? doc.title,
-        kind: textInput(input, "kind") ?? doc.kind,
-        content: applyContentEdit(doc.content, contentEdit),
-      };
-      return {
-        targetLabel: doc.title,
-        title: `AI: ${title}`,
-        panes: [
-          {
-            id: "doc-meta",
-            title: "Document Details",
-            description: "Title and document kind",
-            original: docMeta(doc),
-            modified: docMeta(modified),
-            language: "markdown",
-          },
-          {
-            id: "doc-content",
-            title: "Content",
-            description: "Document body",
-            original: doc.content,
-            modified: modified.content ?? "",
-            language: "markdown",
-          },
-        ],
-      };
-    }
-
-    if (tc.toolName === "createProjectDoc") {
-      const modified = {
-        title: textInput(input, "title"),
-        kind: textInput(input, "kind"),
-        content: textInput(input, "content"),
-      };
-      return {
-        targetLabel: textInput(input, "title") ?? "New doc",
-        title: `AI: ${title}`,
-        panes: [
-          {
-            id: "doc-meta",
-            title: "Document Details",
-            description: "Title and document kind",
-            original: "",
-            modified: docMeta(modified),
-            language: "markdown",
-          },
-          {
-            id: "doc-content",
-            title: "Content",
-            description: "Document body",
-            original: "",
-            modified: modified.content ?? "",
-            language: "markdown",
-          },
-        ],
-      };
-    }
-
-    return {
-      targetLabel: title,
-      title: `AI: ${title}`,
-      panes: [
-        {
-          id: "raw-input",
-          title: "Raw Input",
-          description: "Unrecognized tool payload",
-          original: "",
-          modified: JSON.stringify(tc.input, null, 2),
-          language: "json",
-        },
-      ],
-    };
-  }
-
-  function openApprovalDoc(tc: AiAgentToolCall) {
-    const doc = buildApprovalDoc(tc);
-    if (!doc) return;
-    const id = tc.id;
-    setAiApprovalDoc({
-      id,
-      sessionId: session?.id ?? ai.activeSessionId ?? "",
-      toolCall: tc,
-      ...doc,
-    });
-    void manuscript.openTab({
-      id: `tab-ai-approval-${id}`,
-      type: "ai-approval",
-      refId: id,
-      title: doc.title,
+  function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
     });
   }
+
+  function formatTokens(value: number) {
+    return new Intl.NumberFormat(undefined, { notation: value >= 10_000 ? "compact" : "standard" }).format(value);
+  }
+
+  function statusWord(): string {
+    if (!viewed) return "Ready";
+    if (viewed.status === "retrying") return retry ? `Retrying · attempt ${retry.attempt}` : "Retrying";
+    if (viewed.status === "running") return inChild ? "Subagent working" : "Writing";
+    if (viewed.status === "error") return "Stopped with an error";
+    return "Ready";
+  }
+
+  const starters = [
+    { icon: BookOpenText, text: "Summarize where the manuscript stands and what to write next." },
+    { icon: Feather, text: "Read the last chapter and draft the next scene in the same voice." },
+    { icon: GitBranch, text: "Use a subagent to check continuity across every chapter." },
+  ];
 </script>
 
-<div class="flex h-full flex-col">
-  <PanelHeader title="AI Agent">
-    {#snippet actions()}
+<div class="agent-panel relative flex h-full flex-col overflow-hidden">
+  <!-- Header -->
+  <header class="relative z-10 flex h-10 shrink-0 items-center gap-1.5 border-b border-border bg-sidebar/95 px-2.5 backdrop-blur">
+    {#if inChild}
+      <button
+        type="button"
+        onclick={() => agent.closeChild()}
+        class="inline-flex items-center gap-1 rounded-md px-1.5 py-1 font-mono text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+        aria-label="Back to parent session"
+      >
+        <ArrowLeft class="size-3.5" /> back
+      </button>
+      <span class="min-w-0 truncate font-mono text-[10px] text-accent">
+        <GitBranch class="mb-0.5 mr-1 inline size-3" />{viewed?.agent ?? "subagent"} · {viewed?.title}
+      </span>
+    {:else}
+      <span class="agent-mark" aria-hidden="true"><Feather class="size-3.5" /></span>
       <AiSessionMenu
-        title={session?.title ?? "Sessions"}
-        sessions={ai.sessions}
-        activeSessionId={ai.activeSessionId}
-        loading={ai.sessionLoading}
-        onCreate={createSession}
-        onSelect={selectSession}
+        title={root?.title ?? "Agent"}
+        sessions={agent.rootSessions}
+        activeSessionId={agent.activeSessionId}
+        loading={agent.loading}
+        onCreate={newSession}
+        onSelect={(id) => { pin(); return agent.openSession(id); }}
       />
-    {/snippet}
-  </PanelHeader>
+    {/if}
+    <span class="flex-1"></span>
+    <span
+      class={cn(
+        "size-1.5 rounded-full",
+        agent.streamStatus === "connected" ? "bg-emerald-400" : agent.streamStatus === "disconnected" ? "bg-muted-foreground" : "agent-pulse bg-amber-400",
+      )}
+      title={`Live connection: ${agent.streamStatus}`}
+    ></span>
+    <button
+      type="button"
+      onclick={newSession}
+      class="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+      aria-label="New session"
+      title="New session"
+    >
+      <Plus class="size-3.5" />
+    </button>
+    <button
+      type="button"
+      onclick={() => void manuscript.setActiveView("settings")}
+      class="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+      aria-label="AI settings"
+      title="AI settings"
+    >
+      <Settings2 class="size-3.5" />
+    </button>
+  </header>
 
   {#if !aiEnabled}
-    <div
-      class="flex flex-1 flex-col items-center justify-center gap-3 p-4 text-center"
-    >
-      <div
-        class="flex size-10 items-center justify-center rounded-lg border border-border bg-muted"
-      >
-        <Sparkles class="size-5 text-muted-foreground" />
+    <div class="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
+      <div class="agent-seal"><Sparkles class="size-5" /></div>
+      <div>
+        <p class="font-serif text-lg text-foreground">The agent is resting.</p>
+        <p class="mt-1 text-[11.5px] text-muted-foreground">Enable AI for this project and choose a model to start writing with an agent.</p>
       </div>
-      <p class="text-xs text-muted-foreground">
-        AI features are disabled for this project.
-      </p>
       <button
         type="button"
         onclick={() => void manuscript.setActiveView("settings")}
-        class="rounded-md border border-border px-3 py-1.5 text-[11px] text-foreground hover:bg-muted"
+        class="rounded-md border border-accent/40 px-3 py-1.5 text-[11px] text-accent hover:bg-accent/10"
       >
-        Open Settings
+        Open AI settings
       </button>
     </div>
   {:else}
     <!-- Transcript -->
-    <div
-      bind:this={scrollEl}
-      onscroll={handleTranscriptScroll}
-      class="flex-1 overflow-y-auto"
-    >
-      <AiAgentMessages
-        {session}
-        {isRunning}
-        {toolLabel}
-        {toolStatusLabel}
-        onOpenSession={openTaskSession}
-        onApproveTool={approve}
-        onRejectTool={reject}
-        onOpenApproval={openApprovalDoc}
-        onSubmitQuestion={submitQuestion}
-        toolActionStates={ai.toolActionStates}
-        toolActionErrors={ai.toolActionErrors}
-        onLoadToolDetail={loadToolCallDetail}
-        canLoadEarlier={ai.canLoadEarlierTimeline}
-        loadingEarlier={ai.timelineLoadingEarlier}
-        earlierError={ai.timelineEarlierError}
-        onLoadEarlier={loadEarlierActivity}
-      />
-
-      {#if pendingToolCalls.length > 1}
-        <div
-          class="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-[10px] text-muted-foreground"
-        >
-          <span
-            >{pendingToolCalls.length} changes are awaiting approval above.</span
-          >
-          <button
-            type="button"
-            onclick={approveAll}
-            disabled={pendingToolCalls.some((toolCall) =>
-              Boolean(ai.toolActionStates[toolCall.id]),
-            )}
-            class="inline-flex shrink-0 items-center gap-1 rounded border border-emerald-500/30 px-1.5 py-0.5 text-emerald-500 hover:bg-emerald-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Check class="size-3" /> Approve all
-          </button>
+    <div bind:this={scrollEl} onscroll={onScroll} class="agent-paper relative flex-1 overflow-y-auto">
+      {#if viewed && viewed.messages.length}
+        <AgentTranscript
+          session={viewed}
+          {running}
+          onOpenChild={(id) => { pin(); void agent.openChild(id); }}
+          onLoadEarlier={() => viewed && agent.loadEarlier(viewed.id)}
+        />
+      {:else if agent.loading}
+        <div class="flex h-full items-center justify-center">
+          <Loader2 class="size-4 motion-safe:animate-spin text-muted-foreground" />
         </div>
-      {/if}
-
-      <!-- Queue -->
-      {#if session?.queue && session.queue.filter((q) => q.status === "queued").length > 0}
-        <div class="border-t border-border px-3 py-2">
-          <div class="mb-1 flex items-center gap-1.5">
-            <span class="size-1 rounded-full bg-muted-foreground/60"></span>
-            <p
-              class="text-[10px] uppercase tracking-wider text-muted-foreground"
-            >
-              Queued
+      {:else}
+        <div class="flex min-h-full flex-col justify-end gap-5 px-4 pb-6 pt-10">
+          <div>
+            <p class="font-mono text-[9.5px] uppercase tracking-[0.2em] text-accent">OpenCode · {currentAgent}</p>
+            <h2 class="mt-2 font-serif text-[22px] leading-[1.15] text-foreground">
+              What shall we<br /><em class="text-accent">write</em> today?
+            </h2>
+            <p class="mt-2 max-w-[28ch] text-[11.5px] leading-relaxed text-muted-foreground">
+              The agent reads your manuscript, drafts and revises, delegates to subagents, and asks before it changes anything.
             </p>
           </div>
-          <ul class="space-y-0.5">
-            {#each session.queue.filter((q) => q.status === "queued") as q (q.id)}
-              <li class="truncate pl-2.5 text-[11px] text-muted-foreground">
-                {#if q.model}<span class="text-foreground/70">{q.model}</span> ·
-                {/if}{q.prompt}
+          <ul class="space-y-1.5">
+            {#each starters as starter, i (starter.text)}
+              <li style={`animation-delay:${80 + i * 70}ms`} class="agent-rise">
+                <button
+                  type="button"
+                  onclick={() => { prompt = starter.text; void tick().then(() => textareaEl?.focus()); }}
+                  class="group flex w-full items-start gap-2.5 rounded-lg border border-border/80 bg-card/40 px-3 py-2 text-left text-[11.5px] leading-snug text-foreground/85 transition-colors hover:border-accent/40 hover:bg-card"
+                >
+                  <starter.icon class="mt-0.5 size-3.5 shrink-0 text-muted-foreground group-hover:text-accent" />
+                  {starter.text}
+                </button>
               </li>
             {/each}
           </ul>
+          {#if caps}
+            <p class="font-mono text-[9.5px] text-muted-foreground/70">
+              {caps.tools.length} tools · {caps.skills.length} skills · {subagents.length} subagents
+            </p>
+          {/if}
         </div>
       {/if}
     </div>
 
-    <!-- Error -->
-    {#if ai.sessionError || ai.streamError || session?.error}
-      <div
-        class="border-t border-destructive/30 bg-destructive/10 px-3 py-2 text-[11px] text-destructive"
-      >
-        <div class="flex items-start justify-between gap-2">
-          <span>{ai.sessionError ?? ai.streamError ?? session?.error}</span>
-          {#if ai.canRetryStream}
-            <button
-              type="button"
-              onclick={() => void ai.retryStream()}
-              class="shrink-0 rounded border border-destructive/30 px-2 py-0.5 text-[10px] font-medium hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
-            >
-              Retry
-            </button>
-          {/if}
-        </div>
-        {#if session?.contextUsage && session.status === "error"}
-          <div class="mt-1 text-[10px] text-destructive/80">
-            Request context: {formatUsage(session.contextUsage.totalTokens)} / {formatUsage(
-              session.contextUsage.maxTokens,
-            )} tokens ({session.contextUsage.percentage}%)
+    <!-- Interrupts: approvals and questions -->
+    {#if !inChild && (permissions.length || questions.length)}
+      <div class="agent-interrupts max-h-[45%] shrink-0 space-y-2 overflow-y-auto border-t border-amber-400/20 bg-sidebar/80 p-2.5">
+        {#if permissions.length > 1}
+          <div class="flex items-center justify-between px-0.5">
+            <p class="font-mono text-[9.5px] uppercase tracking-[0.14em] text-amber-300/90">{permissions.length} changes awaiting you</p>
+            <button type="button" onclick={approveAll} class="font-mono text-[10px] text-emerald-400 hover:underline">approve all</button>
           </div>
         {/if}
+        {#each questions as question (question.id)}
+          <AgentQuestionCard
+            {question}
+            busy={Boolean(agent.pendingActions[question.id])}
+            error={agent.actionErrors[question.id]}
+            onSubmit={(answers) => void agent.answerQuestion(question, answers)}
+            onDismiss={() => void agent.dismissQuestion(question)}
+          />
+        {/each}
+        {#each permissions as request (request.id)}
+          <AgentApprovalSlip
+            {request}
+            busy={agent.pendingActions[request.id]}
+            error={agent.actionErrors[request.id]}
+            fromSubagent={request.sessionId !== root?.id}
+            onReview={() => reviewDiff(request)}
+            onApprove={() => void decide(request, "once")}
+            onAlways={() => void decide(request, "always")}
+            onReject={() => void decide(request, "reject")}
+          />
+        {/each}
       </div>
     {/if}
 
-    <!-- Input -->
-    <div class="border-border bg-sidebar/70 p-2">
-      <div
-        class="rounded-xl border border-border bg-background/95 shadow-sm focus-within:border-accent/70"
-      >
-        {#if attachments.length > 0}
-          <div
-            class="flex flex-wrap gap-1.5 border-b border-border/70 px-2 py-2"
-          >
-            {#each attachments as attachment (attachment.id)}
-              <button
-                type="button"
-                onclick={() => removeAttachment(attachment.id)}
-                disabled={promptSubmitting}
-                title="Remove attachment"
-                class="inline-flex max-w-44 items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-[10px] text-muted-foreground hover:text-destructive"
-              >
-                <Paperclip class="size-3 shrink-0" />
-                <span class="truncate">{attachment.name}</span>
-                {#if attachment.reference}
-                  <span class="text-[9px] uppercase text-muted-foreground/70"
-                    >{attachment.reference.type}</span
-                  >
-                {/if}
-                <X class="size-3 shrink-0" />
-              </button>
-            {/each}
-          </div>
+    <!-- Status / errors -->
+    {#if agent.error || viewed?.error}
+      <div role="alert" class="flex shrink-0 items-start gap-2 border-t border-destructive/30 bg-destructive/10 px-3 py-2 text-[11px] text-destructive">
+        <span class="flex-1">{agent.error ?? viewed?.error}</span>
+        {#if agent.streamStatus === "disconnected" && projectId}
+          <button type="button" onclick={() => agent.retryStream()} class="inline-flex items-center gap-1 rounded border border-destructive/30 px-1.5 py-0.5 text-[10px] hover:bg-destructive/10">
+            <RotateCw class="size-3" /> Reconnect
+          </button>
         {/if}
-        {#if autoModeConfirmOpen}
-          <div
-            role="alert"
-            class="flex items-start gap-2 border-b border-amber-500/25 bg-amber-500/8 px-2.5 py-2"
-          >
-            <span class="mt-1 size-1.5 shrink-0 rounded-full bg-amber-400"
-            ></span>
-            <div class="min-w-0 flex-1">
-              <p class="text-[11px] font-medium text-foreground">
-                Enable Auto mode?
-              </p>
-              <p
-                class="mt-0.5 text-[10px] leading-relaxed text-muted-foreground"
-              >
-                Project-changing tools will run immediately, and the agent will
-                proceed without approval prompts or questions.
-              </p>
-              <div class="mt-2 flex justify-end gap-1.5">
-                <button
-                  type="button"
-                  disabled={modeUpdating}
-                  onclick={() => (autoModeConfirmOpen = false)}
-                  class="rounded border border-border px-2 py-1 text-[10px] text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
-                  >Cancel</button
-                >
-                <button
-                  type="button"
-                  disabled={modeUpdating}
-                  onclick={() => void enableAutoMode()}
-                  class="inline-flex items-center gap-1 rounded border border-amber-500/35 bg-amber-500/10 px-2 py-1 text-[10px] font-medium text-amber-300 hover:bg-amber-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 disabled:opacity-50"
-                >
-                  {#if modeUpdating}<Loader2
-                      class="size-3 motion-safe:animate-spin"
-                    />{/if}
-                  Enable Auto
-                </button>
-              </div>
-            </div>
-          </div>
-        {/if}
-        <div class="relative">
-          <span id="ai-project-context-help" class="sr-only">
-            Type @ to attach project context. Use arrow keys to choose a result.
+        <button type="button" onclick={() => agent.clearError()} aria-label="Dismiss" class="opacity-70 hover:opacity-100"><X class="size-3" /></button>
+      </div>
+    {/if}
+
+    <!-- Composer -->
+    {#if !inChild}
+      <div class="relative shrink-0 border-t border-border bg-sidebar/90 p-2">
+        <div class="mb-1.5 flex items-center gap-2 px-1 font-mono text-[9.5px] text-muted-foreground">
+          <span class={cn("inline-flex items-center gap-1", running && "text-accent")}>
+            {#if running}<span class="agent-pulse size-1.5 rounded-full bg-accent"></span>{/if}
+            {statusWord()}
           </span>
-          <textarea
-            bind:this={textareaEl}
-            value={prompt}
-            disabled={promptSubmitting}
-            aria-busy={promptSubmitting}
-            aria-label="Message the AI agent"
-            role="combobox"
-            aria-autocomplete="list"
-            aria-expanded={Boolean(
-              autocompleteOpen && autocompleteItems.length,
-            )}
-            aria-controls="ai-project-context-options"
-            aria-activedescendant={activeAutocompleteId}
-            aria-describedby="ai-project-context-help"
-            oninput={handlePromptInput}
-            onkeydown={handleKey}
-            onclick={handlePromptClick}
-            onkeyup={handlePromptClick}
-            placeholder="Ask about your manuscript..."
-            rows="3"
-            class="max-h-36 min-h-20 w-full resize-none bg-transparent px-3 py-2 text-xs leading-relaxed text-foreground placeholder:text-muted-foreground outline-none"
-          ></textarea>
-          {#if autocompleteOpen && autocompleteItems.length > 0}
-            <div
-              class="absolute bottom-full left-2 right-2 z-30 mb-1 overflow-hidden rounded-lg border border-border bg-popover shadow-xl"
-            >
-              <div
-                class="border-b border-border/70 px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground"
-              >
-                Project context
-              </div>
-              <div
-                id="ai-project-context-options"
-                role="listbox"
-                aria-label="Project context"
-                class="max-h-56 overflow-y-auto p-1"
-              >
-                {#each autocompleteItems as item, index (item.type + item.id)}
-                  <button
-                    id={`ai-project-context-option-${index}`}
-                    type="button"
-                    role="option"
-                    aria-selected={index === selectedAutocompleteIndex}
-                    onmousedown={(event) => {
-                      event.preventDefault();
-                      insertAutocompleteItem(item);
-                    }}
-                    class="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left {index ===
-                    selectedAutocompleteIndex
-                      ? 'bg-muted text-foreground'
-                      : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'}"
-                  >
-                    <span class="min-w-0">
-                      <span class="block truncate text-[11px]"
-                        >@{item.label}</span
-                      >
-                      <span class="block truncate text-[10px] opacity-70"
-                        >{item.detail}</span
-                      >
-                    </span>
-                    <span class="shrink-0 text-[9px] uppercase opacity-60"
-                      >{item.type}</span
-                    >
-                  </button>
-                {/each}
-              </div>
-              <div
-                class="border-t border-border/70 px-2 py-1 text-[10px] text-muted-foreground"
-              >
-                Enter/Tab to attach, Esc to close. Add #10-20 for lines.
-              </div>
-            </div>
+          <span class="flex-1"></span>
+          {#if root && totalTokens > 0}
+            <span title="Tokens used in this session">{formatTokens(totalTokens)} tok</span>
+            {#if root.cost > 0}<span>· ${root.cost.toFixed(root.cost < 1 ? 3 : 2)}</span>{/if}
           {/if}
         </div>
-        <div
-          class="flex items-center justify-between gap-2 border-t border-border/60 px-2 py-1.5"
-        >
-          <div class="flex min-w-0 items-center gap-1.5">
+
+        {#if autoConfirm}
+          <div class="agent-rise mb-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-2.5 text-[11px] text-amber-100">
+            <p class="font-medium text-amber-200">Switch this session to Auto?</p>
+            <p class="mt-0.5 text-amber-100/80">The agent will change chapters, characters, and docs without asking. Capability and permission checks still apply.</p>
+            <div class="mt-2 flex justify-end gap-1.5">
+              <button type="button" onclick={() => (autoConfirm = false)} class="rounded px-2 py-0.5 text-amber-100/80 hover:bg-amber-400/10">Cancel</button>
+              <button type="button" onclick={() => void setMode("auto")} class="rounded bg-amber-400 px-2 py-0.5 font-medium text-black hover:bg-amber-300">Enable Auto</button>
+            </div>
+          </div>
+        {/if}
+
+        <div class="agent-composer rounded-xl border border-border bg-background/95 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.6)] focus-within:border-accent/60">
+          <div class="flex items-center gap-1.5 border-b border-border/60 px-2 py-1">
+            {#if primaryAgents.length > 1}
+              <select
+                value={currentAgent}
+                onchange={(e) => void setAgent((e.currentTarget as HTMLSelectElement).value)}
+                disabled={rootRunning}
+                aria-label="Agent"
+                class="agent-select max-w-[8rem] shrink-0"
+              >
+                {#each primaryAgents as a (a.id)}
+                  <option value={a.id}>{a.name}</option>
+                {/each}
+              </select>
+            {/if}
+
             <input
-              bind:this={fileInputEl}
-              type="file"
-              multiple
-              disabled={promptSubmitting}
-              class="hidden"
-              onchange={(event) => void handleFiles(event.currentTarget.files)}
+              value={modelDraft ?? currentModel}
+              oninput={(e) => (modelDraft = (e.currentTarget as HTMLInputElement).value)}
+              onblur={() => void commitModel()}
+              onkeydown={(e) => { if (e.key === "Enter") { e.preventDefault(); (e.currentTarget as HTMLInputElement).blur(); } }}
+              disabled={rootRunning || !root}
+              aria-label="Model"
+              title="Model (press Enter to switch)"
+              class="agent-select min-w-0 flex-1 truncate border-transparent hover:border-border"
             />
-            <button
-              type="button"
-              onclick={() => fileInputEl?.click()}
-              disabled={uploadingAttachment || promptSubmitting}
-              class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-              title="Attach files"
-            >
+
+          </div>
+          {#if references.length || attachments.length}
+            <div class="flex flex-wrap gap-1 border-b border-border/70 px-2 py-1.5">
+              {#each references as ref (ref.key)}
+                <button type="button" onclick={() => (references = references.filter((r) => r.key !== ref.key))} class="inline-flex items-center gap-1 rounded-md bg-accent/10 px-1.5 py-0.5 font-mono text-[10px] text-accent hover:bg-accent/20" title="Remove reference">
+                  <AtSign class="size-2.5" />{ref.label}<X class="size-2.5 opacity-60" />
+                </button>
+              {/each}
+              {#each attachments as file, i (file.name + i)}
+                <button type="button" onclick={() => (attachments = attachments.filter((_, idx) => idx !== i))} class="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground/80 hover:bg-muted/70" title="Remove attachment">
+                  <Paperclip class="size-2.5" />{file.name}<X class="size-2.5 opacity-60" />
+                </button>
+              {/each}
+            </div>
+          {/if}
+
+          <div class="relative">
+            <textarea
+              bind:this={textareaEl}
+              bind:value={prompt}
+              oninput={updateAutocomplete}
+              onclick={updateAutocomplete}
+              onkeydown={handleKey}
+              rows="3"
+              placeholder={rootRunning ? "Steer the agent, or ⌥↵ to queue…" : "Ask the agent to plan, draft, or revise…  @ to reference"}
+              aria-label="Message the agent"
+              class="block max-h-60 min-h-[4.5rem] w-full resize-none bg-transparent px-3 py-2.5 text-[12.5px] leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+            ></textarea>
+
+            {#if autocompleteOpen && autocompleteItems.length}
+              <ul role="listbox" class="absolute bottom-full left-2 right-2 z-20 mb-1 max-h-60 overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-xl">
+                {#each autocompleteItems as item, index (item.type + item.id)}
+                  <li role="option" aria-selected={index === autocompleteIndex}>
+                    <button
+                      type="button"
+                      onmousedown={(e) => { e.preventDefault(); insertMention(item); }}
+                      class={cn("flex w-full items-center gap-2 rounded px-2 py-1 text-left", index === autocompleteIndex ? "bg-accent/15 text-foreground" : "text-foreground/80 hover:bg-muted")}
+                    >
+                      <span class="min-w-0 flex-1 truncate font-mono text-[11px]">{item.label}</span>
+                      <span class="shrink-0 text-[9.5px] text-muted-foreground">{item.detail}</span>
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </div>
+
+          <div class="flex items-center gap-1 px-1.5 pb-1.5">
+            <input bind:this={fileInputEl} type="file" multiple class="hidden" onchange={(e) => void handleFiles((e.currentTarget as HTMLInputElement).files)} />
+            <button type="button" onclick={() => fileInputEl?.click()} class="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Attach files" title="Attach files">
               <Paperclip class="size-3.5" />
             </button>
-            <div
-              role="group"
-              aria-label="Agent execution mode"
-              class="inline-flex h-7 shrink-0 items-center rounded-md border border-border bg-muted/20 p-0.5"
-              title={approvalMode === "auto"
-                ? "Auto runs available tools without approvals or questions"
-                : "Manual asks before project-changing tools run"}
-            >
+
+            <span class="flex-1"></span>
+            <div class="flex shrink-0 overflow-hidden rounded-md border border-border" role="group" aria-label="Execution mode">
               <button
                 type="button"
-                aria-pressed={approvalMode === "manual"}
-                disabled={modeControlDisabled}
-                onclick={() => void setApprovalMode("manual")}
-                class="h-5 rounded px-1.5 text-[9px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 {approvalMode ===
-                'manual'
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'}"
-                >Manual</button
+                onclick={() => void setMode("manual")}
+                disabled={!root || rootRunning}
+                aria-pressed={mode === "manual"}
+                title="Manual: review every change"
+                class={cn("inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px]", mode === "manual" ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground")}
               >
+                <Hand class="size-3" /> Manual
+              </button>
               <button
                 type="button"
-                aria-pressed={approvalMode === "auto"}
-                disabled={modeControlDisabled}
-                onclick={() => void setApprovalMode("auto")}
-                class="h-5 rounded px-1.5 text-[9px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 disabled:opacity-50 {approvalMode ===
-                'auto'
-                  ? 'bg-amber-500/15 text-amber-300 shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'}">Auto</button
+                onclick={() => void setMode("auto")}
+                disabled={!root || rootRunning}
+                aria-pressed={mode === "auto"}
+                title="Auto: apply changes immediately (admins)"
+                class={cn("inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px]", mode === "auto" ? "bg-amber-400/20 text-amber-300" : "text-muted-foreground hover:text-foreground")}
               >
+                {#if mode === "auto"}<Zap class="size-3" />{:else}<ShieldCheck class="size-3" />{/if} Auto
+              </button>
             </div>
-            <select
-              bind:value={selectedModel}
-              disabled={promptSubmitting}
-              class="h-7 max-w-28 rounded-md border border-transparent bg-transparent px-1.5 text-[10px] text-muted-foreground outline-none hover:border-border hover:text-foreground"
-              title="Model"
-            >
-              {#each modelOptions as model}
-                <option value={model}>{model}</option>
-              {/each}
-            </select>
-          </div>
-          <div class="flex items-center gap-1">
-            <button
-              type="button"
-              onclick={() => void (primaryActionIsStop ? cancel() : send())}
-              disabled={primaryActionIsStop
-                ? stopSubmitting
-                : !prompt.trim() ||
-                  uploadingAttachment ||
-                  promptSubmitting ||
-                  stopSubmitting}
-              aria-label={primaryActionIsStop
-                ? stopSubmitting
-                  ? "Stopping agent"
-                  : "Stop agent"
-                : hasActiveWork
-                  ? "Queue follow-up"
-                  : "Send"}
-              aria-busy={primaryActionIsStop
-                ? stopSubmitting
-                : promptSubmitting}
-              title={primaryActionIsStop
-                ? stopSubmitting
-                  ? "Stopping agent"
-                  : "Stop agent"
-                : hasActiveWork
-                  ? "Queue follow-up"
-                  : "Send"}
-              class="flex size-7 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 {primaryActionIsStop
-                ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
-                : 'bg-accent text-accent-foreground hover:bg-accent/90'}"
-            >
-              {#if stopSubmitting}<Loader2
-                  class="size-3.5 motion-safe:animate-spin"
-                />{:else if primaryActionIsStop}<CircleStop
-                  class="size-3.5"
-                />{:else if promptSubmitting}<Loader2
-                  class="size-3.5 motion-safe:animate-spin"
-                />{:else}<Send class="size-3.5" />{/if}
-            </button>
+
+            {#if rootRunning && !prompt.trim()}
+              <button type="button" onclick={() => void agent.interrupt()} class="agent-send bg-destructive/90 text-white hover:bg-destructive" aria-label="Stop the agent" title="Stop (Esc)">
+                <CircleStop class="size-3.5" />
+              </button>
+            {:else}
+              <button type="button" onclick={() => void send()} disabled={!canSend} class="agent-send bg-accent text-accent-foreground hover:brightness-110 disabled:opacity-30" aria-label="Send" title={rootRunning ? "Steer (↵) · Queue (⌥↵)" : "Send (↵)"}>
+                {#if agent.sending}<Loader2 class="size-3.5 motion-safe:animate-spin" />{:else}<ArrowUp class="size-3.5" />{/if}
+              </button>
+            {/if}
           </div>
         </div>
       </div>
-      <div
-        class="mt-1.5 flex items-center justify-between gap-2 text-[10px] text-muted-foreground"
-      >
-        <span class="inline-flex items-center gap-1">
-          <span class={`size-1.5 rounded-full ${streamDotClass()}`}></span>
-          {streamStatusLabel()} · {session?.status ?? "idle"}
-          {#if ai.canRetryStream}
-            ·
-            <button
-              type="button"
-              onclick={() => void ai.retryStream()}
-              class="rounded px-1 text-accent hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-              >Retry</button
-            >
-          {/if}
-        </span>
-        {#if session?.contextUsage}
-          <span
-            class="min-w-24 text-right {session.contextUsage.percentage > 100
-              ? 'text-destructive'
-              : ''}"
-            title={`${session.contextUsage.totalTokens} / ${session.contextUsage.maxTokens} tokens`}
-          >
-            Context {session.contextUsage.percentage}% · {formatUsage(
-              session.contextUsage.totalTokens,
-            )} tokens
-          </span>
-        {:else}
-          <span class="text-right">Context --%</span>
-        {/if}
+    {:else if viewed}
+      <div class="shrink-0 border-t border-border bg-sidebar/90 px-3 py-2 font-mono text-[10px] text-muted-foreground">
+        Read-only view of a subagent session. {#if running}<button type="button" onclick={() => void agent.interrupt(viewed.id)} class="ml-1 text-destructive hover:underline">stop it</button>{/if}
       </div>
-    </div>
+    {/if}
   {/if}
 </div>
+
+<style>
+  .agent-panel {
+    background:
+      radial-gradient(120% 60% at 100% 0%, color-mix(in oklch, var(--accent) 7%, transparent), transparent 60%),
+      var(--background);
+  }
+  .agent-paper {
+    background-image: repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 27px,
+      color-mix(in oklch, var(--foreground) 2.2%, transparent) 27px,
+      color-mix(in oklch, var(--foreground) 2.2%, transparent) 28px
+    );
+  }
+  .agent-mark {
+    display: inline-grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    color: var(--accent);
+    background: color-mix(in oklch, var(--accent) 12%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 30%, transparent);
+  }
+  .agent-seal {
+    display: grid;
+    place-items: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 999px;
+    color: var(--accent);
+    background: radial-gradient(circle at 35% 30%, color-mix(in oklch, var(--accent) 35%, transparent), color-mix(in oklch, var(--accent) 8%, transparent) 70%);
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 35%, transparent), 0 10px 30px -10px color-mix(in oklch, var(--accent) 60%, transparent);
+  }
+  .agent-select {
+    height: 22px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    padding: 0 6px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--muted-foreground);
+  }
+  .agent-select:focus {
+    outline: none;
+    border-color: color-mix(in oklch, var(--accent) 60%, transparent);
+    color: var(--foreground);
+  }
+  .agent-send {
+    display: inline-grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    transition: filter 120ms, transform 120ms;
+  }
+  .agent-send:not(:disabled):active {
+    transform: scale(0.94);
+  }
+  :global(.agent-prose) {
+    font-family: var(--font-serif);
+    font-size: 13.5px;
+    line-height: 1.62;
+    color: color-mix(in oklch, var(--foreground) 92%, transparent);
+  }
+  :global(.agent-prose code),
+  :global(.agent-prose pre) {
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+  :global(.agent-label) {
+    margin-bottom: 2px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: color-mix(in oklch, var(--muted-foreground) 80%, transparent);
+  }
+  :global(.agent-code) {
+    max-height: 14rem;
+    overflow: auto;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: color-mix(in oklch, var(--card) 70%, transparent);
+    padding: 6px 8px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: color-mix(in oklch, var(--foreground) 80%, transparent);
+  }
+  :global(.agent-rise) {
+    animation: agent-rise 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  :global(.agent-pulse) {
+    animation: agent-pulse 1.4s ease-in-out infinite;
+  }
+  :global(.agent-quill) {
+    display: inline-flex;
+    animation: agent-quill 1.1s ease-in-out infinite;
+  }
+  :global(.agent-ink-line) {
+    height: 1px;
+    width: 64px;
+    background: linear-gradient(90deg, var(--accent), transparent);
+    transform-origin: left;
+    animation: agent-ink 1.6s ease-in-out infinite;
+  }
+  @keyframes agent-rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes agent-pulse {
+    50% { opacity: 0.35; }
+  }
+  @keyframes agent-quill {
+    0%, 100% { transform: translate(0, 0) rotate(0deg); }
+    50% { transform: translate(3px, -1px) rotate(-8deg); }
+  }
+  @keyframes agent-ink {
+    0% { transform: scaleX(0.1); opacity: 0.2; }
+    60% { transform: scaleX(1); opacity: 1; }
+    100% { transform: scaleX(1); opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :global(.agent-rise), :global(.agent-pulse), :global(.agent-quill), :global(.agent-ink-line) {
+      animation: none;
+    }
+  }
+</style>

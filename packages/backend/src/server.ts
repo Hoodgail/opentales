@@ -2,6 +2,7 @@ import { env } from "./config/env.js";
 import { prisma } from "./config/prisma.js";
 import { createApp } from "./app.js";
 import { closeMcpHandler } from "./routes/mcpRoutes.js";
+import { closeOpencodeRuntime } from "./useCases/ai/opencode/host.js";
 
 const app = createApp();
 
@@ -11,6 +12,7 @@ const server = app.listen(env.port, () => {
 
 async function shutdown() {
   await closeMcpHandler();
+  await closeOpencodeRuntime();
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
   });

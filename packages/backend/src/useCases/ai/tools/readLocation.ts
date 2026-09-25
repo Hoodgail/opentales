@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import { tool } from 'ai';
+import { tool } from './shared.js';
 import { z } from 'zod';
 import { HttpError } from '../../../http/HttpError.js';
 import { bodyOf, type ToolContext } from './shared.js';

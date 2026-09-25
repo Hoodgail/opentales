@@ -1,40 +1,47 @@
 # AI system
 
-OpenTales AI is an opt-in project assistant for manuscript-aware chat and dynamic writing through tools. Agents keep plans and progress in project docs. Manual mode proposes mutations for approval; admin-only Auto mode executes permitted mutations immediately.
+OpenTales AI is an opt-in project assistant for manuscript-aware chat and dynamic writing through tools. Agents run on an embedded **[OpenCode V2](https://opencode.ai/v2/docs/build/sdk)** host inside the backend: OpenCode owns the agent loop, transcript, subagents, skills, questions, compaction, and permissions; OpenTales owns identity, project authorization, the project tools, and the approval experience. Manual mode asks the author before each project change; admin-only Auto mode executes permitted changes immediately.
 
 ## Main pieces
 
-| Area                   | Location                                                           | Responsibility                                                                                                  |
-| ---------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| Backend AI controller  | `packages/backend/src/controllers/AiController.ts`                 | Exposes settings, assistive endpoints, agent sessions, SSE, prompts, cancellation, and approval routes.         |
-| Agent session use case | `packages/backend/src/useCases/ai/AiAgentSessionUseCase.ts`        | Persists chat state, queues prompts, streams model output, records tool calls, and executes approved mutations. |
-| AI settings use case   | `packages/backend/src/useCases/ai/ProjectAiSettingsUseCase.ts`     | Stores project-level provider configuration, encrypted credentials, and provider authorization state.           |
-| SDK client             | `packages/sdk/src/client.ts`                                       | Provides typed frontend calls for AI settings, assistive endpoints, agent sessions, streams, and approvals.     |
-| Frontend AI store      | `packages/frontend/src/lib/stores/ai.svelte.ts`                    | Holds settings, docs, active session, session list, stream state, generated feature results, and errors.        |
-| Agent panel            | `packages/frontend/src/lib/components/ide/AiAgentPanel.svelte`     | Renders chat, session switching, queued prompts, pending approvals, and prompt input.                           |
-| Approval diff UI       | `packages/frontend/src/lib/components/ide/AiApprovalEditor.svelte` | Opens proposed mutations as multi-pane Monaco diffs before approval.                                            |
+| Area                   | Location                                                                 | Responsibility                                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| OpenCode runtime       | `packages/backend/src/useCases/ai/opencode/host.ts`                      | Starts one in-memory `@opencode/sdk` host, fans its event bus out per project, and bridges tool permission requests.  |
+| Project workspace      | `packages/backend/src/useCases/ai/opencode/workspace.ts`                 | Generates each project's `.opencode/` config (provider, agents, skills, permission policy) from OpenTales data.       |
+| OpenTales plugin       | `packages/backend/src/useCases/ai/opencode/plugin.ts`                    | Registers every OpenTales tool, injects provider credentials per request, and adds project context each turn.         |
+| Provider mapping       | `packages/backend/src/useCases/ai/opencode/providers.ts`                 | Maps gateway, OpenAI-compatible, GitHub Copilot, and Codex settings onto OpenCode providers and credential transports. |
+| Agent use case         | `packages/backend/src/useCases/ai/OpencodeAgentUseCase.ts`               | Sessions, prompts, interrupts, approvals, questions, and the project SSE stream, mapped to stable SDK types.          |
+| Backend AI controller  | `packages/backend/src/controllers/AiController.ts`                       | Exposes settings, assistive endpoints, agent sessions, events, approvals, and questions.                             |
+| SDK client             | `packages/sdk/src/client.ts`                                             | Typed calls for AI settings, assistive endpoints, agent sessions, and the agent event stream.                         |
+| Frontend agent store   | `packages/frontend/src/lib/stores/agent.svelte.ts`                       | Sessions, per-session transcripts (including subagent children), live streaming, approvals, and questions.           |
+| Agent panel            | `packages/frontend/src/lib/components/ide/AiAgentPanel.svelte`           | Transcript, subagent drill-in, approval slips, questions, composer with agent/model/mode, mentions, and attachments. |
+| Approval diff UI       | `packages/frontend/src/lib/components/ide/AiApprovalEditor.svelte`       | Opens a proposed change as multi-pane Monaco diffs and approves or rejects it.                                       |
 
-| Context assembler | `packages/backend/src/useCases/ai/context/ContextAssembler.ts` | Builds token-budgeted, branch-aware and time-aware context packs. |
+## Architecture
+
+```text
+AiAgentPanel ──SDK──▶ AiController ──▶ OpencodeAgentUseCase
+                                          │
+                                          ▼
+                              OpencodeRuntime (@opencode/sdk, in-memory)
+                                ├─ instance per project workspace
+                                │    data/opencode/projects/<projectId>/.opencode/
+                                │      opencode.json  (provider, agents, permissions)
+                                │      skills/<name>/SKILL.md (+ references/)
+                                ├─ opentales plugin: OpenTales tools, credential hook, context hook
+                                └─ opencode.db (sessions, messages, events)
+```
+
+- **Isolation.** OpenCode's HOME and XDG roots are redirected to `OPENCODE_DATA_DIR/home` (default `./data/opencode`), so the host never reads the server operator's `~/.claude`, `~/.config/opencode`, MCP servers, or skills.
+- **Per-project agents.** Each project has its own workspace directory and so its own OpenCode instance, agents, skills, provider, and plugin instance. The workspace holds configuration only; manuscript data is reached exclusively through OpenTales tools.
+- **Tool surface.** Agents get the OpenTales tools (the same objects the MCP server exposes) plus OpenCode's `question`, `skill`, and `subagent` tools. OpenCode's shell, file, glob/grep, web, code-mode, and MCP tools are denied by the base permission policy.
+- **Secrets.** Provider credentials are never written to the workspace. The config carries a placeholder key and the plugin's `http.request` hook attaches the decrypted project credential (or refreshed Codex token) to each outbound model request.
 
 ## Data model
 
-The AI data model lives in `packages/backend/prisma/schema.prisma`.
+`ProjectAiSettings` stores whether AI is enabled and how to reach the model provider. `ProjectAiSkill` stores project-scoped Agent Skills. Project docs use the versioned `Writing` system; docs with kind `INSTRUCTIONS` are injected into every agent turn as standing author guidance.
 
-`ProjectAiSettings` stores whether AI is enabled and how to reach the model provider.
-
-`ProjectAiSkill` stores project-scoped Agent Skills. Each skill has a unique `name`, `description`, full markdown `content`, and an `enabled` flag. Enabled skills are disclosed to the agent as a compact catalog and loaded on demand through read-only tools.
-
-`ProjectAiAgentSession` stores each chat session for a project. A project can have multiple sessions. Each session has a title, status, `MANUAL`/`AUTO` execution mode, active prompt, messages, queued prompts, tool calls, and an atomic counter for ordered session parts.
-
-`AiAgentMessage` stores persisted transcript messages with roles: `USER`, `ASSISTANT`, `SYSTEM`, and `TOOL`.
-
-`AiAgentPrompt` stores queued or running user prompts. Prompts can be queued normally or inserted ahead of the queue by interrupting the active run.
-
-`AiAgentToolCall` stores model tool calls, including approval-required mutations. Immediate tools remain `RUNNING` until their output is persisted; approval-gated tools move through `PENDING_APPROVAL`/`APPROVED` before `EXECUTED`, `REJECTED`, or `ERROR`.
-
-`AiAgentSessionPart` is the durable ordered execution trace for a chat session. Its atomic per-session sequence preserves contiguous assistant text, tool calls, tool results, and subtask start/finish activity in their original order. `AiAgentMessage` and `AiAgentToolCall` remain compatibility projections and canonical detail records; they are not used to reconstruct new-stream chronology from timestamps. `timelineInfo.mode` is `exact` for fully sequenced history, `approximate` for legacy timestamp projections, and `mixed` when both appear. It also reports server-side truncation and whether older parts exist.
-
-Project docs are separate from chat state. `ProjectDoc` uses the versioned `Writing` system and can be read by the agent. Docs are organized by path-based folders; `kind` is metadata for filtering and internal behavior, not hierarchy. Docs with kind `INSTRUCTIONS` are automatically injected into the agent prompt as standing project guidance regardless of their folder.
+Agent sessions, messages, tool calls, subagent sessions, pending permissions, and questions are persisted by OpenCode in `opencode.db`. Each root session records `opentalesProjectId`, `opentalesUserId`, and `approvalMode` in its metadata; subagent sessions inherit ownership from their root. The legacy `ProjectAiAgentSession`/`AiAgent*` Prisma tables are no longer written.
 
 ## Provider configuration
 
@@ -51,8 +58,8 @@ client.pollCodexAuth(projectId, input);
 
 Provider modes:
 
-- `gateway`: Uses AI SDK model strings such as `openai/gpt-5.4`; credentials come from backend environment configuration.
-- `openai-compatible`: Uses `@ai-sdk/openai-compatible` with project-level `model`, optional `baseUrl`, and optional encrypted project API key.
+- `gateway`: Model strings such as `openai/gpt-5.4` through the Vercel AI Gateway (`AI_GATEWAY_BASE_URL`, default `https://ai-gateway.vercel.sh/v1`); `AI_GATEWAY_API_KEY` comes from backend environment configuration.
+- `openai-compatible`: Any OpenAI-compatible endpoint with project-level `model`, optional `baseUrl` (a bare origin such as `https://strata.yasui.io` gets `/v1` appended), and optional encrypted project API key.
 - `github-copilot`: Uses GitHub device authorization and the Copilot bearer-token transport.
 - `codex`: Uses [OpenAI device authorization](https://learn.chatgpt.com/docs/auth#login-on-headless-devices) for ChatGPT subscription access. The backend encrypts the access token, refresh token, expiry, and ChatGPT account routing identifier, refreshes expiring sessions with one deduplicated refresh, and sends Responses API requests to the Codex backend with the required account and residency headers.
 
@@ -85,172 +92,70 @@ The MCP adapter registers the same tool objects used by interactive OpenTales ag
 
 The external story-writing harness also exposes optimistic prose tools. `readChapter`, `readScene`, `readProjectDoc`, `readSubmission` return the current branch/head tokens. `updateChapter`, `updateScene`, `updateProjectDoc`, `updateSubmission` accept full replacement for empty bodies or exact-string edits. `applyStoryPatch` batches up to 50 canonical/proposal changes atomically with an idempotent receipt.
 
+## Agents
+
+The workspace defines these agents:
+
+- `writer` (default, primary): the OpenTales writing assistant.
+- `planner` (primary): read-only planning; project changes are denied.
+- `explore` (subagent): fast read-only research over the manuscript.
+- `general` (subagent): OpenCode's general-purpose worker for multi-step delegated work.
+- Built-in craft runners from `useCases/ai/agents/*.md` and project agents from docs in the root `agents/` folder (frontmatter: `description`, `mode`, `model`, `hidden`, `runtimeRole`). Explorer and researcher roles are read-only.
+
+OpenCode's coding agents (`build`, `plan`) are disabled. Agents delegate with OpenCode's `subagent` tool, which creates a child session the panel can open. Pending approvals and questions from subagents surface on the root session.
+
+## Skills
+
+Built-in skills from `useCases/ai/skills/*` and enabled project skills are written to `.opencode/skills/<name>/SKILL.md` (built-in reference files are copied alongside). OpenCode advertises them to the model and loads one on demand through its `skill` tool; the author can also attach skills to a prompt. The `opentales-tools` skill is the operating manual for the project tools; its `references/tool-reference.md` is generated from the live schemas with `pnpm exec tsx scripts/generate-opentales-tool-reference.ts`.
+
 ## Agent sessions
 
-The agent panel supports multiple chat sessions per project. The frontend loads the session list and the active session through the SDK:
-
 ```ts
+client.getAiAgentCapabilities(projectId); // agents, skills, tools, default model
 client.listAiAgentSessions(projectId);
-client.createAiAgentSession(projectId, { title, approvalMode });
-client.updateAiAgentSession(projectId, sessionId, { approvalMode });
-client.getAiAgentSession(projectId, sessionId);
-client.queueAiAgentPrompt(projectId, { prompt, interrupt }, sessionId);
-client.cancelAiAgentSession(projectId, sessionId);
+client.createAiAgentSession(projectId, { approvalMode, agent });
+client.updateAiAgentSession(projectId, sessionId, { approvalMode, title, agent, model });
+client.deleteAiAgentSession(projectId, sessionId);
+client.getAiAgentSession(projectId, sessionId); // summary + recent messages + pending permissions/questions
+client.getAiAgentMessages(projectId, sessionId, { cursor, limit });
+client.sendAiAgentPrompt(projectId, sessionId, { text, delivery, agent, model, attachments, references, skills });
+client.interruptAiAgentSession(projectId, sessionId);
+client.replyAiPermission(projectId, sessionId, requestId, { decision: 'once' | 'always' | 'reject', message });
+client.answerAiQuestion(projectId, sessionId, questionId, { answers });
+client.dismissAiQuestion(projectId, sessionId, questionId);
+client.streamAiAgentEvents(projectId, onEvent, { signal });
 ```
 
-Execution mode is durable per session and is captured into every queued prompt:
+Messages are `user`, `assistant` (ordered `text`, `reasoning`, and `tool` parts), or `system` markers (skill activation, compaction, agent/model switches). A `subagent` tool part carries `childSessionId`.
 
-- `manual` is the default. Project-changing tools pause as pending proposals, and `askUser` is available for genuine author decisions.
-- `auto` requires project-admin permission. Available in-scope tools execute immediately, `askUser` is removed from the model toolset, and delegated subagent sessions inherit Auto mode. Tool capability, permission, scope, validation, idempotency, and database safety checks still apply.
+**Delivery.** `steer` (default) delivers a prompt at the next model step, redirecting an active run; `queue` waits for the current run to finish. The panel steers with ↵ and queues with ⌥↵ while the agent is running.
 
-The mode cannot change while a prompt is running or queued. Switching to Auto therefore never silently approves an already-pending proposal or changes the authority of queued work.
+**Streaming.** One authenticated SSE stream per project carries activity for every session the caller owns, including subagent children: `connected`, `session.updated`, `message.updated`, `text.delta`, `reasoning.delta`, `tool.updated`, `permission.asked/replied`, `question.asked/closed`, `status`, and `usage`. The client reconnects with jittered backoff and resynchronizes the open session after reconnecting. Restarting the backend ends live streams; OpenCode persists transcripts, and an interrupted run can be resumed with a new prompt.
 
-Each session has its own SSE stream:
+## Execution modes and approvals
 
-```ts
-await client.streamAiAgentSession(
-  projectId,
-  sessionId,
-  (event) => {
-    // event.session is a full session snapshot
-  },
-  { signal },
-);
-```
+Execution mode is stored on the root session and can change only while it is idle. `auto` requires project-admin permission.
 
-The stream is authenticated with `fetch` so the SDK can send the bearer token. SSE is only the live transport: lifecycle boundaries carry a full bounded session snapshot, while high-frequency `text-delta` events omit `session` and carry an incremental stable part patch. Reloads and reconnects render `session.timeline`, whose sequenced parts live in PostgreSQL. New subscribers are registered in buffered mode before their initial snapshot is read, preventing a newer delta from being overwritten by a late initial snapshot. Heartbeats and response-backpressure buffering keep long-lived connections observable and ordered.
+- **Manual.** Every OpenTales tool that changes project data raises an OpenCode permission request (`action: opentales.write`, `resources: [toolName]`) carrying the proposed input. The tool call waits until the author decides. `once` approves this call, `always` saves an allow rule for that tool in the session, and `reject` returns an error to the model so nothing changes. Questions are available.
+- **Auto.** Changes run immediately; the `question` tool is denied so runs never stall.
 
-Older durable activity is cursor-paged without loading the whole trace:
+Capability, project permission (`project:write` for changes), scope, validation, optimistic-concurrency, and idempotency checks inside each tool apply in both modes. Replying to a permission requires `project:write`.
 
-```ts
-client.getAiAgentTimeline(projectId, { beforeSequence, limit }, sessionId);
-```
+The panel shows pending changes as approval slips. **Review diff** builds a multi-pane Monaco diff (chapter details/summary/manuscript, character fields, document body, or raw input) and opens it in `AiApprovalEditor.svelte`. After a run finishes, the manuscript reloads so approved changes appear immediately.
 
-The response returns ordered `parts`, `nextBeforeSequence`, `nextLegacyCursor`, and `hasMore`. Durable pages use the numeric sequence cursor. Pre-sequencing sessions return `limitation: 'legacy-history-best-effort'` and an opaque timestamp/ID cursor carrying its sequence anchor, so each older page remains globally ordered even when the caller sends only that cursor. Historic text/tool boundaries still cannot be recovered exactly.
+## Questions
 
-Chat streaming is an interactive transport. Session history and planning docs persist, while interrupted model calls must be resumed with a new prompt.
-
-## Prompt lifecycle
-
-When a user sends a prompt, the backend creates an `AiAgentPrompt` row and broadcasts a `prompt-queued` event. The session drain loop picks queued prompts one at a time.
-
-Each session has one in-process drain promise, and starting a prompt also uses a database compare-and-set over both the session and queued prompt. Concurrent submissions therefore cannot start the same prompt twice or run two model turns for one session.
-
-For a running prompt, the backend:
-
-1. Marks the prompt `RUNNING`.
-2. Adds the user message to the transcript.
-3. Creates an empty assistant message.
-4. Calls the model with project context and tool definitions.
-5. Buffers model tokens and coalesces contiguous deltas into one durable `text` part while continuing to update the compatibility assistant message at bounded intervals.
-6. Closes that text part at every tool boundary, appends deduplicated `tool-call` and `tool-result` parts, and starts a new text part when prose resumes.
-7. Marks the prompt `COMPLETED`, `CANCELLED`, or `ERROR`.
-
-`interrupt: true` aborts the active generation, marks queued/running prompts cancelled for that session, and puts the new prompt at the front of the queue.
+When the agent needs a decision it calls OpenCode's `question` tool. The question is rendered inline as a form with options and a custom answer; answers are keyed by field and returned to the model as the tool result. Dismissing cancels the question.
 
 ## Project context
 
-The agent prompt includes high-level project metadata, recent session messages, and up to a few instruction docs. The model can then inspect specific project data using read-only tools.
+Every turn receives the `writer` system prompt, the project metadata, up to five `INSTRUCTIONS` docs (bounded), and the current execution mode. `@` mentions add a machine-readable list of referenced items (type, id, path, line range) which the agent reads with its tools. File attachments are sent inline to the model.
 
-Read-only tools include:
-
-- `listCharacters`
-- `readCharacter`
-- `listChapters`
-- `readChapter`
-- `grepChapter`
-- `grepChapters`
-- `listLocations`
-- `readLocation`
-- `listProjectDocs`
-- `readProjectDoc`
-- `listProjectFiles`
-- `readFolder`
-- `listAssets`
-- `readAssetMetadata`
-- `readAssetContent`
-- `readStoryStructure`
-- `listProjectAiSkills`
-- `readProjectAiSkill`
-
-The prompt tells the model to prefer summaries, grep, bounded reads, and lists before requesting full chapter text. This keeps the agent useful without loading the whole manuscript by default.
-
-## Agent questions
-
-When the agent genuinely needs clarification, it can call `askUser` with one or more questions, concise answer options, and optional recommended choices. The call is persisted as a pending tool call, streamed to `AiAgentPanel.svelte`, and the model run waits until the user submits answers or dismisses the question.
-
-The frontend renders each question with selectable choices plus a custom-answer field by default. Submitted answers are posted through:
-
-```ts
-client.answerAiQuestion(projectId, toolCallId, { answers }, sessionId);
-```
-
-Answers resolve the waiting tool call and are returned to the model as tool output so it can continue the same turn with the user's response in mind.
-
-## Subagents
-
-Primary agent runs can call the `task` tool to delegate focused work to a subagent. The tool creates or resumes a regular AI agent session, persists and broadcasts `subtask-started`/`subtask-finished` lifecycle parts on the parent timeline, and returns a `task_id` plus the final `<task_result>` text so the primary agent can continue with the result. This `task_id` is the child AI session ID, used to resume that task.
-
-Subagents receive a focused objective and scope. Read and update project docs to share plans and findings; resume a prior task using the returned session ID.
-
-Built-in subagents:
-
-- `general` — general-purpose research and multi-step work.
-- `explore` — fast project exploration using read-oriented tools.
-
-Project-specific subagents can be defined as ProjectDocs whose path is under `agent/` or `agents/` and ends in `.md`, for example `agents/reviewer.md`. The markdown body becomes the subagent instructions. Optional frontmatter supports `description`, `mode`, `model`, `hidden`, and `name`.
-
-```markdown
----
-description: Reviews manuscript continuity and character consistency
-mode: subagent
-model: openai/gpt-5-mini
----
-
-You are a continuity reviewer. Focus on contradictions, timeline drift, and character voice.
-```
-
-## Execution modes and mutations
-
-In Manual mode, mutating tools create pending tool calls that the frontend must approve or reject. In Auto mode, the same tools execute immediately inside their existing capability and authorization boundaries and still persist their call/result lifecycle in the ordered session timeline.
-
-Tools that require approval in Manual mode include:
-
-- `askUser`
-- `createCharacter`
-- `updateCharacter`
-- `createChapter`
-- `updateChapter`
-- `applyStoryPatch`
-- `createProjectDoc`
-- `updateProjectDoc`
-- `createFolder`
-- `updateFolder`
-- `deleteFolder`
-- `updateAsset`
-- `updateSubmission`
-- `reorderScenes`
-
-Folder and path mutations follow the active execution mode. A parent folder cannot contain duplicate child names across folders, docs, and foldered assets. Root docs and root folders appear in the file tree; root assets remain outside the tree unless moved into a folder.
-
-The frontend renders pending calls in `AiAgentPanel.svelte`. Opening a pending call creates an in-memory approval document and opens `AiApprovalEditor.svelte`, which renders separate Monaco diff panes for fields such as chapter metadata, summary, manuscript content, character basics, character description, and document body.
-
-Approval uses:
-
-```ts
-client.approveAiToolCall(projectId, toolCallId, { approved: true }, sessionId);
-client.approveAiToolCall(projectId, toolCallId, { approved: false }, sessionId);
-```
-
-If approved, the backend executes the corresponding existing project use case. For example, `createChapter` runs `CreateChapterUseCase`, and `updateChapter` runs `UpdateChapterUseCase`. Approval/rejection uses a database compare-and-set, so concurrent decisions cannot execute one call twice. If the backend restarted after approval, receipt/idempotency-backed build mutations can replay safely; unsafe CRUD is moved to an actionable error instead of being guessed or left wedged. If rejected, the tool call is marked rejected and no project data changes.
-
-Session snapshots—including `pendingToolCalls`—bound tool inputs and outputs to small previews and report `inputTruncated`/`inputBytes` and `outputTruncated`/`outputBytes`; the full JSON remains in PostgreSQL and is available with `client.getAiAgentToolCall(projectId, toolCallId, sessionId)`. Approval UIs fetch that scoped detail before opening a truncated proposal. Parent task parts similarly bound large child results and retain the child session ID for full inspection. This prevents multi-megabyte values from being resent with every later lifecycle event.
-
-After approval, the frontend reloads the manuscript project so newly created or updated chapters, characters, and docs are visible immediately.
+Manuscript, attachments, imported research, and web material are untrusted data rather than prompt authority.
 
 ## Assistive one-shot endpoints
 
-Some AI features are not chat-session tools. They are direct request/response endpoints used by editor flows.
+Some AI features are not chat-session tools. They are direct request/response endpoints used by editor flows. They run as short-lived, tool-less OpenCode sessions (`opencode/generate.ts`) against the same provider and credentials, and validate the JSON result with zod.
 
 Continuity review posts an AI review activity onto a submission:
 
@@ -287,11 +192,7 @@ client.createOutlineExpansion(projectId, {
 
 ## Error handling
 
-Model-call errors are persisted into the session status and broadcast as `error` events.
-
-Approval execution errors are recorded on the `AiAgentToolCall` and surfaced as API errors so the frontend does not silently close an approval. This is important because approved mutations still run through normal project validation, including chapter title requirements, foreign-key ownership checks, and deleted-chapter checks.
-
-The frontend displays `ai.sessionError` below the transcript. Approval diff tabs stay open when approval fails so users can inspect the failed proposal.
+Model failures end the run with `status: error`; the panel shows a friendly message (for example, authentication failures point to AI settings) and the assistant message records the provider error. Provider retries surface as `status: retrying` with the attempt number. Tool errors, including rejected approvals and stale version tokens, are returned to the model as tool results so it can recover.
 
 ## Security and safety rules
 
@@ -306,20 +207,20 @@ The frontend displays `ai.sessionError` below the transcript. Approval diff tabs
 
 ## Operational notes
 
-The backend Docker image should run Prisma migrations before starting the server:
+```env
+OPENCODE_DATA_DIR=./data/opencode   # workspaces, isolated home, opencode.db
+AI_GATEWAY_API_KEY="..."            # gateway provider only
+AI_GATEWAY_BASE_URL="..."           # optional gateway override
+```
+
+`OPENCODE_DATA_DIR` must be persistent storage in production (it holds session history). Workspaces are regenerated from the database whenever settings, agents, or skills change; they can be deleted safely.
+
+Run the live harness test against a real model with:
 
 ```sh
-pnpm exec prisma migrate deploy && node dist/src/server.js
+OPENCODE_LIVE_DATABASE_URL=postgresql://… OPENCODE_LIVE_BASE_URL=https://strata.yasui.io \
+OPENCODE_LIVE_API_KEY=… OPENCODE_LIVE_MODEL=gpt-6-luna \
+pnpm --dir packages/backend vitest run src/useCases/ai/OpencodeAgentUseCase.live.test.ts
 ```
-
-Because connection/runtime handles are in memory, restarting the backend disconnects active SSE streams and abort controllers. Persisted messages, prompts, tool calls, ordered timeline parts, task lifecycle, and session status remain in the database and can be reloaded by the frontend. The interactive model invocation itself is not resumable: a stale `RUNNING` prompt is finalized as an actionable error before new queued work proceeds, and fallback approval/question actions likewise finalize the orphaned turn. Resume long work by reading the persisted planning docs and session history.
 
 See [agentic writing](agentic-writing.md) for the document-based workflow.
-
-For local gateway development, set backend provider credentials such as:
-
-```env
-AI_GATEWAY_API_KEY="..."
-```
-
-OpenAI-compatible mode can use project-level BYOK, or a compatible provider that does not require a per-project key.

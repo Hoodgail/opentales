@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import type { PrismaClient } from '@prisma/client';
-import { tool } from 'ai';
+import { tool } from './shared.js';
 import { z } from 'zod';
 import { env } from '../../../config/env.js';
 import { HttpError } from '../../../http/HttpError.js';

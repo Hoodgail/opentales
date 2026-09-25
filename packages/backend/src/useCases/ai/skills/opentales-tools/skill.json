@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "name": "opentales-tools",
+  "version": "1.0.0",
+  "description": "Operating manual for OpenTales project tools: choosing tools, bounded reads, safe versioned prose edits, batching, approvals, and delegation.",
+  "kind": "workflow",
+  "inputs": [],
+  "outputs": [],
+  "runtimeRoles": ["orchestrator", "explorer", "creator", "drafter", "critic", "reviser", "researcher", "librarian"],
+  "allowedTools": [
+    "readProject",
+    "readStoryStructure",
+    "listChapters",
+    "readChapter",
+    "grepChapters",
+    "grepProject",
+    "listProjectFiles",
+    "readProjectDoc",
+    "updateChapter",
+    "updateProjectDoc",
+    "applyStoryPatch"
+  ],
+  "maxIterations": 1,
+  "context": {
+    "maxTokens": 8000,
+    "sections": ["active-task"]
+  },
+  "procedure": [
+    "Orient with overview and list tools before reading bodies.",
+    "Read bounded ranges and copy headVersionId/revision tokens.",
+    "Edit with exact contentEdit replacements and the token; batch multi-target changes with applyStoryPatch.",
+    "On a stale-token error, re-read and rebase once.",
+    "Report applied changes, pending approvals, and failures truthfully."
+  ],
+  "references": ["references/tool-reference.md"]
+}

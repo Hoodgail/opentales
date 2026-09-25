@@ -1,10 +1,11 @@
-import type { AiAgentToolCall } from '@opentales/sdk';
+import type { AiAgentPermissionRequest } from '@opentales/sdk';
 
 export interface AiApprovalDoc {
+  /** Permission request id; also the tab ref id. */
   id: string;
   sessionId: string;
   title: string;
-  toolCall: AiAgentToolCall;
+  request: AiAgentPermissionRequest;
   targetLabel: string;
   panes: AiApprovalDiffPane[];
 }

@@ -182,7 +182,7 @@
                   >{session.title}</span
                 >
                 <span class="block truncate text-[10px] text-muted-foreground">
-                  {session.messageCount} messages · {sessionTime(
+                  {session.agent ?? "agent"} · {sessionTime(
                     session.updatedAt,
                   )} · {session.status} ·
                   <span class={session.approvalMode === "auto" ? "text-amber-400" : ""}

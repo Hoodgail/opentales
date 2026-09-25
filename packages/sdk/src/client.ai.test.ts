@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { OpenTalesClient } from './client.js';
-import type { AiAgentTimelinePage } from './types.js';
 
 describe('AI session SDK contracts', () => {
   it('starts and polls Codex device authorization through scoped project routes', async () => {
@@ -41,62 +40,56 @@ describe('AI session SDK contracts', () => {
     );
   });
 
-  it('serializes authenticated timeline pagination for named and default sessions', async () => {
-    const timelinePage = {
-      parts: [],
-      timelineInfo: {
-        mode: 'approximate',
-        truncated: false,
-        earliestSequence: null,
-        hasMoreBefore: false
-      },
-      nextBeforeSequence: null,
-      hasMore: false,
-      limitation: 'legacy-history-best-effort'
-    } satisfies AiAgentTimelinePage;
-    const fetcher = vi.fn(async () => new Response(JSON.stringify(timelinePage), {
+  it('routes OpenCode session actions through project-scoped endpoints', async () => {
+    const fetcher = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response('{}', {
       status: 200,
       headers: { 'content-type': 'application/json' }
-    })) as unknown as typeof fetch;
-    const client = new OpenTalesClient({ baseUrl: 'https://api.test', token: 'secret-token', fetcher });
+    }));
+    const client = new OpenTalesClient({ baseUrl: 'https://api.test', token: 'secret-token', fetcher: fetcher as unknown as typeof fetch });
 
-    await client.getAiAgentTimeline(
-      'project-1',
-      { beforeSequence: 1_001, limit: 125, legacyCursor: 'cursor-token' },
-      'session-1'
-    );
-    await client.getAiAgentTimeline('project-1', {});
+    await client.sendAiAgentPrompt('project-1', 'ses_1', { text: 'Draft chapter 2', delivery: 'queue' });
+    await client.getAiAgentMessages('project-1', 'ses_1', { cursor: 'c1', limit: 50 });
+    await client.replyAiPermission('project-1', 'ses_1', 'per_1', { decision: 'once' });
+    await client.answerAiQuestion('project-1', 'ses_1', 'frm_1', { answers: { q0: 'Blue' } });
+    await client.dismissAiQuestion('project-1', 'ses_1', 'frm_1');
+    await client.interruptAiAgentSession('project-1', 'ses_1');
+    await client.getAiAgentCapabilities('project-1');
 
-    expect(fetcher).toHaveBeenNthCalledWith(1,
-      'https://api.test/projects/project-1/ai/agent-sessions/session-1/timeline?beforeSequence=1001&limit=125&legacyCursor=cursor-token',
-      expect.objectContaining({ method: 'GET' })
-    );
-    expect(fetcher).toHaveBeenNthCalledWith(2,
-      'https://api.test/projects/project-1/ai/agent-session/timeline',
-      expect.objectContaining({ method: 'GET' })
-    );
-    const firstHeaders = new Headers(vi.mocked(fetcher).mock.calls[0]?.[1]?.headers);
-    expect(firstHeaders.get('authorization')).toBe('Bearer secret-token');
+    expect(fetcher.mock.calls.map((call) => [call[0], call[1]?.method])).toEqual([
+      ['https://api.test/projects/project-1/ai/agent-sessions/ses_1/prompts', 'POST'],
+      ['https://api.test/projects/project-1/ai/agent-sessions/ses_1/messages?cursor=c1&limit=50', 'GET'],
+      ['https://api.test/projects/project-1/ai/agent-sessions/ses_1/permissions/per_1', 'POST'],
+      ['https://api.test/projects/project-1/ai/agent-sessions/ses_1/questions/frm_1', 'POST'],
+      ['https://api.test/projects/project-1/ai/agent-sessions/ses_1/questions/frm_1', 'DELETE'],
+      ['https://api.test/projects/project-1/ai/agent-sessions/ses_1/interrupt', 'POST'],
+      ['https://api.test/projects/project-1/ai/agent-capabilities', 'GET']
+    ]);
+    expect(fetcher.mock.calls[3]?.[1]?.body).toBe(JSON.stringify({ answers: { q0: 'Blue' } }));
+    expect(new Headers(fetcher.mock.calls[0]?.[1]?.headers).get('authorization')).toBe('Bearer secret-token');
   });
 
-  it('fetches full tool output through the scoped detail route', async () => {
-    const fetcher = vi.fn(async () => new Response(JSON.stringify({ id: 'tool-1', output: { full: true } }), {
+  it('parses the project agent event stream', async () => {
+    const body = [
+      'data: {"type":"connected","sessions":[]}',
+      '',
+      'data: {"type":"text.delta","sessionId":"ses_1","messageId":"msg_1","index":0,"delta":"Hi"}',
+      '',
+      ''
+    ].join('\n');
+    const fetcher = vi.fn(async () => new Response(body, {
       status: 200,
-      headers: { 'content-type': 'application/json' }
+      headers: { 'content-type': 'text/event-stream' }
     })) as unknown as typeof fetch;
     const client = new OpenTalesClient({ baseUrl: 'https://api.test', token: 'token', fetcher });
+    const events: unknown[] = [];
 
-    await client.getAiAgentToolCall('project-1', 'tool-1', 'session-1');
-    await client.getAiAgentToolCall('project-1', 'tool-2');
+    await client.streamAiAgentEvents('project-1', (event) => events.push(event));
 
-    expect(fetcher).toHaveBeenNthCalledWith(1,
-      'https://api.test/projects/project-1/ai/agent-sessions/session-1/tool-calls/tool-1',
-      expect.objectContaining({ method: 'GET' })
-    );
-    expect(fetcher).toHaveBeenNthCalledWith(2,
-      'https://api.test/projects/project-1/ai/agent-session/tool-calls/tool-2',
-      expect.objectContaining({ method: 'GET' })
-    );
+    expect(vi.mocked(fetcher).mock.calls[0]?.[0]).toBe('https://api.test/projects/project-1/ai/agent-events');
+    expect(events).toEqual([
+      { type: 'connected', sessions: [] },
+      { type: 'text.delta', sessionId: 'ses_1', messageId: 'msg_1', index: 0, delta: 'Hi' }
+    ]);
   });
 
   it('manages project-scoped MCP API keys through authenticated project routes', async () => {

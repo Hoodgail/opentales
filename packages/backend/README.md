@@ -11,6 +11,7 @@ Express API for OpenTales. It uses Prisma with PostgreSQL and keeps business log
 - Chapter, character, location, project, and story structure updates
 - Path-based project docs, nested folders, and foldered assets
 - Project-scoped AI settings and Agent Skills
+- Embedded OpenCode V2 agent harness with one isolated workspace per project
 - Project-scoped, revocable MCP API keys for external agents
 - Project storage usage accounting across assets and writing content
 - Versioned prose through `Writing`, `WritingBranch`, and `WritingVersion`
@@ -113,7 +114,9 @@ External agents connect to `POST/GET /mcp` with `Authorization: Bearer otmcp_...
 
 Hosted clients such as ChatGPT, Gemini, and Claude.ai discover the OAuth provider through `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-authorization-server`. OpenTales supports public Dynamic Client Registration at `/register`, authorization-code + PKCE exchange and refresh at `/token`, revocation at `/revoke`, and authenticated project consent under `/oauth/authorize`.
 
-AI skill routes under `/projects/:projectId/ai/skills` let project admins list, create, update, and delete project-scoped Agent Skills. Enabled skills are disclosed to agent sessions as a compact catalog and loaded on demand with read-only AI tools.
+AI skill routes under `/projects/:projectId/ai/skills` let project admins list, create, update, and delete project-scoped Agent Skills. Enabled skills are written into the project's OpenCode workspace and loaded on demand through OpenCode's `skill` tool.
+
+Agent sessions run on an embedded `@opencode/sdk` host (`src/useCases/ai/opencode/`). Routes under `/projects/:projectId/ai/agent-sessions` create, list, prompt, interrupt, and delete sessions and reply to approvals/questions; `/projects/:projectId/ai/agent-events` streams live activity. Set `OPENCODE_DATA_DIR` (default `./data/opencode`) to persistent storage. See [`../../docs/ai-system.md`](../../docs/ai-system.md).
 
 Agents plan and track work in project docs, using ordinary writing tools for drafting and revision. Scene CRUD remains available under `/projects/:projectId/chapters/:chapterId/scenes`.
 

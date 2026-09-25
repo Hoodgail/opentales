@@ -51,3 +51,34 @@ jobs:
       - run: pnpm eval
       - run: pnpm --dir packages/backend test:critical-coverage
       - run: pnpm build
+      - name: Build deployment images
+        run: |
+          docker build -f packages/backend/Dockerfile -t opentales-backend:ci .
+          docker build -f packages/frontend/Dockerfile -t opentales-frontend:ci .
+      - name: Verify embedded agent startup and persistence
+        run: |
+          docker volume create opencode-smoke
+          for mode in write read; do
+            docker run --rm --entrypoint node \
+              -e DATABASE_URL -e JWT_SECRET -e CORS_ORIGIN \
+              -e OPENCODE_DATA_DIR=/data/opencode \
+              -v opencode-smoke:/data/opencode \
+              opentales-backend:ci scripts/smoke-opencode.mjs "$mode"
+          done
+      - name: Verify deployment startup and migrations
+        run: |
+          docker run -d --name backend-smoke --network host \
+            -e DATABASE_URL -e JWT_SECRET -e CORS_ORIGIN opentales-backend:ci
+          curl --fail --retry 20 --retry-all-errors --retry-delay 2 http://localhost:4000/health
+          docker run -d --name frontend-smoke -p 8080:80 opentales-frontend:ci
+          curl --fail --retry 10 --retry-all-errors --retry-delay 2 http://localhost:8080/health
+          curl --fail http://localhost:8080/app.html -o /tmp/app.html
+          curl --fail http://localhost:8080/projects/smoke -o /tmp/deep-link.html
+          cmp /tmp/app.html /tmp/deep-link.html
+      - name: Deployment diagnostics and cleanup
+        if: always()
+        run: |
+          docker logs backend-smoke 2>/dev/null || true
+          docker logs frontend-smoke 2>/dev/null || true
+          docker rm -f backend-smoke frontend-smoke 2>/dev/null || true
+          docker volume rm opencode-smoke 2>/dev/null || true

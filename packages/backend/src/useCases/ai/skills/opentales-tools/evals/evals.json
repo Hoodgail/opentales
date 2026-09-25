@@ -1,0 +1,28 @@
+{
+  "skill_name": "opentales-tools",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Rename the character Ezra to Elias everywhere in the manuscript prose — chapters 1, 2 and 3 all mention him.",
+      "expected_output": "The agent reads chapters with bounded reads or grep, then changes every chapter in one applyStoryPatch (or correctly versioned updateChapter calls) with headVersionId tokens and exact edits, and reports the outcome.",
+      "files": [],
+      "assertions": [
+        "Uses grepChapters or bounded reads before editing",
+        "Every prose edit passes the headVersionId read for that chapter",
+        "Uses applyStoryPatch for the multi-chapter change, or one versioned edit per chapter",
+        "Afterwards no chapter prose contains the name Ezra and all three contain Elias"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "In chapter 1, change the line about the fog so it says the fog rolled in 'like a slow tide' instead. Someone else may be editing the chapter at the same time.",
+      "expected_output": "The agent reads the chapter, edits with an exact contentEdit and the head token; if the token is stale it re-reads and retries once rather than overwriting the whole body.",
+      "files": [],
+      "assertions": [
+        "Uses contentEdit or contentEdits rather than a full content replacement",
+        "Recovers from a stale headVersionId by re-reading before retrying",
+        "The final chapter text contains 'like a slow tide' and keeps the concurrent edit"
+      ]
+    }
+  ]
+}

@@ -93,7 +93,7 @@ function allowedTools(
 }
 
 export function filterToolsForRole(
-  tools: Record<string, RawTool>,
+  tools: Record<string, unknown>,
   role: RuntimeRole,
   contract: TaskContract | null,
   options: { primary: boolean },
@@ -103,7 +103,7 @@ export function filterToolsForRole(
     .filter(([name]) => allowed === null || allowed.has(name))
     .map(
       ([name, value]) =>
-        [name, scopedTool(name, value, role, contract)] as const,
+        [name, scopedTool(name, value as RawTool, role, contract)] as const,
     );
   return Object.fromEntries(entries);
 }
