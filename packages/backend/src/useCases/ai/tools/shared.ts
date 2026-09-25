@@ -40,6 +40,25 @@ export interface ToolContext {
   projectId: string;
 }
 
+/**
+ * Harness-neutral OpenTales tool definition. The same objects are registered
+ * with the embedded OpenCode host (as plugin tools) and with the external MCP
+ * server, so names, schemas, and permission checks never drift.
+ */
+export interface AgentTool<Input = any, Output = any> {
+  description: string;
+  inputSchema: z.ZodType<Input, any>;
+  execute: (input: Input, options?: AgentToolInvocationContext) => Promise<Output> | Output;
+}
+
+export function tool<Schema extends z.ZodType, Output>(definition: {
+  description: string;
+  inputSchema: Schema;
+  execute: (input: z.infer<Schema>, options?: AgentToolInvocationContext) => Promise<Output> | Output;
+}): AgentTool<z.infer<Schema>, Output> {
+  return definition as AgentTool<z.infer<Schema>, Output>;
+}
+
 export interface AgentToolInvocationContext {
   toolCallId?: string;
   abortSignal?: AbortSignal;

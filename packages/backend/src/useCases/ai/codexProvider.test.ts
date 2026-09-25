@@ -1,6 +1,4 @@
 import type { PrismaClient } from '@prisma/client';
-import { createOpenAI } from '@ai-sdk/openai';
-import { generateText } from 'ai';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { decryptSecret } from '../../utils/secretBox.js';
 import {
@@ -20,6 +18,7 @@ import {
   CODEX_DEVICE_VERIFICATION_URL,
   CODEX_ISSUER
 } from './codexModels.js';
+import { providerTransportFor } from './opencode/providers.js';
 
 describe('Codex OAuth provider', () => {
   beforeEach(() => clearCodexRefreshesForTests());
@@ -132,44 +131,33 @@ describe('Codex OAuth provider', () => {
     });
   });
 
-  it('runs a normal AI SDK text task through the Codex Responses transport', async () => {
-    const prisma = prismaFor(futureCredentials());
-    const transport = vi.fn(async () => jsonResponse({
-      id: 'resp-1',
-      created_at: 1,
-      model: 'gpt-5.4',
-      output: [{
-        type: 'message',
-        role: 'assistant',
-        id: 'message-1',
-        content: [{ type: 'output_text', text: 'A clean response.', annotations: [] }]
-      }],
-      usage: {
-        input_tokens: 4,
-        input_tokens_details: { cached_tokens: 0 },
-        output_tokens: 3,
-        output_tokens_details: { reasoning_tokens: 0 }
+  it('rewrites an OpenCode model request for the Codex endpoint via the transport hook', async () => {
+    const prisma = {
+      projectAiSettings: {
+        findUnique: vi.fn(async () => ({
+          enabled: true,
+          providerKind: 'CODEX',
+          model: 'codex/gpt-5.4',
+          baseUrl: null,
+          apiKey: encryptedCodexCredentials(futureCredentials({ expires: Date.now() + 3_600_000 }))
+        })),
+        updateMany: vi.fn(async () => ({ count: 1 }))
       }
-    })) as unknown as typeof fetch;
-    const provider = createOpenAI({
-      name: 'codex',
-      apiKey: 'sdk-dummy',
-      fetch: createCodexFetch(prisma, 'project-sdk', transport, () => 1000)
-    });
+    } as unknown as PrismaClient;
+    const rewrite = await providerTransportFor(prisma, 'project-sdk');
 
-    const result = await generateText({
-      model: provider.responses('gpt-5.4'),
-      prompt: 'Reply cleanly.',
-      maxOutputTokens: 100
-    });
+    const request = await rewrite(new Request('https://chatgpt.com/backend-api/codex/v1/responses', {
+      method: 'POST',
+      headers: { authorization: 'Bearer injected-by-opentales', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-5.4', input: [], max_output_tokens: 100 })
+    }));
 
-    expect(result.text).toBe('A clean response.');
-    expect(result.usage).toMatchObject({ inputTokens: 4, outputTokens: 3 });
-    const [url, init] = vi.mocked(transport).mock.calls[0]!;
-    expect(String(url)).toBe(CODEX_API_ENDPOINT);
-    expect(JSON.parse(String(init?.body))).not.toHaveProperty('max_output_tokens');
-    expect(JSON.parse(String(init?.body))).toHaveProperty('store', false);
-    expect(JSON.parse(String(init?.body))).toHaveProperty('include', ['reasoning.encrypted_content']);
+    expect(request.url).toBe(CODEX_API_ENDPOINT);
+    expect(request.headers.get('authorization')).toMatch(/^Bearer header\./);
+    expect(request.headers.get('ChatGPT-Account-Id')).toBe('account');
+    const body = JSON.parse(await request.text());
+    expect(body).not.toHaveProperty('max_output_tokens');
+    expect(body).toMatchObject({ store: false, include: ['reasoning.encrypted_content'] });
   });
 
   it('deduplicates concurrent refreshes and persists rotated credentials atomically', async () => {

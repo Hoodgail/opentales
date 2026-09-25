@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import { tool } from 'ai';
+import { tool } from './shared.js';
 import { pagination, paginatedResult, paginationInputSchema, type ToolContext } from './shared.js';
 
 export function listChaptersTool(prisma: PrismaClient, context: ToolContext) {

@@ -67,7 +67,7 @@ Important DTOs:
 - `ProjectStorageUsage`
 - `ProjectAiSkill`
 - `ProjectMcpApiKey`, `CreateProjectMcpApiKeyResult`
-- `AiAgentSession`, `AiAgentSessionPart`, `AiAgentToolCall`
+- `AiAgentSession`, `AiAgentMessage`, `AiAgentPart`, `AiAgentPermissionRequest`, `AiAgentQuestion`, `AiAgentStreamEvent`
 - `Character`
 - `Location`
 - `Chapter`
@@ -117,9 +117,21 @@ Important DTOs:
 | `createProjectAiSkill(projectId, input)`                     | `POST /projects/:projectId/ai/skills`                                      |
 | `updateProjectAiSkill(projectId, skillId, input)`            | `PATCH /projects/:projectId/ai/skills/:skillId`                            |
 | `deleteProjectAiSkill(projectId, skillId)`                   | `DELETE /projects/:projectId/ai/skills/:skillId`                           |
-| `answerAiQuestion(projectId, toolCallId, input, sessionId?)` | `POST /projects/:projectId/ai/agent-session/tool-calls/:toolCallId/answer` |
+| `getAiAgentCapabilities(projectId)`                          | `GET /projects/:projectId/ai/agent-capabilities`                           |
+| `listAiAgentSessions(projectId)`                             | `GET /projects/:projectId/ai/agent-sessions`                               |
+| `createAiAgentSession(projectId, input)`                     | `POST /projects/:projectId/ai/agent-sessions`                              |
+| `getAiAgentSession(projectId, sessionId)`                    | `GET /projects/:projectId/ai/agent-sessions/:sessionId`                    |
+| `updateAiAgentSession(projectId, sessionId, input)`          | `PATCH /projects/:projectId/ai/agent-sessions/:sessionId`                  |
+| `deleteAiAgentSession(projectId, sessionId)`                 | `DELETE /projects/:projectId/ai/agent-sessions/:sessionId`                 |
+| `getAiAgentMessages(projectId, sessionId, input)`            | `GET /projects/:projectId/ai/agent-sessions/:sessionId/messages`           |
+| `sendAiAgentPrompt(projectId, sessionId, input)`             | `POST /projects/:projectId/ai/agent-sessions/:sessionId/prompts`           |
+| `interruptAiAgentSession(projectId, sessionId)`              | `POST /projects/:projectId/ai/agent-sessions/:sessionId/interrupt`         |
+| `replyAiPermission(projectId, sessionId, requestId, input)`  | `POST /projects/:projectId/ai/agent-sessions/:sessionId/permissions/:id`   |
+| `answerAiQuestion(projectId, sessionId, questionId, input)`  | `POST /projects/:projectId/ai/agent-sessions/:sessionId/questions/:id`     |
+| `dismissAiQuestion(projectId, sessionId, questionId)`        | `DELETE /projects/:projectId/ai/agent-sessions/:sessionId/questions/:id`   |
+| `streamAiAgentEvents(projectId, onEvent, options)`           | `GET /projects/:projectId/ai/agent-events` (SSE)                           |
 
-Agent session snapshots include the additive `timeline` projection: stable, sequenced `message`, contiguous `text`, `tool-call`, `tool-result`, and `task` parts. `timelineInfo` reports exact, approximate legacy, or mixed chronology plus truncation. Consumers should prefer the timeline, fall back to `messages`/`toolCalls` against older backends, and retain the current snapshot when an incremental stream event omits `session`. Load older durable parts with `beforeSequence`; best-effort legacy pages use `legacyCursor` (the response returns both next cursors). `createAiAgentSession` accepts optional `approvalMode`; `updateAiAgentSession` switches an idle session between `manual` and admin-only `auto`. Auto executes available in-scope mutations immediately and removes `askUser`; each queued prompt captures the current mode. Large tool inputs/outputs—including pending approvals—and parent task results are previewed; call `getAiAgentToolCall` or open the child session for full values.
+Agent sessions run on the backend's embedded OpenCode V2 host. `AiAgentSession` returns the summary, recent messages (`getAiAgentMessages` pages older ones), and pending `permissions` and `questions` for the session and its subagents. `streamAiAgentEvents` delivers live activity for every session the caller owns in a project, including subagent children. Manual mode approvals are OpenCode permission replies (`once`, `always`, `reject`); `auto` is admin-only. See [`docs/ai-system.md`](../../docs/ai-system.md).
 
 Agents use project doc, chapter, scene, character, and relationship tools to plan and write dynamically. Publishing methods include secure export create/list/download/regenerate/delete and import preview/apply. See [agentic writing](../../docs/agentic-writing.md).
 

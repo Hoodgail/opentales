@@ -2,14 +2,6 @@ import {
   OpenTalesClient,
   type Asset,
   type AssetKind,
-  type AiAgentSession,
-  type AiAgentApprovalMode,
-  type AiAgentSessionEvent,
-  type AiAgentSessionPart,
-  type AiAgentSessionSummary,
-  type AiAgentTimelineInfo,
-  type AiAgentToolCall,
-  type AiAgentAttachmentInput,
   type AiCharacterDialogueSuggestion,
   type AiContinuityReview,
   type AiModelCatalog,
@@ -37,9 +29,10 @@ import {
   type UpdateProjectFolderInput,
   type UpdateProjectDocInput
 } from '@opentales/sdk';
+import { agent, resetAgentStore } from './agent.svelte';
 
 const initialAiToken = browserLocalStorage().getItem('opentales.token') ?? undefined;
-const api = new OpenTalesClient({
+export const api = new OpenTalesClient({
   baseUrl: import.meta.env.VITE_API_URL ?? 'http://localhost:4000',
   token: initialAiToken
 });
@@ -67,10 +60,12 @@ export function syncAiToken(token: string | undefined) {
   syncedAiToken = token;
   api.setToken(token);
   ai.reset();
+  resetAgentStore();
 }
 
 export function syncAiProjectContext(projectId: string | null) {
   ai.setProjectContext(projectId);
+  agent.setProject(projectId);
 }
 
 export function reconnectDelayMs(attempt: number, random = Math.random): number {
@@ -84,7 +79,7 @@ export function reconnectDelayMs(attempt: number, random = Math.random): number 
   );
 }
 
-function abortableDelay(delayMs: number, signal: AbortSignal): Promise<void> {
+export function abortableDelay(delayMs: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
       reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
@@ -344,578 +339,6 @@ export function createAiStore() {
     }
   }
 
-  // ── Agent session ────────────────────────────────────────────────────
-  let session = $state<AiAgentSession | null>(null);
-  let sessions = $state<AiAgentSessionSummary[]>([]);
-  let activeSessionId = $state<string | null>(null);
-  let sessionLoading = $state(false);
-  let sessionError = $state<string | null>(null);
-  let streaming = $state(false);
-  let streamStatus = $state<'disconnected' | 'connecting' | 'connected' | 'reconnecting'>('disconnected');
-  let streamError = $state<string | null>(null);
-  let reconnectAttempt = $state(0);
-  let streamAbort: AbortController | null = null;
-  let streamGeneration = 0;
-  let sessionRequestGeneration = 0;
-  let promptMutationGeneration = 0;
-  let pendingCancellationMutations = 0;
-  let sessionListRequestGeneration = 0;
-  let toolActionStates = $state<Record<string, 'approving' | 'rejecting' | 'answering'>>({});
-  let toolActionErrors = $state<Record<string, string>>({});
-  let timelineLoadingEarlier = $state(false);
-  let timelineEarlierError = $state<string | null>(null);
-  let earlierTimelineParts: AiAgentSessionPart[] = [];
-  let timelineBeforeSequence: number | null = null;
-  let timelineLegacyCursor: string | null = null;
-  let timelineHasMoreBefore = false;
-
-  // Accumulated streamed text for the current assistant turn
-  let streamedText = $state('');
-
-  function activeSessionStorageKey(projectId: string): string {
-    return `opentales.ai.activeSession.${projectId}`;
-  }
-
-  function rememberActiveSession(projectId: string, sessionId: string | null) {
-    activeSessionId = sessionId;
-    if (sessionId) browserLocalStorage().setItem(activeSessionStorageKey(projectId), sessionId);
-    else browserLocalStorage().removeItem(activeSessionStorageKey(projectId));
-  }
-
-  function applySessionSnapshot(next: AiAgentSession) {
-    const sameSession = session?.id === next.id;
-    if (!sameSession) {
-      earlierTimelineParts = [];
-      timelineEarlierError = null;
-      timelineHasMoreBefore = Boolean(next.timelineInfo?.hasMoreBefore);
-      timelineBeforeSequence =
-        next.timelineInfo?.earliestSequence ?? earliestSequence(next.timeline ?? []);
-      timelineLegacyCursor = next.timelineInfo?.legacyCursor ?? null;
-    }
-    const timeline = mergeTimelineParts(earlierTimelineParts, next.timeline ?? []);
-    const timelineInfo = mergeTimelineInfo(
-      sameSession ? session?.timelineInfo : undefined,
-      next.timelineInfo,
-      timeline,
-      timelineHasMoreBefore,
-    );
-    session = { ...next, timeline, timelineInfo };
-  }
-
-  function mergeTimelineParts(
-    earlier: AiAgentSessionPart[],
-    current: AiAgentSessionPart[],
-  ): AiAgentSessionPart[] {
-    const byId = new Map<string, AiAgentSessionPart>();
-    for (const part of [...earlier, ...current]) byId.set(part.id, part);
-    return [...byId.values()].sort((left, right) => left.sequence - right.sequence);
-  }
-
-  function earliestSequence(parts: AiAgentSessionPart[]): number | null {
-    return parts.length ? Math.min(...parts.map((part) => part.sequence)) : null;
-  }
-
-  function mergeTimelineInfo(
-    previous: AiAgentTimelineInfo | undefined,
-    incoming: AiAgentTimelineInfo | undefined,
-    parts: AiAgentSessionPart[],
-    hasMoreBefore: boolean,
-  ): AiAgentTimelineInfo | undefined {
-    const mode = combineTimelineModes(previous?.mode, incoming?.mode);
-    if (!mode && !parts.length) return incoming;
-    return {
-      mode: mode ?? 'exact',
-      truncated: hasMoreBefore,
-      earliestSequence: earliestSequence(parts),
-      hasMoreBefore,
-      legacyCursor: timelineLegacyCursor,
-    };
-  }
-
-  function combineTimelineModes(
-    left: AiAgentTimelineInfo['mode'] | undefined,
-    right: AiAgentTimelineInfo['mode'] | undefined,
-  ): AiAgentTimelineInfo['mode'] | undefined {
-    if (!left) return right;
-    if (!right || left === right) return left;
-    return 'mixed';
-  }
-
-  function upsertSessionSummary(next: AiAgentSession) {
-    const summary: AiAgentSessionSummary = {
-      id: next.id,
-      projectId: next.projectId,
-      title: next.title,
-      approvalMode: next.approvalMode ?? 'manual',
-      status: next.status,
-      messageCount: next.messages.length,
-      createdAt: next.updatedAt,
-      updatedAt: next.updatedAt
-    };
-    const idx = sessions.findIndex((candidate) => candidate.id === next.id);
-    if (idx >= 0) sessions[idx] = { ...sessions[idx], ...summary, createdAt: sessions[idx].createdAt };
-    else sessions.unshift(summary);
-  }
-
-  async function loadSessions(projectId: string): Promise<string | null> {
-    const generation = ensureProjectContext(projectId);
-    const request = ++sessionListRequestGeneration;
-    const sessionGenerationAtStart = sessionRequestGeneration;
-    sessionError = null;
-    try {
-      const result = await api.listAiAgentSessions(projectId);
-      if (
-        !isCurrentContext(projectId, generation) ||
-        request !== sessionListRequestGeneration ||
-        sessionGenerationAtStart !== sessionRequestGeneration
-      ) return null;
-      sessions.splice(0, sessions.length, ...result);
-      const remembered = browserLocalStorage().getItem(activeSessionStorageKey(projectId));
-      const selected =
-        result.find((candidate) => candidate.id === activeSessionId)?.id ??
-        result.find((candidate) => candidate.id === remembered)?.id ??
-        result[0]?.id ??
-        null;
-      rememberActiveSession(projectId, selected);
-      return selected;
-    } catch (err) {
-      if (
-        !isCurrentContext(projectId, generation) ||
-        request !== sessionListRequestGeneration ||
-        sessionGenerationAtStart !== sessionRequestGeneration
-      ) return null;
-      sessionError = err instanceof Error ? err.message : 'Failed to load sessions';
-      return null;
-    }
-  }
-
-  async function loadSession(
-    projectId: string,
-    sessionId = activeSessionId ?? undefined
-  ): Promise<AiAgentSession | null> {
-    const generation = ensureProjectContext(projectId);
-    const request = ++sessionRequestGeneration;
-    clearToolActions();
-    sessionLoading = true;
-    sessionError = null;
-    try {
-      const next = await api.getAiAgentSession(projectId, sessionId);
-      if (!isCurrentSessionRequest(projectId, generation, request)) return null;
-      applySessionSnapshot(next);
-      rememberActiveSession(projectId, next.id);
-      upsertSessionSummary(next);
-      return next;
-    } catch (err) {
-      if (!isCurrentSessionRequest(projectId, generation, request)) return null;
-      sessionError = err instanceof Error ? err.message : 'Failed to load session';
-      return null;
-    } finally {
-      if (isCurrentSessionRequest(projectId, generation, request)) sessionLoading = false;
-    }
-  }
-
-  function applyEvent(event: AiAgentSessionEvent) {
-    const snapshot = event.session;
-    if (snapshot) {
-      if (snapshot.projectId !== projectContextId) return;
-      if (activeSessionId && snapshot.id !== activeSessionId) return;
-      const eventData = event.data as { cancelled?: boolean } | undefined;
-      if (
-        event.type === 'session' &&
-        eventData?.cancelled === true &&
-        pendingCancellationMutations === 0
-      ) {
-        promptMutationGeneration += 1;
-      }
-      applySessionSnapshot(snapshot);
-      rememberActiveSession(snapshot.projectId, snapshot.id);
-      upsertSessionSummary(snapshot);
-    }
-
-    const part = (event.data as { part?: AiAgentSessionPart } | undefined)?.part;
-    if (part && session) {
-      const timeline = [...(session.timeline ?? [])];
-      const index = timeline.findIndex((candidate) => candidate.id === part.id);
-      if (index >= 0) timeline[index] = part;
-      else timeline.push(part);
-      timeline.sort((left, right) => left.sequence - right.sequence);
-      session = { ...session, timeline, updatedAt: part.updatedAt };
-    }
-
-    if (event.type === 'text-delta') {
-      if (part?.kind === 'text') streamedText = part.content;
-    }
-    if (event.type === 'prompt-started') {
-      streamedText = '';
-    }
-    if (event.type === 'error') {
-      sessionError = snapshot?.error ?? (event.data as { message?: string })?.message ?? 'Agent error';
-    }
-  }
-
-  async function createSession(
-    projectId: string,
-    title?: string,
-    approvalMode: AiAgentApprovalMode = 'manual'
-  ): Promise<AiAgentSession | null> {
-    const generation = ensureProjectContext(projectId);
-    const request = ++sessionRequestGeneration;
-    clearToolActions();
-    sessionLoading = true;
-    sessionError = null;
-    try {
-      stopStream();
-      session = null;
-      const next = await api.createAiAgentSession(projectId, { title, approvalMode });
-      if (!isCurrentSessionRequest(projectId, generation, request)) return null;
-      applySessionSnapshot(next);
-      rememberActiveSession(projectId, next.id);
-      streamedText = '';
-      upsertSessionSummary(next);
-      void startStream(projectId, next.id);
-      return next;
-    } catch (err) {
-      if (!isCurrentSessionRequest(projectId, generation, request)) return null;
-      sessionError = err instanceof Error ? err.message : 'Failed to create session';
-      return null;
-    } finally {
-      if (isCurrentSessionRequest(projectId, generation, request)) sessionLoading = false;
-    }
-  }
-
-  async function updateSessionApprovalMode(
-    projectId: string,
-    approvalMode: AiAgentApprovalMode
-  ): Promise<boolean> {
-    if (!activeSessionId || !session) return false;
-    const generation = ensureProjectContext(projectId);
-    const request = sessionRequestGeneration;
-    const targetSessionId = activeSessionId;
-    sessionError = null;
-    try {
-      const next = await api.updateAiAgentSession(projectId, targetSessionId, { approvalMode });
-      if (!isCurrentSessionMutation(projectId, generation, request, targetSessionId)) return false;
-      applySessionSnapshot(next);
-      upsertSessionSummary(next);
-      return true;
-    } catch (err) {
-      if (!isCurrentSessionMutation(projectId, generation, request, targetSessionId)) return false;
-      sessionError = err instanceof Error ? err.message : 'Failed to update execution mode';
-      return false;
-    }
-  }
-
-  async function selectSession(projectId: string, sessionId: string): Promise<boolean> {
-    const generation = ensureProjectContext(projectId);
-    if (activeSessionId === sessionId && session?.id === sessionId) return true;
-    const request = ++sessionRequestGeneration;
-    clearToolActions();
-    stopStream();
-    rememberActiveSession(projectId, sessionId);
-    session = null;
-    streamedText = '';
-    sessionLoading = true;
-    sessionError = null;
-    let loaded: AiAgentSession;
-    try {
-      loaded = await api.getAiAgentSession(projectId, sessionId);
-    } catch (err) {
-      if (isCurrentSessionRequest(projectId, generation, request)) {
-        sessionError = err instanceof Error ? err.message : 'Failed to load session';
-        sessionLoading = false;
-      }
-      return false;
-    }
-    if (!isCurrentSessionRequest(projectId, generation, request)) return false;
-    applySessionSnapshot(loaded);
-    rememberActiveSession(projectId, loaded.id);
-    upsertSessionSummary(loaded);
-    sessionLoading = false;
-    void startStream(projectId, sessionId);
-    return true;
-  }
-
-  function isCurrentSessionRequest(
-    projectId: string,
-    projectGeneration: number,
-    requestGeneration: number
-  ): boolean {
-    return (
-      isCurrentContext(projectId, projectGeneration) &&
-      sessionRequestGeneration === requestGeneration
-    );
-  }
-
-  function isCurrentSessionMutation(
-    projectId: string,
-    projectGeneration: number,
-    requestGeneration: number,
-    targetSessionId: string | null
-  ): boolean {
-    return (
-      isCurrentContext(projectId, projectGeneration) &&
-      sessionRequestGeneration === requestGeneration &&
-      activeSessionId === targetSessionId
-    );
-  }
-
-  async function startStream(projectId: string, sessionId = activeSessionId ?? session?.id) {
-    if (!sessionId || projectContextId !== projectId) return;
-    stopStream();
-    const handle = ++streamGeneration;
-    const contextAtStart = contextGeneration;
-    const controller = new AbortController();
-    streamAbort = controller;
-    streaming = true;
-    streamStatus = 'connecting';
-    streamError = null;
-    reconnectAttempt = 0;
-    let lastError = 'Agent stream disconnected';
-
-    for (let attempt = 0; attempt <= STREAM_RECONNECT_MAX_ATTEMPTS; attempt += 1) {
-      if (!isCurrentStream(handle, projectId, sessionId, contextAtStart)) break;
-      if (attempt > 0) {
-        streamStatus = 'reconnecting';
-        reconnectAttempt = attempt;
-        try {
-          const snapshot = await api.getAiAgentSession(projectId, sessionId);
-          if (!isCurrentStream(handle, projectId, sessionId, contextAtStart)) break;
-          applySessionSnapshot(snapshot);
-          upsertSessionSummary(snapshot);
-        } catch (err) {
-          lastError = err instanceof Error ? err.message : 'Failed to restore agent session';
-        }
-      }
-
-      try {
-        await api.streamAiAgentSession(
-          projectId,
-          sessionId,
-          (event) => {
-            if (!isCurrentStream(handle, projectId, sessionId, contextAtStart)) return;
-            streamStatus = 'connected';
-            applyEvent(event);
-          },
-          { signal: controller.signal }
-        );
-        if (controller.signal.aborted) break;
-        lastError = 'Agent stream closed unexpectedly';
-      } catch (err) {
-        if (controller.signal.aborted || (err as Error).name === 'AbortError') break;
-        lastError = err instanceof Error ? err.message : 'Agent stream disconnected';
-      }
-
-      if (attempt >= STREAM_RECONNECT_MAX_ATTEMPTS) {
-        if (isCurrentStream(handle, projectId, sessionId, contextAtStart)) {
-          streamError = `${lastError}. Retry the connection.`;
-        }
-        break;
-      }
-
-      streamStatus = 'reconnecting';
-      reconnectAttempt = attempt + 1;
-      try {
-        await abortableDelay(reconnectDelayMs(attempt), controller.signal);
-      } catch {
-        break;
-      }
-    }
-
-    if (handle === streamGeneration) {
-      streaming = false;
-      streamStatus = 'disconnected';
-      reconnectAttempt = 0;
-      if (streamAbort === controller) streamAbort = null;
-    }
-  }
-
-  function isCurrentStream(
-    handle: number,
-    projectId: string,
-    sessionId: string,
-    generation: number
-  ): boolean {
-    return (
-      handle === streamGeneration &&
-      !streamAbort?.signal.aborted &&
-      isCurrentContext(projectId, generation) &&
-      activeSessionId === sessionId
-    );
-  }
-
-  async function retryStream(): Promise<void> {
-    if (!projectContextId || !activeSessionId) return;
-    await startStream(projectContextId, activeSessionId);
-  }
-
-  function stopStream() {
-    streamGeneration += 1;
-    if (streamAbort) {
-      streamAbort.abort();
-      streamAbort = null;
-    }
-    streaming = false;
-    streamStatus = 'disconnected';
-    reconnectAttempt = 0;
-  }
-
-  async function queuePrompt(
-    projectId: string,
-    prompt: string,
-    interrupt = false,
-    options: { model?: string; attachments?: AiAgentAttachmentInput[] } = {}
-  ) {
-    const generation = ensureProjectContext(projectId);
-    const request = sessionRequestGeneration;
-    const mutation = ++promptMutationGeneration;
-    const targetSessionId = activeSessionId;
-    sessionError = null;
-    try {
-      const next = await api.queueAiAgentPrompt(
-        projectId,
-        { prompt, interrupt, model: options.model, attachments: options.attachments },
-        activeSessionId ?? undefined
-      );
-      if (
-        mutation !== promptMutationGeneration ||
-        !isCurrentSessionMutation(projectId, generation, request, targetSessionId)
-      ) return false;
-      applySessionSnapshot(next);
-      rememberActiveSession(projectId, next.id);
-      upsertSessionSummary(next);
-      return true;
-    } catch (err) {
-      if (
-        mutation !== promptMutationGeneration ||
-        !isCurrentSessionMutation(projectId, generation, request, targetSessionId)
-      ) return false;
-      sessionError = err instanceof Error ? err.message : 'Failed to queue prompt';
-      return false;
-    }
-  }
-
-  async function cancelSession(projectId: string) {
-    const generation = ensureProjectContext(projectId);
-    const request = sessionRequestGeneration;
-    const mutation = ++promptMutationGeneration;
-    const targetSessionId = activeSessionId;
-    sessionError = null;
-    pendingCancellationMutations += 1;
-    try {
-      const next = await api.cancelAiAgentSession(projectId, activeSessionId ?? undefined);
-      if (
-        mutation !== promptMutationGeneration ||
-        !isCurrentSessionMutation(projectId, generation, request, targetSessionId)
-      ) return false;
-      applySessionSnapshot(next);
-      rememberActiveSession(projectId, next.id);
-      upsertSessionSummary(next);
-      return true;
-    } catch (err) {
-      if (
-        mutation !== promptMutationGeneration ||
-        !isCurrentSessionMutation(projectId, generation, request, targetSessionId)
-      ) return false;
-      sessionError = err instanceof Error ? err.message : 'Failed to cancel';
-      return false;
-    } finally {
-      pendingCancellationMutations = Math.max(0, pendingCancellationMutations - 1);
-    }
-  }
-
-  async function approveToolCall(
-    projectId: string,
-    toolCallId: string,
-    approved: boolean,
-    sessionId = activeSessionId ?? undefined
-  ): Promise<boolean> {
-    const generation = ensureProjectContext(projectId);
-    const request = sessionRequestGeneration;
-    const targetSessionId = sessionId ?? null;
-    if (!beginToolActions([toolCallId], approved ? 'approving' : 'rejecting')) return false;
-    sessionError = null;
-    try {
-      const next = await api.approveAiToolCall(projectId, toolCallId, { approved }, sessionId);
-      if (!isCurrentSessionMutation(projectId, generation, request, targetSessionId)) return false;
-      applySessionSnapshot(next);
-      rememberActiveSession(projectId, next.id);
-      upsertSessionSummary(next);
-      return true;
-    } catch (err) {
-      if (!isCurrentSessionMutation(projectId, generation, request, targetSessionId)) return false;
-      const message = err instanceof Error ? err.message : 'Failed to update tool approval';
-      sessionError = message;
-      setToolActionError([toolCallId], message);
-      return false;
-    } finally {
-      if (isCurrentSessionMutation(projectId, generation, request, targetSessionId))
-        finishToolActions([toolCallId]);
-    }
-  }
-
-  async function approveToolCalls(
-    projectId: string,
-    toolCallIds: string[],
-    approved: boolean,
-    sessionId = activeSessionId ?? undefined
-  ): Promise<boolean> {
-    const generation = ensureProjectContext(projectId);
-    const request = sessionRequestGeneration;
-    const targetSessionId = sessionId ?? null;
-    if (!beginToolActions(toolCallIds, approved ? 'approving' : 'rejecting')) return false;
-    sessionError = null;
-    try {
-      const next = await api.approveAiToolCalls(projectId, { toolCallIds, approved }, sessionId);
-      if (!isCurrentSessionMutation(projectId, generation, request, targetSessionId)) return false;
-      applySessionSnapshot(next);
-      rememberActiveSession(projectId, next.id);
-      upsertSessionSummary(next);
-      return true;
-    } catch (err) {
-      if (!isCurrentSessionMutation(projectId, generation, request, targetSessionId)) return false;
-      const message = err instanceof Error ? err.message : 'Failed to update tool approvals';
-      sessionError = message;
-      setToolActionError(toolCallIds, message);
-      return false;
-    } finally {
-      if (isCurrentSessionMutation(projectId, generation, request, targetSessionId))
-        finishToolActions(toolCallIds);
-    }
-  }
-
-  function beginToolActions(
-    toolCallIds: string[],
-    state: 'approving' | 'rejecting' | 'answering'
-  ): boolean {
-    if (toolCallIds.some((id) => toolActionStates[id])) return false;
-    const nextStates = { ...toolActionStates };
-    const nextErrors = { ...toolActionErrors };
-    for (const id of toolCallIds) {
-      nextStates[id] = state;
-      delete nextErrors[id];
-    }
-    toolActionStates = nextStates;
-    toolActionErrors = nextErrors;
-    return true;
-  }
-
-  function finishToolActions(toolCallIds: string[]) {
-    const next = { ...toolActionStates };
-    for (const id of toolCallIds) delete next[id];
-    toolActionStates = next;
-  }
-
-  function setToolActionError(toolCallIds: string[], message: string) {
-    const next = { ...toolActionErrors };
-    for (const id of toolCallIds) next[id] = message;
-    toolActionErrors = next;
-  }
-
-  function clearToolActions() {
-    toolActionStates = {};
-    toolActionErrors = {};
-  }
-
   async function startGithubCopilotAuth(projectId: string): Promise<StartGithubCopilotAuthResult | null> {
     settingsError = null;
     try {
@@ -980,132 +403,6 @@ export function createAiStore() {
     }
   }
 
-  async function answerQuestion(
-    projectId: string,
-    toolCallId: string,
-    answers: string[][],
-    sessionId = activeSessionId ?? undefined
-  ): Promise<boolean> {
-    const generation = ensureProjectContext(projectId);
-    const request = sessionRequestGeneration;
-    const targetSessionId = sessionId ?? null;
-    if (!beginToolActions([toolCallId], 'answering')) return false;
-    sessionError = null;
-    try {
-      const next = await api.answerAiQuestion(projectId, toolCallId, { answers }, sessionId);
-      if (!isCurrentSessionMutation(projectId, generation, request, targetSessionId)) return false;
-      applySessionSnapshot(next);
-      rememberActiveSession(projectId, next.id);
-      upsertSessionSummary(next);
-      return true;
-    } catch (err) {
-      if (!isCurrentSessionMutation(projectId, generation, request, targetSessionId)) return false;
-      const message = err instanceof Error ? err.message : 'Failed to answer question';
-      sessionError = message;
-      setToolActionError([toolCallId], message);
-      return false;
-    } finally {
-      if (isCurrentSessionMutation(projectId, generation, request, targetSessionId))
-        finishToolActions([toolCallId]);
-    }
-  }
-
-  async function loadToolCallDetail(
-    projectId: string,
-    toolCallId: string,
-    sessionId = activeSessionId ?? undefined
-  ): Promise<AiAgentToolCall> {
-    const generation = ensureProjectContext(projectId);
-    const request = sessionRequestGeneration;
-    const targetSessionId = sessionId ?? null;
-    try {
-      const detail = await api.getAiAgentToolCall(projectId, toolCallId, sessionId);
-      if (!isCurrentSessionMutation(projectId, generation, request, targetSessionId))
-        throw new Error('The active project changed before the tool result loaded');
-      return detail;
-    } catch (err) {
-      if (isCurrentSessionMutation(projectId, generation, request, targetSessionId)) {
-        sessionError = err instanceof Error ? err.message : 'Failed to load the full tool result';
-      }
-      throw err;
-    }
-  }
-
-  async function loadEarlierTimeline(
-    projectId: string,
-    sessionId = activeSessionId ?? undefined,
-  ): Promise<boolean> {
-    if (!sessionId || !session || timelineLoadingEarlier || !timelineHasMoreBefore)
-      return false;
-    const beforeSequence =
-      timelineBeforeSequence ??
-      session.timelineInfo?.earliestSequence ??
-      earliestSequence(session.timeline ?? []);
-    if (beforeSequence === null && timelineLegacyCursor === null) return false;
-    const generation = ensureProjectContext(projectId);
-    const request = sessionRequestGeneration;
-    const targetSessionId = sessionId;
-    timelineLoadingEarlier = true;
-    timelineEarlierError = null;
-    try {
-      const page = await api.getAiAgentTimeline(
-        projectId,
-        timelineLegacyCursor !== null
-          ? {
-              legacyCursor: timelineLegacyCursor,
-              beforeSequence: beforeSequence ?? undefined,
-              limit: 200,
-            }
-          : { beforeSequence: beforeSequence ?? undefined, limit: 200 },
-        sessionId,
-      );
-      if (!isCurrentSessionMutation(projectId, generation, request, targetSessionId))
-        return false;
-      earlierTimelineParts = mergeTimelineParts(page.parts, earlierTimelineParts);
-      if (
-        page.limitation === 'legacy-history-best-effort' &&
-        page.hasMore &&
-        !page.nextLegacyCursor
-      ) {
-        timelineHasMoreBefore = false;
-        timelineEarlierError = 'Earlier activity returned no continuation cursor.';
-      } else {
-        timelineHasMoreBefore = page.hasMore;
-      }
-      if (page.limitation === 'legacy-history-best-effort') {
-        timelineLegacyCursor = page.nextLegacyCursor ?? null;
-        timelineBeforeSequence = page.nextBeforeSequence;
-      } else {
-        timelineLegacyCursor = null;
-        timelineBeforeSequence = page.nextBeforeSequence;
-      }
-      const timeline = mergeTimelineParts(earlierTimelineParts, session.timeline ?? []);
-      session = {
-        ...session,
-        timeline,
-        timelineInfo: {
-          mode:
-            combineTimelineModes(session.timelineInfo?.mode, page.timelineInfo.mode) ??
-            page.timelineInfo.mode,
-          truncated: timelineHasMoreBefore,
-          earliestSequence: earliestSequence(timeline),
-          hasMoreBefore: timelineHasMoreBefore,
-          legacyCursor: timelineLegacyCursor,
-        },
-      };
-      return true;
-    } catch (err) {
-      if (!isCurrentSessionMutation(projectId, generation, request, targetSessionId))
-        return false;
-      timelineEarlierError =
-        err instanceof Error ? err.message : 'Failed to load earlier activity';
-      return false;
-    } finally {
-      if (isCurrentSessionMutation(projectId, generation, request, targetSessionId))
-        timelineLoadingEarlier = false;
-    }
-  }
-
   async function loadFileTree(projectId: string) {
     const generation = ensureProjectContext(projectId);
     docsLoading = true;
@@ -1125,13 +422,7 @@ export function createAiStore() {
   }
 
   async function uploadAttachment(projectId: string, file: Blob, options: { kind?: AssetKind; filename?: string } = {}): Promise<Asset | null> {
-    sessionError = null;
-    try {
-      return await api.uploadAsset(projectId, file, options);
-    } catch (err) {
-      sessionError = err instanceof Error ? err.message : 'Failed to upload attachment';
-      return null;
-    }
+    return api.uploadAsset(projectId, file, options);
   }
 
   // ── Tool manifest ───────────────────────────────────────────────────
@@ -1258,22 +549,6 @@ export function createAiStore() {
     docsTotal = 0;
     docsLoading = false;
     docsError = null;
-    stopStream();
-    session = null;
-    sessions.splice(0, sessions.length);
-    activeSessionId = null;
-    sessionLoading = false;
-    sessionError = null;
-    streamError = null;
-    toolActionStates = {};
-    toolActionErrors = {};
-    timelineLoadingEarlier = false;
-    timelineEarlierError = null;
-    earlierTimelineParts = [];
-    timelineBeforeSequence = null;
-    timelineLegacyCursor = null;
-    timelineHasMoreBefore = false;
-    streamedText = '';
     toolManifest = null;
     clearFeatureResults();
   }
@@ -1282,8 +557,6 @@ export function createAiStore() {
     if (projectContextId === projectId) return contextGeneration;
     projectContextId = projectId;
     contextGeneration += 1;
-    sessionRequestGeneration += 1;
-    sessionListRequestGeneration += 1;
     clearProjectState();
     return contextGeneration;
   }
@@ -1291,8 +564,6 @@ export function createAiStore() {
   function reset() {
     projectContextId = null;
     contextGeneration += 1;
-    sessionRequestGeneration += 1;
-    sessionListRequestGeneration += 1;
     clearProjectState();
   }
 
@@ -1339,40 +610,8 @@ export function createAiStore() {
     updateAsset,
     deleteAsset,
 
-    // agent session
-    get session() { return session; },
-    get sessions() { return sessions; },
-    get activeSessionId() { return activeSessionId; },
-    get sessionGeneration() { return sessionRequestGeneration; },
-    get sessionLoading() { return sessionLoading; },
-    get sessionError() { return sessionError; },
-    get streaming() { return streaming; },
-    get streamStatus() { return streamStatus; },
-    get streamError() { return streamError; },
-    get reconnectAttempt() { return reconnectAttempt; },
-    get canRetryStream() { return Boolean(streamError && projectContextId && activeSessionId); },
-    get toolActionStates() { return toolActionStates; },
-    get toolActionErrors() { return toolActionErrors; },
-    get timelineLoadingEarlier() { return timelineLoadingEarlier; },
-    get timelineEarlierError() { return timelineEarlierError; },
-    get canLoadEarlierTimeline() { return timelineHasMoreBefore; },
-    get streamedText() { return streamedText; },
     setProjectContext,
-    loadSessions,
-    loadSession,
-    createSession,
-    updateSessionApprovalMode,
-    selectSession,
-    startStream,
-    retryStream,
-    stopStream,
-    queuePrompt,
-    cancelSession,
-    approveToolCall,
-    approveToolCalls,
-    answerQuestion,
-    loadToolCallDetail,
-    loadEarlierTimeline,
+    // agent attachments
     uploadAttachment,
 
     // tool manifest

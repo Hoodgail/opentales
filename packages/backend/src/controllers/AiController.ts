@@ -1,15 +1,13 @@
 import type { Request, Response } from 'express';
 import type {
-  ApproveAiToolCallInput,
-  ApproveAiToolCallsInput,
   AnswerAiQuestionInput,
   CreateAiAgentSessionInput,
-  GetAiAgentTimelineInput,
   CreateAiCharacterDialogueInput,
   CreateAiOutlineExpansionInput,
   CreateProjectAiSkillInput,
   CreateAiRewriteSuggestionInput,
-  QueueAiAgentPromptInput,
+  ReplyAiPermissionInput,
+  SendAiAgentPromptInput,
   UpdateAiAgentSessionInput,
   UpdateProjectAiSkillInput,
   UpdateProjectAiSettingsInput
@@ -17,7 +15,7 @@ import type {
 import { prisma } from '../config/prisma.js';
 import { HttpError } from '../http/HttpError.js';
 import { AiAssistUseCase } from '../useCases/ai/AiAssistUseCase.js';
-import { AiAgentSessionUseCase } from '../useCases/ai/AiAgentSessionUseCase.js';
+import { OpencodeAgentUseCase } from '../useCases/ai/OpencodeAgentUseCase.js';
 import { ProjectAiModelsUseCase } from '../useCases/ai/ProjectAiModelsUseCase.js';
 import { ProjectAiSettingsUseCase } from '../useCases/ai/ProjectAiSettingsUseCase.js';
 import { ProjectAiSkillsUseCase } from '../useCases/ai/ProjectAiSkillsUseCase.js';
@@ -25,7 +23,7 @@ import { ProjectAiSkillsUseCase } from '../useCases/ai/ProjectAiSkillsUseCase.js
 export class AiController {
   private readonly settingsUseCase = new ProjectAiSettingsUseCase(prisma);
   private readonly assistUseCase = new AiAssistUseCase(prisma);
-  private readonly agentSessionUseCase = new AiAgentSessionUseCase(prisma);
+  private readonly agents = new OpencodeAgentUseCase(prisma);
   private readonly modelsUseCase = new ProjectAiModelsUseCase(prisma);
   private readonly skillsUseCase = new ProjectAiSkillsUseCase(prisma);
 
@@ -122,32 +120,30 @@ export class AiController {
     res.json(await this.skillsUseCase.delete(this.userId(req), req.params.projectId, req.params.skillId));
   };
 
-  agentSession = async (req: Request, res: Response) => {
-    res.json(
-      await this.agentSessionUseCase.get(
-        this.userId(req),
-        req.params.projectId,
-        req.params.sessionId
-      )
-    );
+  agentSessions = async (req: Request, res: Response) => {
+    res.json(await this.agents.list(this.userId(req), req.params.projectId));
   };
 
-  agentSessions = async (req: Request, res: Response) => {
-    res.json(await this.agentSessionUseCase.list(this.userId(req), req.params.projectId));
+  agentCapabilities = async (req: Request, res: Response) => {
+    res.json(await this.agents.capabilities(this.userId(req), req.params.projectId));
+  };
+
+  agentEvents = async (req: Request, res: Response) => {
+    await this.agents.stream(this.userId(req), req.params.projectId, res);
   };
 
   createAgentSession = async (req: Request, res: Response) => {
     res.status(201).json(
-      await this.agentSessionUseCase.create(
-        this.userId(req),
-        req.params.projectId,
-        req.body as CreateAiAgentSessionInput
-      )
+      await this.agents.create(this.userId(req), req.params.projectId, req.body as CreateAiAgentSessionInput)
     );
   };
 
+  agentSession = async (req: Request, res: Response) => {
+    res.json(await this.agents.get(this.userId(req), req.params.projectId, req.params.sessionId));
+  };
+
   updateAgentSession = async (req: Request, res: Response) => {
-    res.json(await this.agentSessionUseCase.update(
+    res.json(await this.agents.update(
       this.userId(req),
       req.params.projectId,
       req.params.sessionId,
@@ -155,77 +151,56 @@ export class AiController {
     ));
   };
 
-  agentSessionEvents = async (req: Request, res: Response) => {
-    await this.agentSessionUseCase.subscribe(
-      this.userId(req),
-      req.params.projectId,
-      res,
-      req.params.sessionId
-    );
+  deleteAgentSession = async (req: Request, res: Response) => {
+    await this.agents.remove(this.userId(req), req.params.projectId, req.params.sessionId);
+    res.status(204).end();
   };
 
-  agentSessionTimeline = async (req: Request, res: Response) => {
-    const input: GetAiAgentTimelineInput = {
-      beforeSequence: optionalInteger(req.query.beforeSequence, 'beforeSequence'),
-      limit: optionalInteger(req.query.limit, 'limit'),
-      legacyCursor: typeof req.query.legacyCursor === 'string' ? req.query.legacyCursor : undefined
-    };
-    res.json(await this.agentSessionUseCase.getTimeline(
-      this.userId(req), req.params.projectId, input, req.params.sessionId
+  agentMessages = async (req: Request, res: Response) => {
+    res.json(await this.agents.messages(this.userId(req), req.params.projectId, req.params.sessionId, {
+      cursor: typeof req.query.cursor === 'string' ? req.query.cursor : undefined,
+      limit: optionalInteger(req.query.limit, 'limit')
+    }));
+  };
+
+  sendAgentPrompt = async (req: Request, res: Response) => {
+    res.json(await this.agents.prompt(
+      this.userId(req),
+      req.params.projectId,
+      req.params.sessionId,
+      req.body as SendAiAgentPromptInput
     ));
   };
 
-  queueAgentPrompt = async (req: Request, res: Response) => {
-    res.json(
-      await this.agentSessionUseCase.queuePrompt(
-        this.userId(req),
-        req.params.projectId,
-        req.body as QueueAiAgentPromptInput,
-        req.params.sessionId
-      )
-    );
+  interruptAgentSession = async (req: Request, res: Response) => {
+    res.json(await this.agents.interrupt(this.userId(req), req.params.projectId, req.params.sessionId));
   };
 
-  cancelAgentSession = async (req: Request, res: Response) => {
-    res.json(
-      await this.agentSessionUseCase.cancel(
-        this.userId(req),
-        req.params.projectId,
-        req.params.sessionId
-      )
-    );
-  };
-
-  approveToolCall = async (req: Request, res: Response) => {
-    res.json(
-      await this.agentSessionUseCase.approveToolCall(
-        this.userId(req),
-        req.params.projectId,
-        req.params.toolCallId,
-        req.body as ApproveAiToolCallInput,
-        req.params.sessionId
-      )
-    );
-  };
-
-  getToolCall = async (req: Request, res: Response) => {
-    res.json(await this.agentSessionUseCase.getToolCall(
+  replyPermission = async (req: Request, res: Response) => {
+    await this.agents.replyPermission(
       this.userId(req),
       req.params.projectId,
-      req.params.toolCallId,
-      req.params.sessionId
-    ));
+      req.params.sessionId,
+      req.params.requestId,
+      req.body as ReplyAiPermissionInput
+    );
+    res.status(204).end();
   };
 
-  approveToolCalls = async (req: Request, res: Response) => {
-    res.json(
-      await this.agentSessionUseCase.approveToolCalls(
-        this.userId(req),
-        req.params.projectId,
-        req.body as ApproveAiToolCallsInput,
-        req.params.sessionId
-      )
+  answerQuestion = async (req: Request, res: Response) => {
+    await this.agents.answerQuestion(
+      this.userId(req),
+      req.params.projectId,
+      req.params.sessionId,
+      req.params.questionId,
+      req.body as AnswerAiQuestionInput
     );
+    res.status(204).end();
+  };
+
+  dismissQuestion = async (req: Request, res: Response) => {
+    await this.agents.dismissQuestion(this.userId(req), req.params.projectId, req.params.sessionId, req.params.questionId);
+    res.status(204).end();
   };
 
   startGithubCopilotAuth = async (req: Request, res: Response) => {
@@ -256,18 +231,6 @@ export class AiController {
         req.params.projectId,
         deviceAuthId,
         userCode
-      )
-    );
-  };
-
-  answerQuestion = async (req: Request, res: Response) => {
-    res.json(
-      await this.agentSessionUseCase.answerQuestion(
-        this.userId(req),
-        req.params.projectId,
-        req.params.toolCallId,
-        req.body as AnswerAiQuestionInput,
-        req.params.sessionId
       )
     );
   };

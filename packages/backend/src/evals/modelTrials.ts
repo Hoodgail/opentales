@@ -1,7 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { generateText, Output } from 'ai';
 import { z } from 'zod';
 
 const baseURL = required('EVAL_MODEL_BASE_URL');
@@ -11,11 +9,33 @@ const repeats = boundedInt(process.env.EVAL_MODEL_TRIALS, 3, 2, 20);
 const minimumMean = boundedNumber(process.env.EVAL_MODEL_MIN_MEAN, 0.7, 0, 1, 'EVAL_MODEL_MIN_MEAN');
 const maximumVariance = boundedNumber(process.env.EVAL_MODEL_MAX_VARIANCE, 0.04, 0, 1, 'EVAL_MODEL_MAX_VARIANCE');
 const prompt = process.env.EVAL_MODEL_PROMPT ?? 'Evaluate whether this scene has a causal turn, character-specific pressure, stable POV, and an earned outcome: Mara opens the forbidden map. It erases her memory of why she came.';
-const provider = createOpenAICompatible({ name: 'eval-provider', baseURL, apiKey });
 const schema = z.object({
   scores: z.object({ causality: z.number().min(0).max(1), characterPressure: z.number().min(0).max(1), povStability: z.number().min(0).max(1), payoff: z.number().min(0).max(1) }),
   feedback: z.string()
 });
+
+/** Direct OpenAI-compatible JSON-mode call; the eval judges the model, not the agent harness. */
+async function judge(): Promise<{ output: z.infer<typeof schema>; usage: unknown }> {
+  const response = await fetch(`${baseURL.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: modelId,
+      max_tokens: 1_000,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content: `Act as an independent fiction rubric judge. Return scores and concise observable feedback, never hidden reasoning. Respond with JSON matching: ${JSON.stringify(z.toJSONSchema(schema))}`
+        },
+        { role: 'user', content: prompt }
+      ]
+    })
+  });
+  if (!response.ok) throw new Error(`Model request failed with HTTP ${response.status}`);
+  const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }>; usage?: unknown };
+  return { output: schema.parse(JSON.parse(payload.choices?.[0]?.message?.content ?? '{}')), usage: payload.usage };
+}
 
 const trials: Array<{
   index: number;
@@ -26,14 +46,8 @@ const trials: Array<{
 }> = [];
 for (let index = 0; index < repeats; index += 1) {
   const started = Date.now();
-  const response = await generateText({
-    model: provider(modelId),
-    system: 'Act as an independent fiction rubric judge. Return scores and concise observable feedback, never hidden reasoning.',
-    prompt,
-    output: Output.object({ schema }),
-    maxOutputTokens: 1_000
-  });
-  trials.push({ index, latencyMs: Date.now() - started, scores: response.output.scores, feedback: response.output.feedback, usage: response.totalUsage ?? response.usage });
+  const response = await judge();
+  trials.push({ index, latencyMs: Date.now() - started, scores: response.output.scores, feedback: response.output.feedback, usage: response.usage });
 }
 const dimensions = ['causality', 'characterPressure', 'povStability', 'payoff'] as const;
 const summary = Object.fromEntries(dimensions.map((dimension) => {

@@ -25,13 +25,13 @@ import type {
   MembersAndInvites,
   AddSubmissionCommentInput,
   AnswerAiQuestionInput,
-  ApproveAiToolCallInput,
-  ApproveAiToolCallsInput,
-  AiAgentSessionEvent,
   AiAgentSession,
   AiAgentSessionSummary,
-  AiAgentTimelinePage,
-  AiAgentToolCall,
+  AiAgentCapabilities,
+  AiAgentMessagePage,
+  AiAgentStreamEvent,
+  ReplyAiPermissionInput,
+  SendAiAgentPromptInput,
   AiCharacterDialogueSuggestion,
   AiContinuityReview,
   AiModelCatalog,
@@ -57,7 +57,6 @@ import type {
   CollaborationPresenceInput,
   ListProjectDocsInput,
   PaginatedProjectDocs,
-  QueueAiAgentPromptInput,
   PatchChapterResult,
   PatchCharacterResult,
   PatchLocationResult,
@@ -122,7 +121,6 @@ import type {
   FindStoryReferencesInput,
   FindStoryReferencesResult,
   GetBuildObservabilityInput,
-  GetAiAgentTimelineInput,
   ListStoryArtifactsInput,
   PaginatedStoryArtifacts,
   PatchSceneResult,
@@ -1451,16 +1449,20 @@ export class OpenTalesClient {
     );
   }
 
+  /** Agents, skills, tools, and the default model available to this project's agent. */
+  getAiAgentCapabilities(projectId: string): Promise<AiAgentCapabilities> {
+    return this.request<AiAgentCapabilities>(
+      `/projects/${projectId}/ai/agent-capabilities`,
+    );
+  }
+
   createAiAgentSession(
     projectId: string,
     input: CreateAiAgentSessionInput = {},
   ): Promise<AiAgentSession> {
     return this.request<AiAgentSession>(
       `/projects/${projectId}/ai/agent-sessions`,
-      {
-        method: "POST",
-        body: input,
-      },
+      { method: "POST", body: input },
     );
   }
 
@@ -1471,149 +1473,109 @@ export class OpenTalesClient {
   ): Promise<AiAgentSession> {
     return this.request<AiAgentSession>(
       `/projects/${projectId}/ai/agent-sessions/${sessionId}`,
-      {
-        method: "PATCH",
-        body: input,
-      },
+      { method: "PATCH", body: input },
+    );
+  }
+
+  deleteAiAgentSession(projectId: string, sessionId: string): Promise<void> {
+    return this.request<void>(
+      `/projects/${projectId}/ai/agent-sessions/${sessionId}`,
+      { method: "DELETE" },
     );
   }
 
   getAiAgentSession(
     projectId: string,
-    sessionId?: string,
+    sessionId: string,
   ): Promise<AiAgentSession> {
-    const suffix = sessionId
-      ? `/agent-sessions/${sessionId}`
-      : "/agent-session";
-    return this.request<AiAgentSession>(`/projects/${projectId}/ai${suffix}`);
-  }
-
-  getAiAgentTimeline(
-    projectId: string,
-    input: GetAiAgentTimelineInput,
-    sessionId?: string,
-  ): Promise<AiAgentTimelinePage> {
-    const suffix = sessionId
-      ? `/agent-sessions/${sessionId}`
-      : "/agent-session";
-    return this.request<AiAgentTimelinePage>(
-      `/projects/${projectId}/ai${suffix}/timeline${this.queryString(input as Record<string, unknown>)}`,
-    );
-  }
-
-  queueAiAgentPrompt(
-    projectId: string,
-    input: QueueAiAgentPromptInput,
-    sessionId?: string,
-  ): Promise<AiAgentSession> {
-    const suffix = sessionId
-      ? `/agent-sessions/${sessionId}`
-      : "/agent-session";
     return this.request<AiAgentSession>(
-      `/projects/${projectId}/ai${suffix}/prompts`,
-      {
-        method: "POST",
-        body: input,
-      },
+      `/projects/${projectId}/ai/agent-sessions/${sessionId}`,
     );
   }
 
-  cancelAiAgentSession(
+  /** Page older transcript messages (newest-first cursor from `AiAgentSession.earlierCursor`). */
+  getAiAgentMessages(
     projectId: string,
-    sessionId?: string,
+    sessionId: string,
+    input: { cursor?: string; limit?: number } = {},
+  ): Promise<AiAgentMessagePage> {
+    return this.request<AiAgentMessagePage>(
+      `/projects/${projectId}/ai/agent-sessions/${sessionId}/messages${this.queryString(input)}`,
+    );
+  }
+
+  sendAiAgentPrompt(
+    projectId: string,
+    sessionId: string,
+    input: SendAiAgentPromptInput,
   ): Promise<AiAgentSession> {
-    const suffix = sessionId
-      ? `/agent-sessions/${sessionId}`
-      : "/agent-session";
     return this.request<AiAgentSession>(
-      `/projects/${projectId}/ai${suffix}/cancel`,
-      {
-        method: "POST",
-      },
+      `/projects/${projectId}/ai/agent-sessions/${sessionId}/prompts`,
+      { method: "POST", body: input },
     );
   }
 
-  getAiAgentToolCall(
+  interruptAiAgentSession(
     projectId: string,
-    toolCallId: string,
-    sessionId?: string,
-  ): Promise<AiAgentToolCall> {
-    const suffix = sessionId
-      ? `/agent-sessions/${sessionId}`
-      : "/agent-session";
-    return this.request<AiAgentToolCall>(
-      `/projects/${projectId}/ai${suffix}/tool-calls/${toolCallId}`,
-    );
-  }
-
-  approveAiToolCall(
-    projectId: string,
-    toolCallId: string,
-    input: ApproveAiToolCallInput,
-    sessionId?: string,
+    sessionId: string,
   ): Promise<AiAgentSession> {
-    const suffix = sessionId
-      ? `/agent-sessions/${sessionId}`
-      : "/agent-session";
     return this.request<AiAgentSession>(
-      `/projects/${projectId}/ai${suffix}/tool-calls/${toolCallId}/approval`,
-      {
-        method: "POST",
-        body: input,
-      },
+      `/projects/${projectId}/ai/agent-sessions/${sessionId}/interrupt`,
+      { method: "POST" },
     );
   }
 
-  approveAiToolCalls(
+  /** Reply to a pending project-change permission (Manual mode approval). */
+  replyAiPermission(
     projectId: string,
-    input: ApproveAiToolCallsInput,
-    sessionId?: string,
-  ): Promise<AiAgentSession> {
-    const suffix = sessionId
-      ? `/agent-sessions/${sessionId}`
-      : "/agent-session";
-    return this.request<AiAgentSession>(
-      `/projects/${projectId}/ai${suffix}/tool-calls/approvals`,
-      {
-        method: "POST",
-        body: input,
-      },
+    sessionId: string,
+    requestId: string,
+    input: ReplyAiPermissionInput,
+  ): Promise<void> {
+    return this.request<void>(
+      `/projects/${projectId}/ai/agent-sessions/${sessionId}/permissions/${requestId}`,
+      { method: "POST", body: input },
     );
   }
 
   answerAiQuestion(
     projectId: string,
-    toolCallId: string,
+    sessionId: string,
+    questionId: string,
     input: AnswerAiQuestionInput,
-    sessionId?: string,
-  ): Promise<AiAgentSession> {
-    const suffix = sessionId
-      ? `/agent-sessions/${sessionId}`
-      : "/agent-session";
-    return this.request<AiAgentSession>(
-      `/projects/${projectId}/ai${suffix}/tool-calls/${toolCallId}/answer`,
-      {
-        method: "POST",
-        body: input,
-      },
+  ): Promise<void> {
+    return this.request<void>(
+      `/projects/${projectId}/ai/agent-sessions/${sessionId}/questions/${questionId}`,
+      { method: "POST", body: input },
     );
   }
 
-  async streamAiAgentSession(
+  dismissAiQuestion(
     projectId: string,
-    sessionId: string | undefined,
-    onEvent: (event: AiAgentSessionEvent) => void,
+    sessionId: string,
+    questionId: string,
+  ): Promise<void> {
+    return this.request<void>(
+      `/projects/${projectId}/ai/agent-sessions/${sessionId}/questions/${questionId}`,
+      { method: "DELETE" },
+    );
+  }
+
+  /**
+   * Subscribe to live agent activity for every session in a project, including
+   * subagent child sessions. Resolves when the stream closes.
+   */
+  async streamAiAgentEvents(
+    projectId: string,
+    onEvent: (event: AiAgentStreamEvent) => void,
     options: { signal?: AbortSignal } = {},
   ): Promise<void> {
     const headers = new Headers();
     headers.set("accept", "text/event-stream");
     if (this.token) headers.set("authorization", `Bearer ${this.token}`);
 
-    const suffix = sessionId
-      ? `/agent-sessions/${sessionId}`
-      : "/agent-session";
     const response = await this.fetcher(
-      `${this.baseUrl}/projects/${projectId}/ai${suffix}/events`,
+      `${this.baseUrl}/projects/${projectId}/ai/agent-events`,
       {
         method: "GET",
         headers,

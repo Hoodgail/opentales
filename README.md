@@ -44,7 +44,7 @@ A novel is a codebase of human meaning — characters, places, plot threads, and
 - **Settings with atmosphere.** Upload reference imagery for every location.
 - **Plot, voice, and obstacles.** Premise, theme, POV, climax, and obstacles live in their own structured panels.
 - **Episodic chapters.** Acts, chapters, and scene beats organized like a project tree.
-- **Agentic writing.** Plan, draft, and revise dynamically with agents that read, create, and edit project docs and manuscript content.
+- **Agentic writing on OpenCode.** Plan, draft, and revise with per-project agents running on an embedded OpenCode V2 harness: subagents, skills, questions, and reviewable approvals over every OpenTales tool.
 - **Reviewable AI branches.** Inspect, edit, compare, approve, merge, or reject generated prose without changing main prematurely.
 - **External writing-agent harness.** Connect hosted Claude through OAuth or create project-scoped MCP keys for Codex, Claude Code, and other agents. Agents can safely create, exact-edit, replace, reorder, invalidate, review, and merge story work through versioned, permission-checked tools with optimistic concurrency and idempotent batch patches.
 - **Publishing pipeline.** Validated DOCX, PDF, EPUB3, Markdown, text, HTML, and project archives with safe import previews.

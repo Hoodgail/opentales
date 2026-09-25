@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import { tool } from 'ai';
+import { tool } from './shared.js';
 import { z } from 'zod';
 import { pagination, paginatedResult, paginationInputSchema, toPrismaDocKind, type ToolContext } from './shared.js';
 

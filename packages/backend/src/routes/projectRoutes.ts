@@ -74,44 +74,27 @@ projectRoutes.get('/:projectId/ai/skills', asyncHandler(ai.skills));
 projectRoutes.post('/:projectId/ai/skills', asyncHandler(ai.createSkill));
 projectRoutes.patch('/:projectId/ai/skills/:skillId', asyncHandler(ai.updateSkill));
 projectRoutes.delete('/:projectId/ai/skills/:skillId', asyncHandler(ai.deleteSkill));
+projectRoutes.get('/:projectId/ai/agent-capabilities', asyncHandler(ai.agentCapabilities));
+projectRoutes.get('/:projectId/ai/agent-events', asyncHandler(ai.agentEvents));
 projectRoutes.get('/:projectId/ai/agent-sessions', asyncHandler(ai.agentSessions));
 projectRoutes.post('/:projectId/ai/agent-sessions', asyncHandler(ai.createAgentSession));
 projectRoutes.get('/:projectId/ai/agent-sessions/:sessionId', asyncHandler(ai.agentSession));
 projectRoutes.patch('/:projectId/ai/agent-sessions/:sessionId', asyncHandler(ai.updateAgentSession));
-projectRoutes.get('/:projectId/ai/agent-sessions/:sessionId/events', asyncHandler(ai.agentSessionEvents));
-projectRoutes.get('/:projectId/ai/agent-sessions/:sessionId/timeline', asyncHandler(ai.agentSessionTimeline));
-projectRoutes.post('/:projectId/ai/agent-sessions/:sessionId/prompts', asyncHandler(ai.queueAgentPrompt));
-projectRoutes.post('/:projectId/ai/agent-sessions/:sessionId/cancel', asyncHandler(ai.cancelAgentSession));
-projectRoutes.get('/:projectId/ai/agent-sessions/:sessionId/tool-calls/:toolCallId', asyncHandler(ai.getToolCall));
+projectRoutes.delete('/:projectId/ai/agent-sessions/:sessionId', asyncHandler(ai.deleteAgentSession));
+projectRoutes.get('/:projectId/ai/agent-sessions/:sessionId/messages', asyncHandler(ai.agentMessages));
+projectRoutes.post('/:projectId/ai/agent-sessions/:sessionId/prompts', asyncHandler(ai.sendAgentPrompt));
+projectRoutes.post('/:projectId/ai/agent-sessions/:sessionId/interrupt', asyncHandler(ai.interruptAgentSession));
 projectRoutes.post(
-  '/:projectId/ai/agent-sessions/:sessionId/tool-calls/approvals',
-  asyncHandler(ai.approveToolCalls)
+  '/:projectId/ai/agent-sessions/:sessionId/permissions/:requestId',
+  asyncHandler(ai.replyPermission)
 );
 projectRoutes.post(
-  '/:projectId/ai/agent-sessions/:sessionId/tool-calls/:toolCallId/approval',
-  asyncHandler(ai.approveToolCall)
-);
-projectRoutes.post(
-  '/:projectId/ai/agent-sessions/:sessionId/tool-calls/:toolCallId/answer',
+  '/:projectId/ai/agent-sessions/:sessionId/questions/:questionId',
   asyncHandler(ai.answerQuestion)
 );
-projectRoutes.get('/:projectId/ai/agent-session', asyncHandler(ai.agentSession));
-projectRoutes.get('/:projectId/ai/agent-session/events', asyncHandler(ai.agentSessionEvents));
-projectRoutes.get('/:projectId/ai/agent-session/timeline', asyncHandler(ai.agentSessionTimeline));
-projectRoutes.post('/:projectId/ai/agent-session/prompts', asyncHandler(ai.queueAgentPrompt));
-projectRoutes.post('/:projectId/ai/agent-session/cancel', asyncHandler(ai.cancelAgentSession));
-projectRoutes.get('/:projectId/ai/agent-session/tool-calls/:toolCallId', asyncHandler(ai.getToolCall));
-projectRoutes.post(
-  '/:projectId/ai/agent-session/tool-calls/approvals',
-  asyncHandler(ai.approveToolCalls)
-);
-projectRoutes.post(
-  '/:projectId/ai/agent-session/tool-calls/:toolCallId/approval',
-  asyncHandler(ai.approveToolCall)
-);
-projectRoutes.post(
-  '/:projectId/ai/agent-session/tool-calls/:toolCallId/answer',
-  asyncHandler(ai.answerQuestion)
+projectRoutes.delete(
+  '/:projectId/ai/agent-sessions/:sessionId/questions/:questionId',
+  asyncHandler(ai.dismissQuestion)
 );
 projectRoutes.post('/:projectId/ai/continuity-reviews', asyncHandler(ai.continuityReview));
 projectRoutes.post('/:projectId/ai/rewrite-suggestions', asyncHandler(ai.rewriteSuggestion));

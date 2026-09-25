@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Check, FileJson, GitCompare, LayoutGrid, Loader2, X } from 'lucide-svelte';
   import { deleteAiApprovalDoc, getAiApprovalDoc } from '$lib/data/ai-approval-docs';
-  import { ai } from '$lib/stores/ai.svelte';
+  import { agent } from '$lib/stores/agent.svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
   import { cn } from '$lib/utils';
   import MonacoDiffEditor from './MonacoDiffEditor.svelte';
@@ -14,27 +14,20 @@
 
   const doc = $derived(getAiApprovalDoc(approvalId));
   const projectId = $derived(manuscript.projectId);
-  const actionState = $derived(doc ? ai.toolActionStates[doc.toolCall.id] : undefined);
-  const actionError = $derived(doc ? ai.toolActionErrors[doc.toolCall.id] : undefined);
+  const actionState = $derived(doc ? agent.pendingActions[doc.id] : undefined);
+  const actionError = $derived(doc ? agent.actionErrors[doc.id] : undefined);
   let showRaw = $state(false);
 
-  async function approve() {
+  async function decide(decision: 'once' | 'reject') {
     if (!projectId || !doc) return;
-    const pid = projectId;
-    const succeeded = await ai.approveToolCall(pid, doc.toolCall.id, true, doc.sessionId);
+    const succeeded = await agent.replyPermission(doc.request, decision);
     if (!succeeded) return;
-    await manuscript.refreshProject(pid);
     deleteAiApprovalDoc(doc.id);
-    await manuscript.closeTab(`tab-ai-approval-${doc.toolCall.id}`);
+    await manuscript.closeTab(`tab-ai-approval-${doc.id}`);
   }
 
-  async function reject() {
-    if (!projectId || !doc) return;
-    const succeeded = await ai.approveToolCall(projectId, doc.toolCall.id, false, doc.sessionId);
-    if (!succeeded) return;
-    deleteAiApprovalDoc(doc.id);
-    await manuscript.closeTab(`tab-ai-approval-${doc.toolCall.id}`);
-  }
+  const approve = () => decide('once');
+  const reject = () => decide('reject');
 </script>
 
 {#if !doc}
@@ -91,7 +84,7 @@
     {/if}
 
     {#if showRaw}
-      <pre class="max-h-44 shrink-0 overflow-auto border-b border-border bg-card p-3 text-[11px] text-foreground/80">{JSON.stringify(doc.toolCall.input, null, 2)}</pre>
+      <pre class="max-h-44 shrink-0 overflow-auto border-b border-border bg-card p-3 text-[11px] text-foreground/80">{JSON.stringify(doc.request.toolInput, null, 2)}</pre>
     {/if}
 
     <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto bg-background p-3">

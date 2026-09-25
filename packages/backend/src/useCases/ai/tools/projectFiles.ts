@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import { tool } from 'ai';
+import { tool } from './shared.js';
 import { z } from 'zod';
 import { ProjectFolderUseCase } from '../../projectFiles/ProjectFolderUseCase.js';
 import { emptyInputSchema, type ToolContext } from './shared.js';

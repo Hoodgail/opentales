@@ -1,4 +1,4 @@
-import { tool, type Tool } from "ai";
+import { tool, type AgentTool as Tool } from "./shared.js";
 import { z } from "zod";
 import { HttpError } from "../../../http/HttpError.js";
 import type { AiAgentInfo } from "../agents.js";
