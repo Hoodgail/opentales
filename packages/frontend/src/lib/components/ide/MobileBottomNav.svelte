@@ -29,7 +29,6 @@
 
   const items: Item[] = [
     { id: "explorer", label: "Manuscript", icon: FileText },
-    { id: "build", label: "Build", icon: Workflow },
     { id: "bible", label: "Bible", icon: BookMarked },
     { id: "publishing", label: "Publish", icon: Archive },
     { id: "revisions", label: "Revisions", icon: History },

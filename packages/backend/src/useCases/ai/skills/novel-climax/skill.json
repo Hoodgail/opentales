@@ -1,1 +1,53 @@
-{"schemaVersion":1,"name":"novel-climax","version":"1.0.0","description":"Design an earned climax that forces the story's deepest contradiction into an irreversible costly choice.","kind":"planning","inputs":["story-brief","character-bible","plot-thread","act-architecture"],"outputs":["beat","act-architecture","finale-plan"],"runtimeRoles":["creator"],"allowedTools":["searchStory","queryCanon","queryOpenLoops","createProjectDoc","updateProjectDoc","applyArtifactBatch","reportTaskResult"],"maxIterations":2,"context":{"maxTokens":20000,"sections":["story-brief","narrative-contract","active-task","characters","world","threads","canon"]},"rubric":"climax-v1","procedure":["Converge external conflict, internal contradiction, and thematic choice.","Require setup coverage, agency, irreversible cost, and consequential aftermath.","Persist climax beats and architecture changes with stable causal links."],"references":[]}
+{
+  "schemaVersion": 1,
+  "name": "novel-climax",
+  "version": "1.1.0",
+  "description": "Design an earned climax that forces the story's deepest contradiction into an irreversible costly choice.",
+  "kind": "planning",
+  "inputs": [
+    "story-brief",
+    "character-bible",
+    "plot-thread",
+    "act-architecture"
+  ],
+  "outputs": ["beat", "act-architecture", "finale-plan"],
+  "runtimeRoles": ["creator"],
+  "allowedTools": [
+    "createProjectDoc",
+    "updateProjectDoc",
+    "listProjectFiles",
+    "listProjectDocs",
+    "readProjectDoc",
+    "grepProject",
+    "listChapters",
+    "readChapter",
+    "listScenes",
+    "readScene",
+    "listCharacters",
+    "readCharacter",
+    "listLocations",
+    "readLocation",
+    "readStoryStructure"
+  ],
+  "maxIterations": 2,
+  "context": {
+    "maxTokens": 20000,
+    "sections": [
+      "story-brief",
+      "narrative-contract",
+      "active-task",
+      "characters",
+      "world",
+      "threads",
+      "canon"
+    ]
+  },
+  "rubric": "climax-v1",
+  "procedure": [
+    "Converge external conflict, internal contradiction, and thematic choice.",
+    "Require setup coverage, agency, irreversible cost, and consequential aftermath.",
+    "Persist climax beats and architecture changes with stable causal links.",
+    "Choose the next step from the author's goal and current project state; keep progress in project docs and verify persisted tool results."
+  ],
+  "references": []
+}

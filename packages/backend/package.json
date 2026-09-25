@@ -13,12 +13,11 @@
     "test:coverage": "vitest run --coverage",
     "eval": "vitest run src/evals --reporter=default",
     "eval:model": "tsx src/evals/modelTrials.ts",
-    "test:critical-coverage": "vitest run src/useCases/ai src/useCases/novelBuild src/evals/continuityBenchmark.test.ts --coverage --no-file-parallelism",
+    "test:critical-coverage": "vitest run src/useCases/ai src/evals/continuityBenchmark.test.ts --coverage --no-file-parallelism",
     "start": "node dist/src/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:seed": "tsx prisma/seed.ts",
-    "eval:novel-build": "node --import tsx scripts/live-novel-build.ts"
+    "prisma:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "3.0.98",

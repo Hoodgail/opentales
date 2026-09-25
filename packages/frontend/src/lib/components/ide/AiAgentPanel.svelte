@@ -56,8 +56,7 @@
       ),
   );
   const primaryActionIsStop = $derived(
-    stopSubmitting ||
-      (hasActiveWork && (!prompt.trim() || promptSubmitting)),
+    stopSubmitting || (hasActiveWork && (!prompt.trim() || promptSubmitting)),
   );
   const approvalMode = $derived<AiAgentApprovalMode>(
     session?.approvalMode ?? "manual",
@@ -142,7 +141,10 @@
         const sessionGeneration = ai.sessionGeneration;
         const selectedSessionId = await ai.loadSessions(pid);
         if (cancelled || sessionGeneration !== ai.sessionGeneration) return;
-        const loaded = await ai.loadSession(pid, selectedSessionId ?? undefined);
+        const loaded = await ai.loadSession(
+          pid,
+          selectedSessionId ?? undefined,
+        );
         if (cancelled) return;
         await Promise.all([
           ai.loadToolManifest(pid),
@@ -239,7 +241,8 @@
     if (!loaded) return;
     await tick();
     if (scrollEl) {
-      scrollEl.scrollTop = previousTop + (scrollEl.scrollHeight - previousHeight);
+      scrollEl.scrollTop =
+        previousTop + (scrollEl.scrollHeight - previousHeight);
     }
   }
 
@@ -522,7 +525,8 @@
     const q = query.trim().toLowerCase();
     if (!q) return item.scoreBoost ?? 1;
     const haystack = `${item.label} ${item.searchText}`.toLowerCase();
-    if (/[*?]/.test(q)) return globMatches(q, haystack) ? 200 + (item.scoreBoost ?? 0) : 0;
+    if (/[*?]/.test(q))
+      return globMatches(q, haystack) ? 200 + (item.scoreBoost ?? 0) : 0;
     if (haystack.includes(q)) return 100 + q.length + (item.scoreBoost ?? 0);
     let score = item.scoreBoost ?? 0;
     let cursor = 0;
@@ -673,16 +677,12 @@
       readStoryStructure: "Read story structure",
       getProjectStats: "Read project stats",
       compareVersions: "Compared versions",
-      listBuildRuns: "Listed novel builds",
-      listBuildUnits: "Listed build units",
-      getBuildState: "Read build state",
       getSceneContext: "Read scene context",
       searchStory: "Searched story",
       findReferences: "Found references",
       runStoryLint: "Checked story",
       reportTaskResult: "Reported task result",
       task: "Delegated task",
-      startNovelBuild: "Start novel build",
       updateProject: "Update project",
       updateProjectAiSettings: "Update AI settings",
       askUser: "Ask user",
@@ -1219,12 +1219,15 @@
         <div
           class="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-[10px] text-muted-foreground"
         >
-          <span>{pendingToolCalls.length} changes are awaiting approval above.</span>
+          <span
+            >{pendingToolCalls.length} changes are awaiting approval above.</span
+          >
           <button
             type="button"
             onclick={approveAll}
             disabled={pendingToolCalls.some((toolCall) =>
-              Boolean(ai.toolActionStates[toolCall.id]))}
+              Boolean(ai.toolActionStates[toolCall.id]),
+            )}
             class="inline-flex shrink-0 items-center gap-1 rounded border border-emerald-500/30 px-1.5 py-0.5 text-emerald-500 hover:bg-emerald-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Check class="size-3" /> Approve all
@@ -1272,9 +1275,11 @@
             </button>
           {/if}
         </div>
-        {#if session?.contextUsage && session.status === 'error'}
+        {#if session?.contextUsage && session.status === "error"}
           <div class="mt-1 text-[10px] text-destructive/80">
-            Request context: {formatUsage(session.contextUsage.totalTokens)} / {formatUsage(session.contextUsage.maxTokens)} tokens ({session.contextUsage.percentage}%)
+            Request context: {formatUsage(session.contextUsage.totalTokens)} / {formatUsage(
+              session.contextUsage.maxTokens,
+            )} tokens ({session.contextUsage.percentage}%)
           </div>
         {/if}
       </div>
@@ -1314,10 +1319,15 @@
             role="alert"
             class="flex items-start gap-2 border-b border-amber-500/25 bg-amber-500/8 px-2.5 py-2"
           >
-            <span class="mt-1 size-1.5 shrink-0 rounded-full bg-amber-400"></span>
+            <span class="mt-1 size-1.5 shrink-0 rounded-full bg-amber-400"
+            ></span>
             <div class="min-w-0 flex-1">
-              <p class="text-[11px] font-medium text-foreground">Enable Auto mode?</p>
-              <p class="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+              <p class="text-[11px] font-medium text-foreground">
+                Enable Auto mode?
+              </p>
+              <p
+                class="mt-0.5 text-[10px] leading-relaxed text-muted-foreground"
+              >
                 Project-changing tools will run immediately, and the agent will
                 proceed without approval prompts or questions.
               </p>
@@ -1327,14 +1337,17 @@
                   disabled={modeUpdating}
                   onclick={() => (autoModeConfirmOpen = false)}
                   class="rounded border border-border px-2 py-1 text-[10px] text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
-                >Cancel</button>
+                  >Cancel</button
+                >
                 <button
                   type="button"
                   disabled={modeUpdating}
                   onclick={() => void enableAutoMode()}
                   class="inline-flex items-center gap-1 rounded border border-amber-500/35 bg-amber-500/10 px-2 py-1 text-[10px] font-medium text-amber-300 hover:bg-amber-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 disabled:opacity-50"
                 >
-                  {#if modeUpdating}<Loader2 class="size-3 motion-safe:animate-spin" />{/if}
+                  {#if modeUpdating}<Loader2
+                      class="size-3 motion-safe:animate-spin"
+                    />{/if}
                   Enable Auto
                 </button>
               </div>
@@ -1353,7 +1366,9 @@
             aria-label="Message the AI agent"
             role="combobox"
             aria-autocomplete="list"
-            aria-expanded={Boolean(autocompleteOpen && autocompleteItems.length)}
+            aria-expanded={Boolean(
+              autocompleteOpen && autocompleteItems.length,
+            )}
             aria-controls="ai-project-context-options"
             aria-activedescendant={activeAutocompleteId}
             aria-describedby="ai-project-context-help"
@@ -1396,7 +1411,9 @@
                       : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'}"
                   >
                     <span class="min-w-0">
-                      <span class="block truncate text-[11px]">@{item.label}</span>
+                      <span class="block truncate text-[11px]"
+                        >@{item.label}</span
+                      >
                       <span class="block truncate text-[10px] opacity-70"
                         >{item.detail}</span
                       >
@@ -1453,7 +1470,8 @@
                 'manual'
                   ? 'bg-background text-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground'}"
-              >Manual</button>
+                >Manual</button
+              >
               <button
                 type="button"
                 aria-pressed={approvalMode === "auto"}
@@ -1462,8 +1480,8 @@
                 class="h-5 rounded px-1.5 text-[9px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 disabled:opacity-50 {approvalMode ===
                 'auto'
                   ? 'bg-amber-500/15 text-amber-300 shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'}"
-              >Auto</button>
+                  : 'text-muted-foreground hover:text-foreground'}">Auto</button
+              >
             </div>
             <select
               bind:value={selectedModel}
@@ -1479,8 +1497,7 @@
           <div class="flex items-center gap-1">
             <button
               type="button"
-              onclick={() =>
-                void (primaryActionIsStop ? cancel() : send())}
+              onclick={() => void (primaryActionIsStop ? cancel() : send())}
               disabled={primaryActionIsStop
                 ? stopSubmitting
                 : !prompt.trim() ||
@@ -1523,9 +1540,7 @@
         class="mt-1.5 flex items-center justify-between gap-2 text-[10px] text-muted-foreground"
       >
         <span class="inline-flex items-center gap-1">
-          <span
-            class={`size-1.5 rounded-full ${streamDotClass()}`}
-          ></span>
+          <span class={`size-1.5 rounded-full ${streamDotClass()}`}></span>
           {streamStatusLabel()} · {session?.status ?? "idle"}
           {#if ai.canRetryStream}
             ·
@@ -1533,13 +1548,15 @@
               type="button"
               onclick={() => void ai.retryStream()}
               class="rounded px-1 text-accent hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            >Retry</button
+              >Retry</button
             >
           {/if}
         </span>
         {#if session?.contextUsage}
           <span
-            class="min-w-24 text-right {session.contextUsage.percentage > 100 ? 'text-destructive' : ''}"
+            class="min-w-24 text-right {session.contextUsage.percentage > 100
+              ? 'text-destructive'
+              : ''}"
             title={`${session.contextUsage.totalTokens} / ${session.contextUsage.maxTokens} tokens`}
           >
             Context {session.contextUsage.percentage}% · {formatUsage(

@@ -5,4 +5,4 @@ description: Verify final manuscript completeness, proof diagnostics, chapter or
 
 # Novel Finalization
 
-Finalization is a release gate. Require every causal chapter checkpoint, passing proof diagnostics, accepted final branch heads, and an inspectable export manifest before the final checkpoint.
+Read the current manuscript and planning docs. Check unresolved promises, continuity, prose, and publication readiness. Apply requested corrections with the writing tools and record remaining issues or completion in project docs.

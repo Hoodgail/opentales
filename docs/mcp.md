@@ -112,9 +112,6 @@ The server adapts the tool definitions in `packages/backend/src/useCases/ai/tool
 The following runtime-only capabilities are intentionally not remote workspace tools:
 
 - `task` and `askUser` depend on an OpenTales-managed interactive agent session. External hosts already own delegation and user interaction, so the server exposes agent prompts instead.
-- `applyBuildUnitPatch`, `compileBuildManuscript`, and `reportTaskResult` require a fenced durable-worker lease. Public agents use the separate `updateBuildUnit` and `compileBuild` workspace operations, which apply project permissions and optimistic concurrency without impersonating a worker task.
-
-When a failed task has exhausted its retry budget, call `getBuildState` with `detail: "tasks"`, then call `rerunBuildTask` with that task's ID and the run's current revision. This explicitly invalidates transitive downstream output and resets the boundary's attempt budget. `resumeNovelBuild` intentionally refuses to bypass an exhausted failed boundary.
 
 Mutations called through a read/write key execute immediately on the server after any approval enforced by the MCP host. Tool annotations identify reads and destructive operations so compatible clients can apply local approval policy. The result must confirm a change before an agent claims it succeeded.
 
@@ -122,10 +119,10 @@ Mutations called through a read/write key execute immediately on the server afte
 
 `createChapter` stores prose in `content`; `summary` is metadata, and omitting `content` intentionally creates an empty chapter. Unknown fields such as `body` are rejected instead of silently discarded. Chapter writes return compact receipts containing the chapter ID, word count, and new head token, even for large manuscripts. Verify written prose with `readChapter` and its word count.
 
-External agents have a complete read/create/edit/remove path for canonical story entities, project documents, proposals, and isolated Novel Build manuscripts. Prose mutations use one consistent protocol:
+External agents have a complete read/create/edit/remove path for canonical story entities, project documents, and proposals. Prose mutations use one consistent protocol:
 
-1. Read the target with `readChapter`, `readScene`, `readProjectDoc`, `readSubmission`, or `readBuildUnit`.
-2. Copy the returned `headVersionId`. Scenes and build units also return a numeric `revision`; build units additionally use the current build revision.
+1. Read the target with `readChapter`, `readScene`, `readProjectDoc`, `readSubmission`.
+2. Copy the returned `headVersionId`. Scenes also return a numeric `revision`.
 3. Use a full `content` or `patch.mode="replace"` replacement to initialize or intentionally clear an empty body, or use exact `oldString`/`newString` edits for a bounded change. Ambiguous and missing matches fail without writing.
 4. On `409`, re-read the target and reconsider the edit. Never blindly retry with stale tokens.
 
@@ -133,28 +130,26 @@ External agents have a complete read/create/edit/remove path for canonical story
 
 `mergeSubmission` requires `confirm=true` and the canonical chapter head from `readChapter` or `listChapters` (use `null` for a new-chapter proposal). A stale main head fails closed. If main advanced after the proposal was opened, the agent must read and reconcile that prose before explicitly confirming the newer head.
 
-The public Novel Build workspace tools are separate from worker-only lease tools. They cover authorization, pause/resume/cancel, replan/checkpoint branching, build-unit create/edit/invalidate/reorder, immutable compilation, main comparison, review creation, owner approve/merge/reject, and artifact unpinning. `updateBuildUnit` supports exact or full-body edits and can move a reviewed unit to `accepted`; `invalidateBuildUnit` removes it from active compilation while retaining history. Owner confirmation and frozen-review drift checks remain authoritative.
-
-Build artifact discovery is two-step and bounded: `listBuildArtifacts` returns paginated metadata without content, then `readBuildArtifact` returns one selected schema-versioned artifact with its bindings and links.
+For long tasks, agents maintain an adaptable plan and progress in project docs, then use the ordinary writing tools to draft, review, and revise.
 
 ### Resources
 
-| URI | Contents |
-| --- | --- |
-| `opentales://project` | Bound project and workspace metadata |
-| `opentales://skills/{name}` | Full enabled built-in or project Agent Skill, including bundled references |
-| `opentales://agents/{name}` | Built-in or project-defined agent prompt |
-| `opentales://instructions/{id}` | Author-owned project `INSTRUCTIONS` document |
+| URI                             | Contents                                                                   |
+| ------------------------------- | -------------------------------------------------------------------------- |
+| `opentales://project`           | Bound project and workspace metadata                                       |
+| `opentales://skills/{name}`     | Full enabled built-in or project Agent Skill, including bundled references |
+| `opentales://agents/{name}`     | Built-in or project-defined agent prompt                                   |
+| `opentales://instructions/{id}` | Author-owned project `INSTRUCTIONS` document                               |
 
 ### Prompts
 
-| Prompt | Purpose |
-| --- | --- |
+| Prompt                | Purpose                                                                      |
+| --------------------- | ---------------------------------------------------------------------------- |
 | `opentales_workspace` | Load project identity, author instructions, and the skill catalog for a task |
-| `opentales_agent` | Apply one named built-in or project agent prompt |
-| `opentales_skill` | Activate one full Agent Skill and its references for a task |
+| `opentales_agent`     | Apply one named built-in or project agent prompt                             |
+| `opentales_skill`     | Activate one full Agent Skill and its references for a task                  |
 
-The MCP initialization response also includes concise server-wide guidance. It tells agents to treat manuscript and imported material as data, use lists/grep/bounded reads first, load matching skills progressively, resolve opaque IDs themselves, and leave persisted Novel Build tasks to the durable worker.
+The MCP initialization response also includes concise server-wide guidance. It tells agents to treat manuscript and imported material as data, use lists/grep/bounded reads first, load matching skills progressively, resolve opaque IDs themselves, and maintain plans and progress in project docs.
 
 ## HTTP and deployment behavior
 
@@ -183,11 +178,11 @@ Local development proxies `http://localhost:5173/mcp` to `http://localhost:4000/
 
 These JWT-authenticated editor routes back the settings UI:
 
-| Method | Route | Description |
-| --- | --- | --- |
-| `GET` | `/projects/:projectId/mcp-api-keys` | List safe key metadata |
-| `POST` | `/projects/:projectId/mcp-api-keys` | Create a key and return its secret once |
-| `DELETE` | `/projects/:projectId/mcp-api-keys/:keyId` | Revoke a key immediately |
+| Method   | Route                                      | Description                             |
+| -------- | ------------------------------------------ | --------------------------------------- |
+| `GET`    | `/projects/:projectId/mcp-api-keys`        | List safe key metadata                  |
+| `POST`   | `/projects/:projectId/mcp-api-keys`        | Create a key and return its secret once |
+| `DELETE` | `/projects/:projectId/mcp-api-keys/:keyId` | Revoke a key immediately                |
 
 The TypeScript SDK exposes `listProjectMcpApiKeys`, `createProjectMcpApiKey`, and `revokeProjectMcpApiKey` for these routes.
 

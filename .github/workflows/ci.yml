@@ -29,8 +29,6 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://opentales:opentales@127.0.0.1:5432/opentales_test?schema=public
-      AI_WORKER_TEST_DATABASE_URL: postgresql://opentales:opentales@127.0.0.1:5432/opentales_test?schema=public
-      NOVEL_BUILD_TEST_DATABASE_URL: postgresql://opentales:opentales@127.0.0.1:5432/opentales_test?schema=public
       EXPORT_IMPORT_TEST_DATABASE_URL: postgresql://opentales:opentales@127.0.0.1:5432/opentales_test?schema=public
       REVISION_TEST_DATABASE_URL: postgresql://opentales:opentales@127.0.0.1:5432/opentales_test?schema=public
       RENAME_REFACTOR_TEST_DATABASE_URL: postgresql://opentales:opentales@127.0.0.1:5432/opentales_test?schema=public

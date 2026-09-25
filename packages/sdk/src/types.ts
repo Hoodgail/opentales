@@ -1,22 +1,41 @@
-export type ChapterStatus = 'draft' | 'in-progress' | 'review' | 'final';
-export type SceneStatus = 'planned' | 'draft' | 'in-progress' | 'review' | 'revised' | 'final';
-export type ObstacleType = 'internal' | 'external' | 'interpersonal';
-export type AssetKind = 'image' | 'audio' | 'video' | 'document';
-export type Role = 'OWNER' | 'ADMIN' | 'EDITOR' | 'VIEWER';
-export type CoverOrientation = 'landscape' | 'portrait';
-export type ProjectVisibility = 'private' | 'public';
-export type AiProviderKind = 'gateway' | 'openai-compatible' | 'github-copilot' | 'codex';
-export type ProjectMcpApiKeyPermission = 'read-only' | 'read-write';
-export type AiRewriteMode = 'tighter' | 'softer' | 'more-visceral' | 'more-lyrical';
-export type ProjectDocKind = 'note' | 'brainstorm' | 'instructions' | 'reference' | 'other';
+export type ChapterStatus = "draft" | "in-progress" | "review" | "final";
+export type SceneStatus =
+  | "planned"
+  | "draft"
+  | "in-progress"
+  | "review"
+  | "revised"
+  | "final";
+export type ObstacleType = "internal" | "external" | "interpersonal";
+export type AssetKind = "image" | "audio" | "video" | "document";
+export type Role = "OWNER" | "ADMIN" | "EDITOR" | "VIEWER";
+export type CoverOrientation = "landscape" | "portrait";
+export type ProjectVisibility = "private" | "public";
+export type AiProviderKind =
+  | "gateway"
+  | "openai-compatible"
+  | "github-copilot"
+  | "codex";
+export type ProjectMcpApiKeyPermission = "read-only" | "read-write";
+export type AiRewriteMode =
+  | "tighter"
+  | "softer"
+  | "more-visceral"
+  | "more-lyrical";
+export type ProjectDocKind =
+  | "note"
+  | "brainstorm"
+  | "instructions"
+  | "reference"
+  | "other";
 export type CollaborationDocumentKind =
-  | 'chapter'
-  | 'character'
-  | 'location'
-  | 'structure'
-  | 'obstacle'
-  | 'doc'
-  | 'ai-skill';
+  | "chapter"
+  | "character"
+  | "location"
+  | "structure"
+  | "obstacle"
+  | "doc"
+  | "ai-skill";
 
 export interface AuthUser {
   id: string;
@@ -240,13 +259,13 @@ export interface CollaborationEdit {
   revision: number;
   user: CollaborationUser;
   changes: CollaborationTextChange[];
-  selection: CollaborationEditInput['selection'];
+  selection: CollaborationEditInput["selection"];
 }
 
 export interface CollaborationPresence {
   clientId: string;
   user: CollaborationUser;
-  selection: CollaborationEditInput['selection'];
+  selection: CollaborationEditInput["selection"];
   document: CollaborationDocumentRef;
   focused: boolean;
   location: CollaborationLocation | null;
@@ -255,7 +274,7 @@ export interface CollaborationPresence {
 
 export interface CollaborationPresenceInput {
   clientId: string;
-  selection?: CollaborationEditInput['selection'];
+  selection?: CollaborationEditInput["selection"];
   focused?: boolean;
   location?: CollaborationLocation | null;
 }
@@ -265,7 +284,17 @@ export interface CollaborationLeaveInput {
 }
 
 export interface CollaborationLocation {
-  tabType: 'chapter' | 'character' | 'location' | 'structure' | 'outline' | 'submission' | 'doc' | 'ai-skill' | 'ai-approval' | 'settings';
+  tabType:
+    | "chapter"
+    | "character"
+    | "location"
+    | "structure"
+    | "outline"
+    | "submission"
+    | "doc"
+    | "ai-skill"
+    | "ai-approval"
+    | "settings";
   refId: string;
   title: string;
   field?: string;
@@ -279,15 +308,19 @@ export interface CollaborationSnapshot {
 }
 
 export type CollaborationDocumentEvent =
-  | { type: 'snapshot'; snapshot: CollaborationSnapshot }
-  | { type: 'edit'; edit: CollaborationEdit }
-  | { type: 'presence'; presence: CollaborationPresence }
-  | { type: 'leave'; clientId: string };
+  | { type: "snapshot"; snapshot: CollaborationSnapshot }
+  | { type: "edit"; edit: CollaborationEdit }
+  | { type: "presence"; presence: CollaborationPresence }
+  | { type: "leave"; clientId: string };
 
 export type CollaborationEvent =
   | CollaborationDocumentEvent
-  | { type: 'project-presence'; collaborators: CollaborationPresence[] }
-  | { type: 'document-event'; document: CollaborationDocumentRef; event: CollaborationDocumentEvent };
+  | { type: "project-presence"; collaborators: CollaborationPresence[] }
+  | {
+      type: "document-event";
+      document: CollaborationDocumentRef;
+      event: CollaborationDocumentEvent;
+    };
 
 export interface PaginatedProjectDocs {
   items: ProjectDoc[];
@@ -431,7 +464,7 @@ export interface PublicProject {
 }
 
 export interface TrashItem {
-  kind: 'chapter';
+  kind: "chapter";
   id: string;
   title: string;
   number: number;
@@ -538,7 +571,7 @@ export interface McpOAuthAuthorizationContext {
 export interface AuthorizeMcpOAuthInput extends McpOAuthAuthorizationRequest {
   projectId?: string;
   access?: ProjectMcpApiKeyPermission;
-  decision: 'approve' | 'deny';
+  decision: "approve" | "deny";
 }
 
 export interface AuthorizeMcpOAuthResult {
@@ -569,7 +602,7 @@ export interface PollGithubCopilotAuthInput {
 }
 
 export interface PollGithubCopilotAuthResult {
-  status: 'pending' | 'slow_down' | 'authorized' | 'failed';
+  status: "pending" | "slow_down" | "authorized" | "failed";
   interval?: number;
   settings?: ProjectAiSettings;
   message?: string;
@@ -589,7 +622,7 @@ export interface PollCodexAuthInput {
 }
 
 export interface PollCodexAuthResult {
-  status: 'pending' | 'authorized' | 'failed';
+  status: "pending" | "authorized" | "failed";
   interval?: number;
   settings?: ProjectAiSettings;
   message?: string;
@@ -636,7 +669,7 @@ export interface AiModelCatalogProvider {
 export interface AiModelCatalog {
   providers: AiModelCatalogProvider[];
   updatedAt: string;
-  source: 'models.dev' | 'unavailable';
+  source: "models.dev" | "unavailable";
 }
 
 export interface ProjectAiSkill {
@@ -665,7 +698,7 @@ export interface UpdateProjectAiSkillInput {
 }
 
 export interface AiContinuityIssue {
-  severity: 'info' | 'warning' | 'error';
+  severity: "info" | "warning" | "error";
   title: string;
   evidence: string;
   earlierContext: string;
@@ -706,14 +739,14 @@ export interface AiCharacterDialogueSuggestion {
 
 export interface CreateAiOutlineExpansionInput {
   synopsis: string;
-  targetLength?: 'short' | 'medium' | 'long';
+  targetLength?: "short" | "medium" | "long";
   povCharacterId?: string;
   locationId?: string;
 }
 
 export interface AiOutlineExpansion {
   draft: string;
-  label: 'AI draft';
+  label: "AI draft";
   acceptRequiresEdits: true;
   notes: string;
 }
@@ -729,27 +762,33 @@ export interface AiToolManifest {
   tools: AiToolDescriptor[];
 }
 
-export type AiAgentSessionStatus = 'idle' | 'running' | 'cancelled' | 'error';
-export type AiAgentApprovalMode = 'manual' | 'auto';
-export type AiToolCallStatus = 'pending-approval' | 'approved' | 'rejected' | 'running' | 'executed' | 'error';
+export type AiAgentSessionStatus = "idle" | "running" | "cancelled" | "error";
+export type AiAgentApprovalMode = "manual" | "auto";
+export type AiToolCallStatus =
+  | "pending-approval"
+  | "approved"
+  | "rejected"
+  | "running"
+  | "executed"
+  | "error";
 export type AiAgentSessionEventType =
-  | 'session'
-  | 'prompt-queued'
-  | 'prompt-started'
-  | 'text-delta'
-  | 'tool-call'
-  | 'tool-result'
-  | 'tool-approval'
-  | 'question-asked'
-  | 'question-answered'
-  | 'subtask-started'
-  | 'subtask-finished'
-  | 'prompt-finished'
-  | 'error';
+  | "session"
+  | "prompt-queued"
+  | "prompt-started"
+  | "text-delta"
+  | "tool-call"
+  | "tool-result"
+  | "tool-approval"
+  | "question-asked"
+  | "question-answered"
+  | "subtask-started"
+  | "subtask-finished"
+  | "prompt-finished"
+  | "error";
 
 export interface AiAgentMessage {
   id: string;
-  role: 'user' | 'assistant' | 'system' | 'tool';
+  role: "user" | "assistant" | "system" | "tool";
   content: string;
   model?: string | null;
   attachments?: AiAgentAttachment[];
@@ -762,14 +801,14 @@ export interface AiAgentSubtaskPart {
   toolCallId?: string | null;
   description: string;
   subagentType: string;
-  status: 'running' | 'completed' | 'cancelled' | 'error';
+  status: "running" | "completed" | "cancelled" | "error";
   output?: unknown;
   outputTruncated?: boolean;
   outputBytes?: number;
   error?: string | null;
 }
 
-export type AiAgentTimelineChronology = 'exact' | 'approximate' | 'mixed';
+export type AiAgentTimelineChronology = "exact" | "approximate" | "mixed";
 
 /** Describes the fidelity and server-side windowing of `AiAgentSession.timeline`. */
 export interface AiAgentTimelineInfo {
@@ -796,21 +835,21 @@ interface AiAgentSessionPartBase {
  */
 export type AiAgentSessionPart =
   | (AiAgentSessionPartBase & {
-      kind: 'message';
+      kind: "message";
       message: AiAgentMessage;
     })
   | (AiAgentSessionPartBase & {
-      kind: 'text';
+      kind: "text";
       messageId: string;
       content: string;
       streaming: boolean;
     })
   | (AiAgentSessionPartBase & {
-      kind: 'tool-call' | 'tool-result';
+      kind: "tool-call" | "tool-result";
       toolCall: AiAgentToolCall;
     })
   | (AiAgentSessionPartBase & {
-      kind: 'task';
+      kind: "task";
       task: AiAgentSubtaskPart;
     });
 
@@ -829,7 +868,7 @@ export interface AiAgentTimelinePage {
   nextBeforeSequence: number | null;
   nextLegacyCursor?: string | null;
   hasMore: boolean;
-  limitation?: 'legacy-history-best-effort';
+  limitation?: "legacy-history-best-effort";
 }
 
 export interface AiAgentQueuedPrompt {
@@ -837,7 +876,7 @@ export interface AiAgentQueuedPrompt {
   prompt: string;
   model?: string | null;
   attachments?: AiAgentAttachment[];
-  status: 'queued' | 'running' | 'completed' | 'cancelled' | 'error';
+  status: "queued" | "running" | "completed" | "cancelled" | "error";
   createdAt: string;
 }
 
@@ -857,15 +896,15 @@ export interface AiAgentAttachmentInput extends AiAgentAttachment {
 }
 
 export type AiAgentProjectReferenceType =
-  | 'folder'
-  | 'doc'
-  | 'asset'
-  | 'chapter'
-  | 'character'
-  | 'location'
-  | 'act'
-  | 'structure'
-  | 'obstacle';
+  | "folder"
+  | "doc"
+  | "asset"
+  | "chapter"
+  | "character"
+  | "location"
+  | "act"
+  | "structure"
+  | "obstacle";
 
 export interface AiAgentProjectReference {
   type: AiAgentProjectReferenceType;
@@ -914,6 +953,7 @@ export interface AiAgentSession {
   timeline?: AiAgentSessionPart[];
   timelineInfo?: AiAgentTimelineInfo;
   pendingToolCalls: AiAgentToolCall[];
+  /** @deprecated Historical field; current sessions are not bound to a build. */
   activeBuildRunId?: string | null;
   contextUsage: AiAgentContextUsage | null;
   error: string | null;
@@ -933,7 +973,6 @@ export interface AiAgentSessionSummary {
 
 export interface CreateAiAgentSessionInput {
   title?: string;
-  buildRunId?: string | null;
   approvalMode?: AiAgentApprovalMode;
 }
 
@@ -945,8 +984,6 @@ export interface QueueAiAgentPromptInput {
   prompt: string;
   model?: string;
   attachments?: AiAgentAttachmentInput[];
-  /** Bind this prompt and any delegated tasks to a known Novel Build. */
-  buildRunId?: string | null;
   /**
    * If true, cancels the active generation and runs this prompt next.
    */
@@ -1062,7 +1099,7 @@ export interface UpdateProjectInput {
 }
 
 export type UpdateChapterInput = Partial<
-  Pick<Chapter, 'title' | 'status' | 'summary' | 'content'>
+  Pick<Chapter, "title" | "status" | "summary" | "content">
 > & {
   povCharacterId?: string | null;
   locationId?: string | null;
@@ -1070,10 +1107,12 @@ export type UpdateChapterInput = Partial<
   /** Optional compare-and-swap guard for manuscript updates. */
   expectedHeadVersionId?: string | null;
 };
-export type UpdateCharacterInput = Partial<Omit<Character, 'id' | 'relationships' | 'assets'>> & {
+export type UpdateCharacterInput = Partial<
+  Omit<Character, "id" | "relationships" | "assets">
+> & {
   avatarAssetId?: string | null;
 };
-export type UpdateLocationInput = Partial<Omit<Location, 'id'>> & {
+export type UpdateLocationInput = Partial<Omit<Location, "id">> & {
   imageAssetId?: string | null;
 };
 export type UpdateStructureInput = Partial<StoryStructure>;
@@ -1204,15 +1243,15 @@ export interface UpdateCharacterRelationshipInput {
   note?: string | null;
 }
 
-export type SubmissionKind = 'chapter-edit' | 'new-chapter';
-export type SubmissionStatus = 'open' | 'merged' | 'declined';
+export type SubmissionKind = "chapter-edit" | "new-chapter";
+export type SubmissionStatus = "open" | "merged" | "declined";
 export type ActivityType =
-  | 'submission-opened'
-  | 'submission-updated'
-  | 'submission-merged'
-  | 'submission-declined'
-  | 'comment-added'
-  | 'ai-review-posted';
+  | "submission-opened"
+  | "submission-updated"
+  | "submission-merged"
+  | "submission-declined"
+  | "comment-added"
+  | "ai-review-posted";
 
 export interface SubmissionAuthor {
   id: string;
@@ -1294,7 +1333,7 @@ export interface SubmissionCommentAnchor {
   lineStart: number;
   lineEnd: number;
   // Which side of the diff the anchor refers to.
-  side: 'base' | 'head';
+  side: "base" | "head";
 }
 
 export interface AddSubmissionCommentInput {
@@ -1370,89 +1409,103 @@ export interface CreateBetaShareCommentInput {
   lineEnd?: number | null;
 }
 
-// Durable Novel Build and structured story-state contracts.
+// Historical workflow and story-state DTOs retained for stored exports and revisions.
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
 export interface JsonObject {
   [key: string]: JsonValue;
 }
 
-export type BuildAutonomyMode = 'assist' | 'plan-review' | 'autonomous-draft';
+export type BuildAutonomyMode = "assist" | "plan-review" | "autonomous-draft";
 export type BuildRunStatus =
-  | 'planning'
-  | 'drafting'
-  | 'revising'
-  | 'paused'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+  | "planning"
+  | "drafting"
+  | "revising"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled";
 export type BuildTaskStatus =
-  | 'blocked'
-  | 'ready'
-  | 'running'
-  | 'review'
-  | 'done'
-  | 'failed'
-  | 'cancelled';
+  | "blocked"
+  | "ready"
+  | "running"
+  | "review"
+  | "done"
+  | "failed"
+  | "cancelled";
 export type StoryArtifactType =
-  | 'story-brief'
-  | 'narrative-contract'
-  | 'character-bible'
-  | 'relationship-graph'
-  | 'world-bible'
-  | 'plot-thread'
-  | 'act-architecture'
-  | 'chapter-brief'
-  | 'scene-plan'
-  | 'timeline'
-  | 'setup-payoff-map'
-  | 'research-questions'
-  | 'open-questions'
-  | 'beat'
-  | 'chapter-draft'
-  | 'revision-issue'
-  | 'finale-plan'
-  | 'export-manifest';
+  | "story-brief"
+  | "narrative-contract"
+  | "character-bible"
+  | "relationship-graph"
+  | "world-bible"
+  | "plot-thread"
+  | "act-architecture"
+  | "chapter-brief"
+  | "scene-plan"
+  | "timeline"
+  | "setup-payoff-map"
+  | "research-questions"
+  | "open-questions"
+  | "beat"
+  | "chapter-draft"
+  | "revision-issue"
+  | "finale-plan"
+  | "export-manifest";
 export type StoryArtifactStatus =
-  | 'draft'
-  | 'validated'
-  | 'accepted'
-  | 'superseded'
-  | 'invalidated';
+  | "draft"
+  | "validated"
+  | "accepted"
+  | "superseded"
+  | "invalidated";
 export type CanonFactStatus =
-  | 'proposed'
-  | 'canonical'
-  | 'disputed'
-  | 'retracted'
-  | 'invalidated';
-export type EntityStateStatus = 'proposed' | 'active' | 'superseded' | 'invalidated';
+  | "proposed"
+  | "canonical"
+  | "disputed"
+  | "retracted"
+  | "invalidated";
+export type EntityStateStatus =
+  | "proposed"
+  | "active"
+  | "superseded"
+  | "invalidated";
 export type OpenLoopKind =
-  | 'promise'
-  | 'question'
-  | 'clue'
-  | 'setup'
-  | 'mystery'
-  | 'foreshadowing'
-  | 'other';
-export type OpenLoopStatus = 'open' | 'reinforced' | 'resolved' | 'abandoned' | 'invalidated';
+  | "promise"
+  | "question"
+  | "clue"
+  | "setup"
+  | "mystery"
+  | "foreshadowing"
+  | "other";
+export type OpenLoopStatus =
+  | "open"
+  | "reinforced"
+  | "resolved"
+  | "abandoned"
+  | "invalidated";
 export type SetupPayoffStatus =
-  | 'planned'
-  | 'setup'
-  | 'reinforced'
-  | 'paid-off'
-  | 'abandoned'
-  | 'invalidated';
+  | "planned"
+  | "setup"
+  | "reinforced"
+  | "paid-off"
+  | "abandoned"
+  | "invalidated";
 export type PlotThreadKind =
-  | 'main'
-  | 'subplot'
-  | 'character-arc'
-  | 'mystery'
-  | 'romance'
-  | 'thematic'
-  | 'other';
-export type PlotThreadStatus = 'planned' | 'active' | 'resolved' | 'abandoned' | 'invalidated';
-export type BuildTraceStatus = 'started' | 'completed' | 'failed';
-export type BuildEvaluationKind = 'deterministic' | 'model' | 'human';
+  | "main"
+  | "subplot"
+  | "character-arc"
+  | "mystery"
+  | "romance"
+  | "thematic"
+  | "other";
+export type PlotThreadStatus =
+  | "planned"
+  | "active"
+  | "resolved"
+  | "abandoned"
+  | "invalidated";
+export type BuildTraceStatus = "started" | "completed" | "failed";
+export type BuildEvaluationKind = "deterministic" | "model" | "human";
 
 export interface StoryReference {
   type: string;
@@ -1902,8 +1955,13 @@ export interface ApplyBuildWritingPatchResult {
   buildRevision: number;
 }
 
-export type BuildManuscriptUnitKind = 'chapter' | 'scene';
-export type BuildManuscriptUnitStatus = 'planned' | 'drafting' | 'review' | 'accepted' | 'invalidated';
+export type BuildManuscriptUnitKind = "chapter" | "scene";
+export type BuildManuscriptUnitStatus =
+  | "planned"
+  | "drafting"
+  | "review"
+  | "accepted"
+  | "invalidated";
 
 export interface BuildManuscriptUnit {
   id: string;
@@ -1968,8 +2026,15 @@ export interface PatchBuildManuscriptUnitInput {
   lease?: BuildTaskLeaseInput;
   body?: string;
   contentPatch?:
-    | { mode: 'replace'; content: string }
-    | { mode: 'edit'; edits: Array<{ oldString: string; newString: string; replaceAll?: boolean }> };
+    | { mode: "replace"; content: string }
+    | {
+        mode: "edit";
+        edits: Array<{
+          oldString: string;
+          newString: string;
+          replaceAll?: boolean;
+        }>;
+      };
   title?: string;
   status?: BuildManuscriptUnitStatus;
   tension?: number | null;
@@ -2046,8 +2111,8 @@ export interface BuildComparison {
   semantic: BuildSemanticDiff;
 }
 
-export type BuildReviewStatus = 'open' | 'approved' | 'merged' | 'rejected';
-export type BuildReviewUnitAction = 'create' | 'update';
+export type BuildReviewStatus = "open" | "approved" | "merged" | "rejected";
+export type BuildReviewUnitAction = "create" | "update";
 
 export interface BuildReviewUnit {
   id: string;
@@ -2126,19 +2191,43 @@ export interface RegisterBuildExportInput {
   compilationId: string;
   outputs: Array<{
     projectExportId: string;
-    format: 'docx' | 'pdf' | 'epub' | 'markdown' | 'text' | 'html' | 'project-archive';
+    format:
+      | "docx"
+      | "pdf"
+      | "epub"
+      | "markdown"
+      | "text"
+      | "html"
+      | "project-archive";
     assetId: string;
     mimeType: string;
     checksum?: string | null;
   }>;
 }
 
-export type ProjectExportFormat = 'docx' | 'pdf' | 'epub' | 'markdown' | 'text' | 'html' | 'project-archive';
-export type ProjectExportPreset = 'standard-manuscript' | 'reading-copy' | 'ebook' | 'web' | 'archive';
-export type ProjectExportStatus = 'pending' | 'generating' | 'ready' | 'failed' | 'deleted';
+export type ProjectExportFormat =
+  | "docx"
+  | "pdf"
+  | "epub"
+  | "markdown"
+  | "text"
+  | "html"
+  | "project-archive";
+export type ProjectExportPreset =
+  | "standard-manuscript"
+  | "reading-copy"
+  | "ebook"
+  | "web"
+  | "archive";
+export type ProjectExportStatus =
+  | "pending"
+  | "generating"
+  | "ready"
+  | "failed"
+  | "deleted";
 export type ProjectExportTarget =
-  | { kind: 'main' }
-  | { kind: 'build'; buildRunId: string; compilationId?: string | null };
+  | { kind: "main" }
+  | { kind: "build"; buildRunId: string; compilationId?: string | null };
 
 export interface ProjectExportOptions {
   authorName?: string;
@@ -2162,7 +2251,7 @@ export interface ProjectExport {
   compilationId: string | null;
   assetId: string | null;
   regeneratedFromId: string | null;
-  target: 'main' | 'build';
+  target: "main" | "build";
   format: ProjectExportFormat;
   preset: ProjectExportPreset;
   status: ProjectExportStatus;
@@ -2185,8 +2274,17 @@ export interface RegenerateProjectExportInput {
   idempotencyKey: string;
 }
 
-export type ProjectImportFormat = 'docx' | 'markdown' | 'text' | 'html' | 'project-archive';
-export type ProjectImportStatus = 'previewed' | 'applying' | 'applied' | 'failed';
+export type ProjectImportFormat =
+  | "docx"
+  | "markdown"
+  | "text"
+  | "html"
+  | "project-archive";
+export type ProjectImportStatus =
+  | "previewed"
+  | "applying"
+  | "applied"
+  | "failed";
 
 export interface ImportPreviewScene {
   sourceId?: string | null;
@@ -2206,7 +2304,7 @@ export interface ImportPreviewChapter {
 }
 
 export interface ProjectImportConflict {
-  kind: 'chapter-number' | 'chapter-title' | 'artifact-key';
+  kind: "chapter-number" | "chapter-title" | "artifact-key";
   sourceKey: string;
   existingId: string;
   message: string;
@@ -2268,7 +2366,7 @@ export interface StoryArtifact {
   bindings?: StoryArtifactBinding[];
 }
 
-export type StoryArtifactBindingKind = 'build-unit' | 'entity' | 'ledger';
+export type StoryArtifactBindingKind = "build-unit" | "entity" | "ledger";
 
 export interface StoryArtifactBinding {
   id: string;
@@ -2325,34 +2423,44 @@ export interface CreateStoryArtifactInput {
   key: string;
   title: string;
   schemaVersion?: string;
-  status?: Extract<StoryArtifactStatus, 'draft' | 'validated' | 'accepted'>;
+  status?: Extract<StoryArtifactStatus, "draft" | "validated" | "accepted">;
   content: KnownStoryArtifactContent;
   bindings?: CreateStoryArtifactBindingInput[];
 }
 
 export type StoryArtifactBatchOperation =
-  | { op: 'create'; artifact: CreateStoryArtifactInput }
+  | { op: "create"; artifact: CreateStoryArtifactInput }
   | {
-      op: 'replace';
+      op: "replace";
       artifactId: string;
       expectedVersion: number;
       artifact: CreateStoryArtifactInput;
     }
   | {
-      op: 'set-status';
+      op: "set-status";
       artifactId: string;
       expectedVersion: number;
-      status: Extract<StoryArtifactStatus, 'draft' | 'validated' | 'accepted'>;
+      status: Extract<StoryArtifactStatus, "draft" | "validated" | "accepted">;
     }
-  | { op: 'invalidate'; artifactId: string; expectedVersion: number; reason?: string }
   | {
-      op: 'link';
+      op: "invalidate";
+      artifactId: string;
+      expectedVersion: number;
+      reason?: string;
+    }
+  | {
+      op: "link";
       fromArtifactId: string;
       toArtifactId: string;
       relationType: string;
       metadata?: JsonValue;
     }
-  | { op: 'unlink'; fromArtifactId: string; toArtifactId: string; relationType: string };
+  | {
+      op: "unlink";
+      fromArtifactId: string;
+      toArtifactId: string;
+      relationType: string;
+    };
 
 export interface ApplyStoryArtifactBatchInput {
   idempotencyKey: string;
@@ -2527,46 +2635,128 @@ export interface PlotThread {
 
 export type UpsertCanonFactInput = Omit<
   CanonFact,
-  'id' | 'projectId' | 'buildRunId' | 'sourceTaskId' | 'sourceUnitId' | 'supersedesFactId' | 'version' | 'isCurrent' | 'validFromOrder' | 'validToOrder' | 'invalidatedAt' | 'createdAt' | 'updatedAt'
-> & { sourceUnitId?: string | null; validFromOrder?: number | null; validToOrder?: number | null };
+  | "id"
+  | "projectId"
+  | "buildRunId"
+  | "sourceTaskId"
+  | "sourceUnitId"
+  | "supersedesFactId"
+  | "version"
+  | "isCurrent"
+  | "validFromOrder"
+  | "validToOrder"
+  | "invalidatedAt"
+  | "createdAt"
+  | "updatedAt"
+> & {
+  sourceUnitId?: string | null;
+  validFromOrder?: number | null;
+  validToOrder?: number | null;
+};
 export type UpsertEntityStateInput = Omit<
   EntityState,
-  'id' | 'projectId' | 'buildRunId' | 'sourceTaskId' | 'sourceUnitId' | 'supersedesStateId' | 'version' | 'isCurrent' | 'validFromOrder' | 'validToOrder' | 'invalidatedAt' | 'createdAt' | 'updatedAt'
-> & { sourceUnitId?: string | null; validFromOrder?: number | null; validToOrder?: number | null };
+  | "id"
+  | "projectId"
+  | "buildRunId"
+  | "sourceTaskId"
+  | "sourceUnitId"
+  | "supersedesStateId"
+  | "version"
+  | "isCurrent"
+  | "validFromOrder"
+  | "validToOrder"
+  | "invalidatedAt"
+  | "createdAt"
+  | "updatedAt"
+> & {
+  sourceUnitId?: string | null;
+  validFromOrder?: number | null;
+  validToOrder?: number | null;
+};
 export type UpsertTimelineEventInput = Omit<
   TimelineEvent,
-  'id' | 'projectId' | 'buildRunId' | 'sourceTaskId' | 'sourceUnitId' | 'supersedesEventId' | 'version' | 'isCurrent' | 'invalidatedAt' | 'createdAt' | 'updatedAt'
+  | "id"
+  | "projectId"
+  | "buildRunId"
+  | "sourceTaskId"
+  | "sourceUnitId"
+  | "supersedesEventId"
+  | "version"
+  | "isCurrent"
+  | "invalidatedAt"
+  | "createdAt"
+  | "updatedAt"
 > & { sourceUnitId?: string | null };
 export type UpsertOpenLoopInput = Omit<
   OpenLoop,
-  'id' | 'projectId' | 'buildRunId' | 'sourceTaskId' | 'sourceUnitId' | 'supersedesLoopId' | 'version' | 'isCurrent' | 'invalidatedAt' | 'createdAt' | 'updatedAt'
+  | "id"
+  | "projectId"
+  | "buildRunId"
+  | "sourceTaskId"
+  | "sourceUnitId"
+  | "supersedesLoopId"
+  | "version"
+  | "isCurrent"
+  | "invalidatedAt"
+  | "createdAt"
+  | "updatedAt"
 > & { sourceUnitId?: string | null };
 export type UpsertSetupPayoffLinkInput = Omit<
   SetupPayoffLink,
-  'id' | 'projectId' | 'buildRunId' | 'sourceTaskId' | 'sourceUnitId' | 'supersedesLinkId' | 'version' | 'isCurrent' | 'invalidatedAt' | 'createdAt' | 'updatedAt'
+  | "id"
+  | "projectId"
+  | "buildRunId"
+  | "sourceTaskId"
+  | "sourceUnitId"
+  | "supersedesLinkId"
+  | "version"
+  | "isCurrent"
+  | "invalidatedAt"
+  | "createdAt"
+  | "updatedAt"
 > & { sourceUnitId?: string | null };
 export type UpsertPlotThreadInput = Omit<
   PlotThread,
-  'id' | 'projectId' | 'buildRunId' | 'sourceTaskId' | 'sourceUnitId' | 'supersedesThreadId' | 'version' | 'isCurrent' | 'invalidatedAt' | 'createdAt' | 'updatedAt'
+  | "id"
+  | "projectId"
+  | "buildRunId"
+  | "sourceTaskId"
+  | "sourceUnitId"
+  | "supersedesThreadId"
+  | "version"
+  | "isCurrent"
+  | "invalidatedAt"
+  | "createdAt"
+  | "updatedAt"
 > & { sourceUnitId?: string | null };
 
 export type StoryStateEntityKind =
-  | 'canon-fact'
-  | 'entity-state'
-  | 'timeline-event'
-  | 'open-loop'
-  | 'setup-payoff'
-  | 'plot-thread';
+  | "canon-fact"
+  | "entity-state"
+  | "timeline-event"
+  | "open-loop"
+  | "setup-payoff"
+  | "plot-thread";
 
 export type StoryStateBatchOperation =
-  | { op: 'upsert-canon-fact'; value: UpsertCanonFactInput }
-  | { op: 'upsert-entity-state'; value: UpsertEntityStateInput }
-  | { op: 'upsert-timeline-event'; value: UpsertTimelineEventInput }
-  | { op: 'upsert-open-loop'; value: UpsertOpenLoopInput }
-  | { op: 'upsert-setup-payoff'; value: UpsertSetupPayoffLinkInput }
-  | { op: 'upsert-plot-thread'; value: UpsertPlotThreadInput }
-  | { op: 'invalidate'; entityKind: StoryStateEntityKind; key: string; reason?: string }
-  | { op: 'restore'; entityKind: StoryStateEntityKind; key: string; version: number };
+  | { op: "upsert-canon-fact"; value: UpsertCanonFactInput }
+  | { op: "upsert-entity-state"; value: UpsertEntityStateInput }
+  | { op: "upsert-timeline-event"; value: UpsertTimelineEventInput }
+  | { op: "upsert-open-loop"; value: UpsertOpenLoopInput }
+  | { op: "upsert-setup-payoff"; value: UpsertSetupPayoffLinkInput }
+  | { op: "upsert-plot-thread"; value: UpsertPlotThreadInput }
+  | {
+      op: "invalidate";
+      entityKind: StoryStateEntityKind;
+      key: string;
+      reason?: string;
+    }
+  | {
+      op: "restore";
+      entityKind: StoryStateEntityKind;
+      key: string;
+      version: number;
+    };
 
 export interface ApplyStoryStateBatchInput {
   idempotencyKey: string;
@@ -2601,7 +2791,14 @@ export interface StoryStateDelta extends StoryStateSnapshot {
 export interface StoryStateHistoryResult {
   entityKind: StoryStateEntityKind;
   key: string;
-  versions: Array<CanonFact | EntityState | TimelineEvent | OpenLoop | SetupPayoffLink | PlotThread>;
+  versions: Array<
+    | CanonFact
+    | EntityState
+    | TimelineEvent
+    | OpenLoop
+    | SetupPayoffLink
+    | PlotThread
+  >;
 }
 
 export interface TemporalStoryStateQuery {
@@ -2670,7 +2867,10 @@ export interface BuildTrace {
   completedAt: string | null;
 }
 
-export type AppendBuildTraceInput = Omit<BuildTrace, 'id' | 'projectId' | 'buildRunId'>;
+export type AppendBuildTraceInput = Omit<
+  BuildTrace,
+  "id" | "projectId" | "buildRunId"
+>;
 
 export interface StartBuildTraceInput {
   taskId: string;
@@ -2692,7 +2892,7 @@ export interface StartBuildTraceInput {
 export interface FinishBuildTraceInput {
   lease: BuildTaskLeaseInput;
   requestHash: string;
-  status: Extract<BuildTraceStatus, 'completed' | 'failed'>;
+  status: Extract<BuildTraceStatus, "completed" | "failed">;
   provider?: string | null;
   model?: string | null;
   modelParameters?: JsonValue | null;
@@ -2731,7 +2931,7 @@ export interface BuildEvaluationResult {
 
 export type AppendBuildEvaluationInput = Omit<
   BuildEvaluationResult,
-  'id' | 'projectId' | 'buildRunId' | 'createdAt'
+  "id" | "projectId" | "buildRunId" | "createdAt"
 >;
 
 export interface BuildObservability {
@@ -2749,11 +2949,24 @@ export interface GetBuildObservabilityInput {
   offset?: number;
 }
 
-export type StorySearchKind = StoryStateEntityKind | 'artifact' | 'build-unit' | 'chapter' | 'scene' | 'character' | 'location' | 'doc' | 'obstacle' | 'act' | 'story-structure' | 'relationship' | 'asset';
+export type StorySearchKind =
+  | StoryStateEntityKind
+  | "artifact"
+  | "build-unit"
+  | "chapter"
+  | "scene"
+  | "character"
+  | "location"
+  | "doc"
+  | "obstacle"
+  | "act"
+  | "story-structure"
+  | "relationship"
+  | "asset";
 
 export interface SearchStoryInput {
   query: string;
-  strategy?: 'hybrid' | 'fts' | 'exact' | 'regex' | 'semantic';
+  strategy?: "hybrid" | "fts" | "exact" | "regex" | "semantic";
   kinds?: StorySearchKind[];
   artifactTypes?: StoryArtifactType[];
   statuses?: string[];
@@ -2778,7 +2991,7 @@ export interface StorySearchHit {
 
 export interface StorySearchResult {
   query: string;
-  strategyUsed: Exclude<NonNullable<SearchStoryInput['strategy']>, 'semantic'>;
+  strategyUsed: Exclude<NonNullable<SearchStoryInput["strategy"]>, "semantic">;
   warnings: string[];
   hits: StorySearchHit[];
   total: number;
@@ -2804,9 +3017,13 @@ export interface FindStoryReferencesResult {
   nextOffset: number | null;
 }
 
-export type RenameSymbolTargetType = 'character' | 'location';
-export type RenameSymbolScope = 'main' | 'build' | 'all';
-export type RenameSymbolOccurrenceKind = 'canonical-writing' | 'build-writing' | 'artifact' | 'structured-label';
+export type RenameSymbolTargetType = "character" | "location";
+export type RenameSymbolScope = "main" | "build" | "all";
+export type RenameSymbolOccurrenceKind =
+  | "canonical-writing"
+  | "build-writing"
+  | "artifact"
+  | "structured-label";
 
 export interface PreviewRenameSymbolInput {
   targetType: RenameSymbolTargetType;
@@ -2886,13 +3103,25 @@ export interface ApplyRenameSymbolResult {
   scope: RenameSymbolScope;
   buildRunId: string | null;
   appliedOccurrences: number;
-  updatedBranches: Array<{ writingId: string; branchId: string; previousVersionId: string; newVersionId: string }>;
+  updatedBranches: Array<{
+    writingId: string;
+    branchId: string;
+    previousVersionId: string;
+    newVersionId: string;
+  }>;
   updatedArtifactIds: string[];
   updatedUnitIds: string[];
   appliedAt: string;
 }
 
-export type NamedSnapshotScope = 'project' | 'chapter' | 'scene' | 'project-doc' | 'writing' | 'build-checkpoint' | 'build-compilation';
+export type NamedSnapshotScope =
+  | "project"
+  | "chapter"
+  | "scene"
+  | "project-doc"
+  | "writing"
+  | "build-checkpoint"
+  | "build-compilation";
 
 export interface SnapshotWritingHead {
   entityType: string;
@@ -2940,62 +3169,166 @@ export interface NamedSnapshot {
   deletedAt: string | null;
 }
 
-export interface SnapshotListFilter { scope?: NamedSnapshotScope; includeDeleted?: boolean }
-export interface CompareNamedSnapshotsInput { leftSnapshotId: string; rightSnapshotId?: string | null }
-export interface SnapshotLineChange { kind: 'equal' | 'added' | 'removed'; leftStart: number; rightStart: number; lines: string[] }
-export interface SnapshotProseDiff { writingId: string; entityType: string; entityId: string; leftVersionId: string | null; rightVersionId: string | null; leftWordCount: number; rightWordCount: number; wordDelta: number; changes: SnapshotLineChange[] }
-export interface SnapshotSemanticChange { path: string; before: JsonValue | null; after: JsonValue | null }
-export interface NamedSnapshotComparison { leftSnapshotId: string; rightSnapshotId: string | null; prose: SnapshotProseDiff[]; semantic: SnapshotSemanticChange[] }
-export interface RestoreNamedSnapshotInput { idempotencyKey: string; confirm: true; expectedHeads: Record<string, string | null>; expectedEntityRevisions?: Record<string, number> }
-export interface RestoreNamedSnapshotResult { snapshotId: string; restoredVersionIds: Record<string, string>; restoredAt: string }
-export interface BranchFromNamedSnapshotInput { idempotencyKey: string; name: string }
-export interface BranchFromNamedSnapshotResult { snapshotId: string; branches: Array<{ writingId: string; branchId: string; name: string; headVersionId: string }> }
+export interface SnapshotListFilter {
+  scope?: NamedSnapshotScope;
+  includeDeleted?: boolean;
+}
+export interface CompareNamedSnapshotsInput {
+  leftSnapshotId: string;
+  rightSnapshotId?: string | null;
+}
+export interface SnapshotLineChange {
+  kind: "equal" | "added" | "removed";
+  leftStart: number;
+  rightStart: number;
+  lines: string[];
+}
+export interface SnapshotProseDiff {
+  writingId: string;
+  entityType: string;
+  entityId: string;
+  leftVersionId: string | null;
+  rightVersionId: string | null;
+  leftWordCount: number;
+  rightWordCount: number;
+  wordDelta: number;
+  changes: SnapshotLineChange[];
+}
+export interface SnapshotSemanticChange {
+  path: string;
+  before: JsonValue | null;
+  after: JsonValue | null;
+}
+export interface NamedSnapshotComparison {
+  leftSnapshotId: string;
+  rightSnapshotId: string | null;
+  prose: SnapshotProseDiff[];
+  semantic: SnapshotSemanticChange[];
+}
+export interface RestoreNamedSnapshotInput {
+  idempotencyKey: string;
+  confirm: true;
+  expectedHeads: Record<string, string | null>;
+  expectedEntityRevisions?: Record<string, number>;
+}
+export interface RestoreNamedSnapshotResult {
+  snapshotId: string;
+  restoredVersionIds: Record<string, string>;
+  restoredAt: string;
+}
+export interface BranchFromNamedSnapshotInput {
+  idempotencyKey: string;
+  name: string;
+}
+export interface BranchFromNamedSnapshotResult {
+  snapshotId: string;
+  branches: Array<{
+    writingId: string;
+    branchId: string;
+    name: string;
+    headVersionId: string;
+  }>;
+}
 
-export type WritingAnnotationKind = 'comment' | 'note' | 'suggestion';
-export type WritingAnnotationStatus = 'open' | 'resolved' | 'accepted' | 'rejected';
-export interface WritingAnnotationReply { id: string; threadId: string; authorId: string | null; body: string; createdAt: string }
+export type WritingAnnotationKind = "comment" | "note" | "suggestion";
+export type WritingAnnotationStatus =
+  | "open"
+  | "resolved"
+  | "accepted"
+  | "rejected";
+export interface WritingAnnotationReply {
+  id: string;
+  threadId: string;
+  authorId: string | null;
+  body: string;
+  createdAt: string;
+}
 export interface WritingAnnotationThread {
-  id: string; projectId: string; writingId: string; branchId: string; anchorVersionId: string;
-  authorId: string | null; resolvedById: string | null; acceptedVersionId: string | null;
-  chapterId: string | null; sceneId: string | null; kind: WritingAnnotationKind; status: WritingAnnotationStatus;
-  revision: number; start: number; end: number; quote: string; anchorHash: string; body: string;
-  suggestedReplacement: string | null; resolvedAt: string | null; createdAt: string; updatedAt: string;
+  id: string;
+  projectId: string;
+  writingId: string;
+  branchId: string;
+  anchorVersionId: string;
+  authorId: string | null;
+  resolvedById: string | null;
+  acceptedVersionId: string | null;
+  chapterId: string | null;
+  sceneId: string | null;
+  kind: WritingAnnotationKind;
+  status: WritingAnnotationStatus;
+  revision: number;
+  start: number;
+  end: number;
+  quote: string;
+  anchorHash: string;
+  body: string;
+  suggestedReplacement: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
   replies: WritingAnnotationReply[];
 }
-export interface ListWritingAnnotationsInput { writingId?: string; chapterId?: string; sceneId?: string; status?: WritingAnnotationStatus; kind?: WritingAnnotationKind }
-export interface CreateWritingAnnotationInput {
-  idempotencyKey: string; writingId: string; branchId: string; versionId: string; chapterId?: string | null; sceneId?: string | null;
-  kind: WritingAnnotationKind; start: number; end: number; quote: string; anchorHash?: string; body: string; suggestedReplacement?: string | null;
+export interface ListWritingAnnotationsInput {
+  writingId?: string;
+  chapterId?: string;
+  sceneId?: string;
+  status?: WritingAnnotationStatus;
+  kind?: WritingAnnotationKind;
 }
-export interface ReplyToWritingAnnotationInput { idempotencyKey: string; body: string }
-export interface UpdateWritingAnnotationStatusInput { expectedRevision: number }
-export interface AcceptWritingSuggestionInput { idempotencyKey: string; confirm: true; expectedRevision: number; expectedHeadVersionId: string }
+export interface CreateWritingAnnotationInput {
+  idempotencyKey: string;
+  writingId: string;
+  branchId: string;
+  versionId: string;
+  chapterId?: string | null;
+  sceneId?: string | null;
+  kind: WritingAnnotationKind;
+  start: number;
+  end: number;
+  quote: string;
+  anchorHash?: string;
+  body: string;
+  suggestedReplacement?: string | null;
+}
+export interface ReplyToWritingAnnotationInput {
+  idempotencyKey: string;
+  body: string;
+}
+export interface UpdateWritingAnnotationStatusInput {
+  expectedRevision: number;
+}
+export interface AcceptWritingSuggestionInput {
+  idempotencyKey: string;
+  confirm: true;
+  expectedRevision: number;
+  expectedHeadVersionId: string;
+}
 
 export interface StoryReferenceHit extends StorySearchHit {
   path: string;
   relationship: string;
 }
 
-export type StoryDiagnosticSeverity = 'info' | 'warning' | 'error';
+export type StoryDiagnosticSeverity = "info" | "warning" | "error";
 export type StoryDiagnosticCategory =
-  | 'schema'
-  | 'cross-link'
-  | 'continuity'
-  | 'chronology'
-  | 'knowledge'
-  | 'location'
-  | 'world-rule'
-  | 'setup-payoff'
-  | 'plot'
-  | 'workflow'
-  | 'character'
-  | 'pov'
-  | 'pacing'
-  | 'repetition'
-  | 'dialogue'
-  | 'style'
-  | 'metadata'
-  | 'publishing';
+  | "schema"
+  | "cross-link"
+  | "continuity"
+  | "chronology"
+  | "knowledge"
+  | "location"
+  | "world-rule"
+  | "setup-payoff"
+  | "plot"
+  | "workflow"
+  | "character"
+  | "pov"
+  | "pacing"
+  | "repetition"
+  | "dialogue"
+  | "style"
+  | "metadata"
+  | "publishing";
 
 export interface StoryDiagnostic {
   id: string;

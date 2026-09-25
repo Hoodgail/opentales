@@ -1,1 +1,40 @@
-{"schemaVersion":1,"name":"novel-research","version":"1.0.0","description":"Define bounded, source-aware research questions and record their story impact.","kind":"research","inputs":["story-brief","world-bible"],"outputs":["research-questions"],"runtimeRoles":["researcher","creator"],"allowedTools":["searchStory","findReferences","queryCanon","applyArtifactBatch","reportTaskResult"],"maxIterations":2,"context":{"maxTokens":16000,"sections":["story-brief","active-task","world","canon"]},"rubric":"research-questions-v1","procedure":["Identify only factual uncertainties that can materially alter story choices.","Declare required evidence, acceptable confidence, affected artifacts, and a bounded answer format.","Persist questions and sourced findings as data; never promote unverified material to canon."],"references":[]}
+{
+  "schemaVersion": 1,
+  "name": "novel-research",
+  "version": "1.1.0",
+  "description": "Define bounded, source-aware research questions and record their story impact.",
+  "kind": "research",
+  "inputs": ["story-brief", "world-bible"],
+  "outputs": ["research-questions"],
+  "runtimeRoles": ["researcher", "creator"],
+  "allowedTools": [
+    "listProjectFiles",
+    "listProjectDocs",
+    "readProjectDoc",
+    "grepProject",
+    "listChapters",
+    "readChapter",
+    "listScenes",
+    "readScene",
+    "listCharacters",
+    "readCharacter",
+    "listLocations",
+    "readLocation",
+    "readStoryStructure",
+    "createProjectDoc",
+    "updateProjectDoc"
+  ],
+  "maxIterations": 2,
+  "context": {
+    "maxTokens": 16000,
+    "sections": ["story-brief", "active-task", "world", "canon"]
+  },
+  "rubric": "research-questions-v1",
+  "procedure": [
+    "Identify only factual uncertainties that can materially alter story choices.",
+    "Declare required evidence, acceptable confidence, affected project docs, and a bounded answer format.",
+    "Persist questions and sourced findings as data; never promote unverified material to canon.",
+    "Choose the next step from the author's goal and current project state; keep progress in project docs and verify persisted tool results."
+  ],
+  "references": []
+}

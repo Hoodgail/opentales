@@ -1,4 +1,4 @@
-import { Prisma, type PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from "@prisma/client";
 import type {
   BuildObservability,
   FindStoryReferencesInput,
@@ -8,14 +8,14 @@ import type {
   SearchStoryInput,
   StoryReferenceHit,
   StorySearchHit,
-  StoryStateSnapshot
-  ,StoryStateDelta
-  ,StoryStateEntityKind
-  ,StoryStateHistoryResult
-  ,TemporalStoryStateQuery
-  ,TemporalStoryStateResult
-} from '@opentales/sdk';
-import { HttpError } from '../http/HttpError.js';
+  StoryStateSnapshot,
+  StoryStateDelta,
+  StoryStateEntityKind,
+  StoryStateHistoryResult,
+  TemporalStoryStateQuery,
+  TemporalStoryStateResult,
+} from "@opentales/sdk";
+import { HttpError } from "../http/HttpError.js";
 import {
   toBuildCheckpoint,
   toBuildDirective,
@@ -29,8 +29,8 @@ import {
   toPrismaArtifactType,
   toSetupPayoff,
   toStoryArtifact,
-  toTimelineEvent
-} from '../useCases/novelBuild/novelBuildMapper.js';
+  toTimelineEvent,
+} from "../useCases/storyState/storyStateMapper.js";
 
 interface RawSearchRow {
   kind: string;
@@ -46,7 +46,11 @@ interface RawSearchRow {
   total: bigint;
 }
 
-interface RawReferenceRow extends Omit<RawSearchRow, 'score' | 'total' | 'absolute_start' | 'line_start'> {
+interface RawReferenceRow
+  extends Omit<
+    RawSearchRow,
+    "score" | "total" | "absolute_start" | "line_start"
+  > {
   path: string;
   relationship: string;
   total: bigint;
@@ -54,19 +58,52 @@ interface RawReferenceRow extends Omit<RawSearchRow, 'score' | 'total' | 'absolu
   line_start: number | null;
 }
 
-interface RawDeltaRow { kind: string; id: string; updated_at: Date; total: bigint }
+interface RawDeltaRow {
+  kind: string;
+  id: string;
+  updated_at: Date;
+  total: bigint;
+}
 
 export class StoryStateRepository {
   constructor(readonly prisma: PrismaClient) {}
 
-  async snapshot(projectId: string, buildRunId: string): Promise<StoryStateSnapshot> {
-    const [canonFacts, entityStates, timelineEvents, openLoops, setupPayoffs, plotThreads] = await Promise.all([
-      this.prisma.canonFact.findMany({ where: { projectId, buildRunId, isCurrent: true, invalidatedAt: null }, orderBy: { createdAt: 'asc' } }),
-      this.prisma.entityState.findMany({ where: { projectId, buildRunId, isCurrent: true, invalidatedAt: null }, orderBy: [{ storyOrder: 'asc' }, { createdAt: 'asc' }] }),
-      this.prisma.timelineEvent.findMany({ where: { projectId, buildRunId, isCurrent: true, invalidatedAt: null }, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] }),
-      this.prisma.openLoop.findMany({ where: { projectId, buildRunId, isCurrent: true, invalidatedAt: null }, orderBy: { createdAt: 'asc' } }),
-      this.prisma.setupPayoffLink.findMany({ where: { projectId, buildRunId, isCurrent: true, invalidatedAt: null }, orderBy: { createdAt: 'asc' } }),
-      this.prisma.plotThread.findMany({ where: { projectId, buildRunId, isCurrent: true, invalidatedAt: null }, orderBy: { createdAt: 'asc' } })
+  async snapshot(
+    projectId: string,
+    buildRunId: string,
+  ): Promise<StoryStateSnapshot> {
+    const [
+      canonFacts,
+      entityStates,
+      timelineEvents,
+      openLoops,
+      setupPayoffs,
+      plotThreads,
+    ] = await Promise.all([
+      this.prisma.canonFact.findMany({
+        where: { projectId, buildRunId, isCurrent: true, invalidatedAt: null },
+        orderBy: { createdAt: "asc" },
+      }),
+      this.prisma.entityState.findMany({
+        where: { projectId, buildRunId, isCurrent: true, invalidatedAt: null },
+        orderBy: [{ storyOrder: "asc" }, { createdAt: "asc" }],
+      }),
+      this.prisma.timelineEvent.findMany({
+        where: { projectId, buildRunId, isCurrent: true, invalidatedAt: null },
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      }),
+      this.prisma.openLoop.findMany({
+        where: { projectId, buildRunId, isCurrent: true, invalidatedAt: null },
+        orderBy: { createdAt: "asc" },
+      }),
+      this.prisma.setupPayoffLink.findMany({
+        where: { projectId, buildRunId, isCurrent: true, invalidatedAt: null },
+        orderBy: { createdAt: "asc" },
+      }),
+      this.prisma.plotThread.findMany({
+        where: { projectId, buildRunId, isCurrent: true, invalidatedAt: null },
+        orderBy: { createdAt: "asc" },
+      }),
     ]);
     return {
       projectId,
@@ -76,20 +113,23 @@ export class StoryStateRepository {
       timelineEvents: timelineEvents.map(toTimelineEvent),
       openLoops: openLoops.map(toOpenLoop),
       setupPayoffs: setupPayoffs.map(toSetupPayoff),
-      plotThreads: plotThreads.map(toPlotThread)
+      plotThreads: plotThreads.map(toPlotThread),
     };
   }
 
   async delta(
     projectId: string,
     buildRunId: string,
-    input: { sinceUpdatedAt?: string; limit?: number; offset?: number }
+    input: { sinceUpdatedAt?: string; limit?: number; offset?: number },
   ): Promise<StoryStateDelta> {
     const limit = clamp(input.limit, 1, 500, 100);
     const offset = clamp(input.offset, 0, 1_000_000, 0);
     const since = input.sinceUpdatedAt ? new Date(input.sinceUpdatedAt) : null;
-    if (since && Number.isNaN(since.valueOf())) throw new HttpError(400, 'sinceUpdatedAt must be an ISO date');
-    const sinceFilter = since ? Prisma.sql`AND "updatedAt" > ${since}` : Prisma.empty;
+    if (since && Number.isNaN(since.valueOf()))
+      throw new HttpError(400, "sinceUpdatedAt must be an ISO date");
+    const sinceFilter = since
+      ? Prisma.sql`AND "updatedAt" > ${since}`
+      : Prisma.empty;
     const page = await this.prisma.$queryRaw<RawDeltaRow[]>(Prisma.sql`
       WITH changed AS (
         SELECT 'canon-fact'::text kind, id, "updatedAt" updated_at FROM "CanonFact" WHERE "projectId"=${projectId} AND "buildRunId"=${buildRunId} ${sinceFilter}
@@ -102,17 +142,52 @@ export class StoryStateRepository {
       SELECT kind, id, updated_at, count(*) OVER() total
       FROM changed ORDER BY updated_at ASC, kind ASC, id ASC LIMIT ${limit} OFFSET ${offset}
     `);
-    const ids = (kind: string) => page.filter((row) => row.kind === kind).map((row) => row.id);
-    const [canonFacts, entityStates, timelineEvents, openLoops, setupPayoffs, plotThreads] = await Promise.all([
-      ids('canon-fact').length ? this.prisma.canonFact.findMany({ where: { id: { in: ids('canon-fact') } } }) : [],
-      ids('entity-state').length ? this.prisma.entityState.findMany({ where: { id: { in: ids('entity-state') } } }) : [],
-      ids('timeline-event').length ? this.prisma.timelineEvent.findMany({ where: { id: { in: ids('timeline-event') } } }) : [],
-      ids('open-loop').length ? this.prisma.openLoop.findMany({ where: { id: { in: ids('open-loop') } } }) : [],
-      ids('setup-payoff').length ? this.prisma.setupPayoffLink.findMany({ where: { id: { in: ids('setup-payoff') } } }) : [],
-      ids('plot-thread').length ? this.prisma.plotThread.findMany({ where: { id: { in: ids('plot-thread') } } }) : []
+    const ids = (kind: string) =>
+      page.filter((row) => row.kind === kind).map((row) => row.id);
+    const [
+      canonFacts,
+      entityStates,
+      timelineEvents,
+      openLoops,
+      setupPayoffs,
+      plotThreads,
+    ] = await Promise.all([
+      ids("canon-fact").length
+        ? this.prisma.canonFact.findMany({
+            where: { id: { in: ids("canon-fact") } },
+          })
+        : [],
+      ids("entity-state").length
+        ? this.prisma.entityState.findMany({
+            where: { id: { in: ids("entity-state") } },
+          })
+        : [],
+      ids("timeline-event").length
+        ? this.prisma.timelineEvent.findMany({
+            where: { id: { in: ids("timeline-event") } },
+          })
+        : [],
+      ids("open-loop").length
+        ? this.prisma.openLoop.findMany({
+            where: { id: { in: ids("open-loop") } },
+          })
+        : [],
+      ids("setup-payoff").length
+        ? this.prisma.setupPayoffLink.findMany({
+            where: { id: { in: ids("setup-payoff") } },
+          })
+        : [],
+      ids("plot-thread").length
+        ? this.prisma.plotThread.findMany({
+            where: { id: { in: ids("plot-thread") } },
+          })
+        : [],
     ]);
     const order = new Map(page.map((row, index) => [row.id, index]));
-    const byPage = <T extends { id: string }>(values: T[]) => values.sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0));
+    const byPage = <T extends { id: string }>(values: T[]) =>
+      values.sort(
+        (left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0),
+      );
     const total = page[0] ? Number(page[0].total) : 0;
     return {
       projectId,
@@ -125,7 +200,7 @@ export class StoryStateRepository {
       timelineEvents: byPage(timelineEvents).map(toTimelineEvent),
       openLoops: byPage(openLoops).map(toOpenLoop),
       setupPayoffs: byPage(setupPayoffs).map(toSetupPayoff),
-      plotThreads: byPage(plotThreads).map(toPlotThread)
+      plotThreads: byPage(plotThreads).map(toPlotThread),
     };
   }
 
@@ -133,51 +208,131 @@ export class StoryStateRepository {
     projectId: string,
     buildRunId: string,
     entityKind: StoryStateEntityKind,
-    key: string
+    key: string,
   ): Promise<StoryStateHistoryResult> {
     const normalized = key.trim();
-    if (!normalized) throw new HttpError(400, 'History key is required');
-    const versions = entityKind === 'canon-fact' ? (await this.prisma.canonFact.findMany({ where: { projectId, buildRunId, key: normalized }, orderBy: { version: 'asc' } })).map(toCanonFact)
-      : entityKind === 'entity-state' ? (await this.prisma.entityState.findMany({ where: { projectId, buildRunId, key: normalized }, orderBy: { version: 'asc' } })).map(toEntityState)
-      : entityKind === 'timeline-event' ? (await this.prisma.timelineEvent.findMany({ where: { projectId, buildRunId, key: normalized }, orderBy: { version: 'asc' } })).map(toTimelineEvent)
-      : entityKind === 'open-loop' ? (await this.prisma.openLoop.findMany({ where: { projectId, buildRunId, key: normalized }, orderBy: { version: 'asc' } })).map(toOpenLoop)
-      : entityKind === 'setup-payoff' ? (await this.prisma.setupPayoffLink.findMany({ where: { projectId, buildRunId, key: normalized }, orderBy: { version: 'asc' } })).map(toSetupPayoff)
-      : (await this.prisma.plotThread.findMany({ where: { projectId, buildRunId, key: normalized }, orderBy: { version: 'asc' } })).map(toPlotThread);
-    if (!versions.length) throw new HttpError(404, 'Story-state history not found');
+    if (!normalized) throw new HttpError(400, "History key is required");
+    const versions =
+      entityKind === "canon-fact"
+        ? (
+            await this.prisma.canonFact.findMany({
+              where: { projectId, buildRunId, key: normalized },
+              orderBy: { version: "asc" },
+            })
+          ).map(toCanonFact)
+        : entityKind === "entity-state"
+          ? (
+              await this.prisma.entityState.findMany({
+                where: { projectId, buildRunId, key: normalized },
+                orderBy: { version: "asc" },
+              })
+            ).map(toEntityState)
+          : entityKind === "timeline-event"
+            ? (
+                await this.prisma.timelineEvent.findMany({
+                  where: { projectId, buildRunId, key: normalized },
+                  orderBy: { version: "asc" },
+                })
+              ).map(toTimelineEvent)
+            : entityKind === "open-loop"
+              ? (
+                  await this.prisma.openLoop.findMany({
+                    where: { projectId, buildRunId, key: normalized },
+                    orderBy: { version: "asc" },
+                  })
+                ).map(toOpenLoop)
+              : entityKind === "setup-payoff"
+                ? (
+                    await this.prisma.setupPayoffLink.findMany({
+                      where: { projectId, buildRunId, key: normalized },
+                      orderBy: { version: "asc" },
+                    })
+                  ).map(toSetupPayoff)
+                : (
+                    await this.prisma.plotThread.findMany({
+                      where: { projectId, buildRunId, key: normalized },
+                      orderBy: { version: "asc" },
+                    })
+                  ).map(toPlotThread);
+    if (!versions.length)
+      throw new HttpError(404, "Story-state history not found");
     return { entityKind, key: normalized, versions };
   }
 
   async temporal(
     projectId: string,
     buildRunId: string,
-    input: TemporalStoryStateQuery
+    input: TemporalStoryStateQuery,
   ): Promise<TemporalStoryStateResult> {
     const limit = clamp(input.limit, 1, 500, 100);
     const offset = clamp(input.offset, 0, 1_000_000, 0);
-    const storyOrder = input.storyOrder ?? await this.resolveStoryOrder(projectId, buildRunId, input.sceneId);
-    const interval = storyOrder === null ? {} : {
-      AND: [
-        { OR: [{ validFromOrder: null }, { validFromOrder: { lte: storyOrder } }] },
-        { OR: [{ validToOrder: null }, { validToOrder: { gte: storyOrder } }] }
-      ]
-    };
+    const storyOrder =
+      input.storyOrder ??
+      (await this.resolveStoryOrder(projectId, buildRunId, input.sceneId));
+    const interval =
+      storyOrder === null
+        ? {}
+        : {
+            AND: [
+              {
+                OR: [
+                  { validFromOrder: null },
+                  { validFromOrder: { lte: storyOrder } },
+                ],
+              },
+              {
+                OR: [
+                  { validToOrder: null },
+                  { validToOrder: { gte: storyOrder } },
+                ],
+              },
+            ],
+          };
     const [canonFacts, states, timelineRows] = await Promise.all([
       this.prisma.canonFact.findMany({
-        where: { projectId, buildRunId, isCurrent: true, invalidatedAt: null, ...interval,
-          ...(input.entityType ? { subjectType: input.entityType } : {}), ...(input.entityId ? { subjectId: input.entityId } : {}),
-          ...(input.predicate ? { predicate: input.predicate } : {}) },
-        orderBy: [{ validFromOrder: 'asc' }, { version: 'desc' }]
+        where: {
+          projectId,
+          buildRunId,
+          isCurrent: true,
+          invalidatedAt: null,
+          ...interval,
+          ...(input.entityType ? { subjectType: input.entityType } : {}),
+          ...(input.entityId ? { subjectId: input.entityId } : {}),
+          ...(input.predicate ? { predicate: input.predicate } : {}),
+        },
+        orderBy: [{ validFromOrder: "asc" }, { version: "desc" }],
       }),
       this.prisma.entityState.findMany({
-        where: { projectId, buildRunId, isCurrent: true, invalidatedAt: null, ...interval,
-          ...(input.entityType ? { entityType: input.entityType } : {}), ...(input.entityId ? { entityId: input.entityId } : {}),
-          ...(input.stateKey ? { stateKey: input.stateKey } : {}) },
-        orderBy: [{ validFromOrder: 'asc' }, { storyOrder: 'asc' }, { version: 'desc' }]
+        where: {
+          projectId,
+          buildRunId,
+          isCurrent: true,
+          invalidatedAt: null,
+          ...interval,
+          ...(input.entityType ? { entityType: input.entityType } : {}),
+          ...(input.entityId ? { entityId: input.entityId } : {}),
+          ...(input.stateKey ? { stateKey: input.stateKey } : {}),
+        },
+        orderBy: [
+          { validFromOrder: "asc" },
+          { storyOrder: "asc" },
+          { version: "desc" },
+        ],
       }),
-      this.temporalTimelineIds(projectId, buildRunId, storyOrder, input.participantId, limit, offset)
+      this.temporalTimelineIds(
+        projectId,
+        buildRunId,
+        storyOrder,
+        input.participantId,
+        limit,
+        offset,
+      ),
     ]);
     const timelineEvents = timelineRows.ids.length
-      ? await this.prisma.timelineEvent.findMany({ where: { id: { in: timelineRows.ids } }, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] })
+      ? await this.prisma.timelineEvent.findMany({
+          where: { id: { in: timelineRows.ids } },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        })
       : [];
     return {
       storyOrder,
@@ -185,19 +340,35 @@ export class StoryStateRepository {
       entityStates: latestEntityStates(states).map(toEntityState),
       timelineEvents: timelineEvents.map(toTimelineEvent),
       totalTimelineEvents: timelineRows.total,
-      nextTimelineOffset: offset + timelineEvents.length < timelineRows.total ? offset + timelineEvents.length : null
+      nextTimelineOffset:
+        offset + timelineEvents.length < timelineRows.total
+          ? offset + timelineEvents.length
+          : null,
     };
   }
 
-  private async resolveStoryOrder(projectId: string, buildRunId: string, sceneId?: string): Promise<number | null> {
+  private async resolveStoryOrder(
+    projectId: string,
+    buildRunId: string,
+    sceneId?: string,
+  ): Promise<number | null> {
     if (!sceneId) return null;
     const unit = await this.prisma.buildManuscriptUnit.findFirst({
-      where: { projectId, buildRunId, OR: [{ id: sceneId }, { sourceSceneId: sceneId }], kind: 'SCENE' },
-      include: { parentUnit: { select: { order: true } } }
+      where: {
+        projectId,
+        buildRunId,
+        OR: [{ id: sceneId }, { sourceSceneId: sceneId }],
+        kind: "SCENE",
+      },
+      include: { parentUnit: { select: { order: true } } },
     });
     if (unit) return (unit.parentUnit?.order ?? 0) * 10_000 + unit.order;
-    const scene = await this.prisma.scene.findFirst({ where: { id: sceneId, chapter: { projectId, deletedAt: null } }, include: { chapter: { select: { number: true } } } });
-    if (!scene) throw new HttpError(404, 'Temporal scene not found in project/build');
+    const scene = await this.prisma.scene.findFirst({
+      where: { id: sceneId, chapter: { projectId, deletedAt: null } },
+      include: { chapter: { select: { number: true } } },
+    });
+    if (!scene)
+      throw new HttpError(404, "Temporal scene not found in project/build");
     return scene.chapter.number * 10_000 + scene.order;
   }
 
@@ -207,9 +378,11 @@ export class StoryStateRepository {
     storyOrder: number | null,
     participantId: string | undefined,
     limit: number,
-    offset: number
+    offset: number,
   ): Promise<{ ids: string[]; total: number }> {
-    const rows = await this.prisma.$queryRaw<Array<{ id: string; total: bigint }>>(Prisma.sql`
+    const rows = await this.prisma.$queryRaw<
+      Array<{ id: string; total: bigint }>
+    >(Prisma.sql`
       SELECT event.id, count(*) OVER() AS total
       FROM "TimelineEvent" event
       WHERE event."projectId" = ${projectId}
@@ -221,51 +394,85 @@ export class StoryStateRepository {
       ORDER BY event."sortOrder" ASC NULLS LAST, event."createdAt" ASC
       LIMIT ${limit} OFFSET ${offset}
     `);
-    return { ids: rows.map((row) => row.id), total: rows[0] ? Number(rows[0].total) : 0 };
+    return {
+      ids: rows.map((row) => row.id),
+      total: rows[0] ? Number(rows[0].total) : 0,
+    };
   }
 
   async listArtifacts(
     projectId: string,
     buildRunId: string,
-    input: ListStoryArtifactsInput
+    input: ListStoryArtifactsInput,
   ): Promise<PaginatedStoryArtifacts> {
     const limit = clamp(input.limit, 1, 500, 50);
     const offset = clamp(input.offset, 0, 1_000_000, 0);
     const where: Prisma.StoryArtifactWhereInput = {
       projectId,
       buildRunId,
-      ...(input.types?.length ? { type: { in: input.types.map(toPrismaArtifactType) } } : {}),
-      ...(input.statuses?.length ? { status: { in: input.statuses.map(toPrismaArtifactStatus) } } : {}),
-      ...(input.taskId ? { taskId: input.taskId } : {})
+      ...(input.types?.length
+        ? { type: { in: input.types.map(toPrismaArtifactType) } }
+        : {}),
+      ...(input.statuses?.length
+        ? { status: { in: input.statuses.map(toPrismaArtifactStatus) } }
+        : {}),
+      ...(input.taskId ? { taskId: input.taskId } : {}),
     };
     const [total, items] = await this.prisma.$transaction([
       this.prisma.storyArtifact.count({ where }),
       this.prisma.storyArtifact.findMany({
         where,
-        orderBy: [{ type: 'asc' }, { key: 'asc' }, { version: 'desc' }],
+        orderBy: [{ type: "asc" }, { key: "asc" }, { version: "desc" }],
         skip: offset,
-        take: limit
-      })
+        take: limit,
+      }),
     ]);
-    return { items: items.map(toStoryArtifact), total, limit, offset, nextOffset: offset + items.length < total ? offset + items.length : null };
+    return {
+      items: items.map(toStoryArtifact),
+      total,
+      limit,
+      offset,
+      nextOffset: offset + items.length < total ? offset + items.length : null,
+    };
   }
 
   async observability(
     projectId: string,
     buildRunId: string,
-    input: { taskId?: string; limit?: number; offset?: number }
+    input: { taskId?: string; limit?: number; offset?: number },
   ): Promise<BuildObservability> {
     const limit = clamp(input.limit, 1, 500, 100);
     const offset = clamp(input.offset, 0, 1_000_000, 0);
     const taskFilter = input.taskId ? { taskId: input.taskId } : {};
     const [traces, evaluations, checkpoints, directives] = await Promise.all([
-      this.prisma.buildTrace.findMany({ where: { projectId, buildRunId, ...taskFilter }, orderBy: { startedAt: 'desc' }, skip: offset, take: limit }),
-      this.prisma.buildEvaluationResult.findMany({ where: { projectId, buildRunId, ...taskFilter }, orderBy: { createdAt: 'desc' }, skip: offset, take: limit }),
-      this.prisma.buildCheckpoint.findMany({ where: { projectId, buildRunId, ...taskFilter }, orderBy: { sequence: 'desc' }, skip: offset, take: limit }),
+      this.prisma.buildTrace.findMany({
+        where: { projectId, buildRunId, ...taskFilter },
+        orderBy: { startedAt: "desc" },
+        skip: offset,
+        take: limit,
+      }),
+      this.prisma.buildEvaluationResult.findMany({
+        where: { projectId, buildRunId, ...taskFilter },
+        orderBy: { createdAt: "desc" },
+        skip: offset,
+        take: limit,
+      }),
+      this.prisma.buildCheckpoint.findMany({
+        where: { projectId, buildRunId, ...taskFilter },
+        orderBy: { sequence: "desc" },
+        skip: offset,
+        take: limit,
+      }),
       this.prisma.buildDirective.findMany({
-        where: { projectId, buildRunId, ...(input.taskId ? { fromTaskId: input.taskId } : {}) },
-        orderBy: { createdAt: 'desc' }, skip: offset, take: limit
-      })
+        where: {
+          projectId,
+          buildRunId,
+          ...(input.taskId ? { fromTaskId: input.taskId } : {}),
+        },
+        orderBy: { createdAt: "desc" },
+        skip: offset,
+        take: limit,
+      }),
     ]);
     return {
       projectId,
@@ -273,31 +480,47 @@ export class StoryStateRepository {
       traces: traces.map(toBuildTrace),
       evaluations: evaluations.map(toBuildEvaluation),
       checkpoints: checkpoints.map(toBuildCheckpoint),
-      directives: directives.map(toBuildDirective)
+      directives: directives.map(toBuildDirective),
     };
   }
 
   async search(
     projectId: string,
     buildRunId: string,
-    input: Required<Pick<SearchStoryInput, 'query' | 'strategy' | 'limit' | 'offset'>> & SearchStoryInput
+    input: Required<
+      Pick<SearchStoryInput, "query" | "strategy" | "limit" | "offset">
+    > &
+      SearchStoryInput,
   ): Promise<{ hits: StorySearchHit[]; total: number }> {
     const kinds = input.kinds ?? [];
     const fields = input.fields ?? [];
     const statuses = input.statuses ?? [];
     const artifactTypes = input.artifactTypes ?? [];
-    const structuredFilters = Object.entries(input.filters ?? {}).flatMap(([key, values]) => {
-      const normalized = [...new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean))];
-      if (!normalized.length) return [];
-      if (key === 'after' || key === 'before') {
-        const positions = normalized.map((value) => Number(value.match(/(?:^|[-_\s])(\d+(?:\.\d+)?)$/)?.[1] ?? value)).filter(Number.isFinite);
-        if (!positions.length) return [Prisma.sql`AND false`];
-        const boundary = key === 'after' ? Math.min(...positions) : Math.max(...positions);
-        return [key === 'after'
-          ? Prisma.sql`AND CASE WHEN jsonb_typeof(search_fields->'order') = 'number' THEN (search_fields->>'order')::double precision > ${boundary} ELSE false END`
-          : Prisma.sql`AND CASE WHEN jsonb_typeof(search_fields->'order') = 'number' THEN (search_fields->>'order')::double precision < ${boundary} ELSE false END`];
-      }
-      return [Prisma.sql`AND EXISTS (
+    const structuredFilters = Object.entries(input.filters ?? {}).flatMap(
+      ([key, values]) => {
+        const normalized = [
+          ...new Set(
+            values.map((value) => value.trim().toLowerCase()).filter(Boolean),
+          ),
+        ];
+        if (!normalized.length) return [];
+        if (key === "after" || key === "before") {
+          const positions = normalized
+            .map((value) =>
+              Number(value.match(/(?:^|[-_\s])(\d+(?:\.\d+)?)$/)?.[1] ?? value),
+            )
+            .filter(Number.isFinite);
+          if (!positions.length) return [Prisma.sql`AND false`];
+          const boundary =
+            key === "after" ? Math.min(...positions) : Math.max(...positions);
+          return [
+            key === "after"
+              ? Prisma.sql`AND CASE WHEN jsonb_typeof(search_fields->'order') = 'number' THEN (search_fields->>'order')::double precision > ${boundary} ELSE false END`
+              : Prisma.sql`AND CASE WHEN jsonb_typeof(search_fields->'order') = 'number' THEN (search_fields->>'order')::double precision < ${boundary} ELSE false END`,
+          ];
+        }
+        return [
+          Prisma.sql`AND EXISTS (
         SELECT 1
         FROM jsonb_array_elements_text(CASE
           WHEN jsonb_typeof(search_fields -> ${key}) = 'array' THEN search_fields -> ${key}
@@ -305,27 +528,47 @@ export class StoryStateRepository {
           ELSE '[]'::jsonb
         END) AS filter_value(value)
         WHERE lower(filter_value.value) IN (${Prisma.join(normalized)})
-      )`];
-    });
-    const kindFilter = kinds.length ? Prisma.sql`AND kind IN (${Prisma.join(kinds)})` : Prisma.empty;
-    const fieldFilter = fields.length ? Prisma.sql`AND field_name IN (${Prisma.join(fields)})` : Prisma.empty;
-    const statusFilter = statuses.length ? Prisma.sql`AND status IN (${Prisma.join(statuses)})` : Prisma.empty;
-    const artifactFilter = artifactTypes.length ? Prisma.sql`AND artifact_type IN (${Prisma.join(artifactTypes)})` : Prisma.empty;
-    const structuredFilter = structuredFilters.length ? Prisma.join(structuredFilters, ' ') : Prisma.empty;
+      )`,
+        ];
+      },
+    );
+    const kindFilter = kinds.length
+      ? Prisma.sql`AND kind IN (${Prisma.join(kinds)})`
+      : Prisma.empty;
+    const fieldFilter = fields.length
+      ? Prisma.sql`AND field_name IN (${Prisma.join(fields)})`
+      : Prisma.empty;
+    const statusFilter = statuses.length
+      ? Prisma.sql`AND status IN (${Prisma.join(statuses)})`
+      : Prisma.empty;
+    const artifactFilter = artifactTypes.length
+      ? Prisma.sql`AND artifact_type IN (${Prisma.join(artifactTypes)})`
+      : Prisma.empty;
+    const structuredFilter = structuredFilters.length
+      ? Prisma.join(structuredFilters, " ")
+      : Prisma.empty;
     const caseSensitive = input.caseSensitive === true;
-    const textExpression = caseSensitive ? Prisma.sql`search_text` : Prisma.sql`lower(search_text)`;
-    const queryExpression = caseSensitive ? Prisma.sql`${input.query}` : Prisma.sql`lower(${input.query})`;
-    const sourceTextExpression = caseSensitive ? Prisma.sql`source.source_body` : Prisma.sql`lower(source.source_body)`;
+    const textExpression = caseSensitive
+      ? Prisma.sql`search_text`
+      : Prisma.sql`lower(search_text)`;
+    const queryExpression = caseSensitive
+      ? Prisma.sql`${input.query}`
+      : Prisma.sql`lower(${input.query})`;
+    const sourceTextExpression = caseSensitive
+      ? Prisma.sql`source.source_body`
+      : Prisma.sql`lower(source.source_body)`;
     const sourceMatchPosition = Prisma.sql`position(${queryExpression} in ${sourceTextExpression})`;
     let match: Prisma.Sql;
     let score: Prisma.Sql;
-    if (input.strategy === 'regex') {
-      match = caseSensitive ? Prisma.sql`search_text ~ ${input.query}` : Prisma.sql`search_text ~* ${input.query}`;
+    if (input.strategy === "regex") {
+      match = caseSensitive
+        ? Prisma.sql`search_text ~ ${input.query}`
+        : Prisma.sql`search_text ~* ${input.query}`;
       score = Prisma.sql`1.0::double precision`;
-    } else if (input.strategy === 'exact') {
+    } else if (input.strategy === "exact") {
       match = Prisma.sql`position(${queryExpression} in ${textExpression}) > 0`;
       score = Prisma.sql`2.0::double precision`;
-    } else if (input.strategy === 'fts') {
+    } else if (input.strategy === "fts") {
       match = Prisma.sql`document @@ websearch_to_tsquery('english', ${input.query})`;
       score = Prisma.sql`ts_rank_cd(document, websearch_to_tsquery('english', ${input.query}))::double precision`;
     } else {
@@ -559,27 +802,50 @@ export class StoryStateRepository {
     });
     return {
       hits: rows.map((row) => ({
-        kind: row.kind as StorySearchHit['kind'],
+        kind: row.kind as StorySearchHit["kind"],
         id: row.id,
         key: row.key,
         title: row.title,
         snippet: row.snippet,
         score: Number(row.score),
-        ref: row.ref as unknown as StorySearchHit['ref'],
-        sourceSpan: searchSourceSpan(row.source_span, row.snippet, input.query, row.absolute_start, row.line_start)
+        ref: row.ref as unknown as StorySearchHit["ref"],
+        sourceSpan: searchSourceSpan(
+          row.source_span,
+          row.snippet,
+          input.query,
+          row.absolute_start,
+          row.line_start,
+        ),
       })),
-      total: rows[0] ? Number(rows[0].total) : 0
+      total: rows[0] ? Number(rows[0].total) : 0,
     };
   }
 
   async findReferences(
     projectId: string,
     buildRunId: string,
-    input: Required<Pick<FindStoryReferencesInput, 'refType' | 'refId' | 'limit' | 'offset'>>
+    input: Required<
+      Pick<FindStoryReferencesInput, "refType" | "refId" | "limit" | "offset">
+    >,
   ): Promise<{ hits: StoryReferenceHit[]; total: number }> {
-    const terms = await this.referenceTerms(projectId, buildRunId, input.refType, input.refId);
-    if (!terms.length) throw new HttpError(404, `Reference target '${input.refType}:${input.refId}' was not found`);
-    const proseMatch = Prisma.join(terms.map((term) => Prisma.sql`position(lower(${term}) in lower(coalesce(v.body,''))) > 0`), ' OR ');
+    const terms = await this.referenceTerms(
+      projectId,
+      buildRunId,
+      input.refType,
+      input.refId,
+    );
+    if (!terms.length)
+      throw new HttpError(
+        404,
+        `Reference target '${input.refType}:${input.refId}' was not found`,
+      );
+    const proseMatch = Prisma.join(
+      terms.map(
+        (term) =>
+          Prisma.sql`position(lower(${term}) in lower(coalesce(v.body,''))) > 0`,
+      ),
+      " OR ",
+    );
     const firstProseMatch = Prisma.sql`least(${Prisma.join(terms.map((term) => Prisma.sql`nullif(position(lower(${term}) in lower(coalesce(v.body,''))), 0)`))})`;
     const proseSnippet = Prisma.sql`substring(coalesce(v.body,'') FROM greatest(1, ${firstProseMatch} - 120) FOR 500)`;
     const absoluteReferenceMatch = Prisma.sql`least(${Prisma.join(terms.map((term) => Prisma.sql`nullif(position(lower(${term}) in lower(source.source_body)), 0)`))})`;
@@ -693,89 +959,356 @@ export class StoryStateRepository {
     });
     return {
       hits: rows.map((row) => ({
-        kind: row.kind as StoryReferenceHit['kind'], id: row.id, key: row.key, title: row.title,
-        snippet: row.snippet, score: 1, ref: row.ref as unknown as StoryReferenceHit['ref'],
-        sourceSpan: referenceSourceSpan(row.source_span, row.snippet, terms, row.absolute_start, row.line_start), path: row.path, relationship: row.relationship
+        kind: row.kind as StoryReferenceHit["kind"],
+        id: row.id,
+        key: row.key,
+        title: row.title,
+        snippet: row.snippet,
+        score: 1,
+        ref: row.ref as unknown as StoryReferenceHit["ref"],
+        sourceSpan: referenceSourceSpan(
+          row.source_span,
+          row.snippet,
+          terms,
+          row.absolute_start,
+          row.line_start,
+        ),
+        path: row.path,
+        relationship: row.relationship,
       })),
-      total: rows[0] ? Number(rows[0].total) : 0
+      total: rows[0] ? Number(rows[0].total) : 0,
     };
   }
 
-  private async referenceTerms(projectId: string, buildRunId: string, refType: string, refId: string): Promise<string[]> {
-    if (refType === 'character') {
+  private async referenceTerms(
+    projectId: string,
+    buildRunId: string,
+    refType: string,
+    refId: string,
+  ): Promise<string[]> {
+    if (refType === "character") {
       const [character, bible, fact, state] = await Promise.all([
-        this.prisma.character.findFirst({ where: { projectId, OR: [{ id: refId }, { name: refId }, { aliases: { has: refId } }] }, select: { id: true, name: true, aliases: true } }),
-        this.prisma.storyArtifact.findFirst({ where: { projectId, buildRunId, type: 'CHARACTER_BIBLE', invalidatedAt: null, OR: [{ id: refId }, { key: refId }, { content: { path: ['characterKey'], equals: refId } }] }, select: { id: true, key: true, title: true, content: true } }),
-        this.prisma.canonFact.findFirst({ where: { projectId, buildRunId, subjectType: 'character', subjectId: refId, isCurrent: true, invalidatedAt: null }, select: { subjectId: true } }),
-        this.prisma.entityState.findFirst({ where: { projectId, buildRunId, entityType: 'character', entityId: refId, isCurrent: true, invalidatedAt: null }, select: { entityId: true } })
+        this.prisma.character.findFirst({
+          where: {
+            projectId,
+            OR: [{ id: refId }, { name: refId }, { aliases: { has: refId } }],
+          },
+          select: { id: true, name: true, aliases: true },
+        }),
+        this.prisma.storyArtifact.findFirst({
+          where: {
+            projectId,
+            buildRunId,
+            type: "CHARACTER_BIBLE",
+            invalidatedAt: null,
+            OR: [
+              { id: refId },
+              { key: refId },
+              { content: { path: ["characterKey"], equals: refId } },
+            ],
+          },
+          select: { id: true, key: true, title: true, content: true },
+        }),
+        this.prisma.canonFact.findFirst({
+          where: {
+            projectId,
+            buildRunId,
+            subjectType: "character",
+            subjectId: refId,
+            isCurrent: true,
+            invalidatedAt: null,
+          },
+          select: { subjectId: true },
+        }),
+        this.prisma.entityState.findFirst({
+          where: {
+            projectId,
+            buildRunId,
+            entityType: "character",
+            entityId: refId,
+            isCurrent: true,
+            invalidatedAt: null,
+          },
+          select: { entityId: true },
+        }),
       ]);
-      const content = bible?.content && typeof bible.content === 'object' && !Array.isArray(bible.content) ? bible.content as Prisma.JsonObject : null;
-      const values: unknown[] = [refId, character?.id, character?.name, ...(character?.aliases ?? []), bible?.id, bible?.key, bible?.title, content?.characterKey, content?.name, ...(Array.isArray(content?.aliases) ? content.aliases : []), fact?.subjectId, state?.entityId];
+      const content =
+        bible?.content &&
+        typeof bible.content === "object" &&
+        !Array.isArray(bible.content)
+          ? (bible.content as Prisma.JsonObject)
+          : null;
+      const values: unknown[] = [
+        refId,
+        character?.id,
+        character?.name,
+        ...(character?.aliases ?? []),
+        bible?.id,
+        bible?.key,
+        bible?.title,
+        content?.characterKey,
+        content?.name,
+        ...(Array.isArray(content?.aliases) ? content.aliases : []),
+        fact?.subjectId,
+        state?.entityId,
+      ];
       return character || bible || fact || state ? searchableTerms(values) : [];
     }
-    const values = refType === 'location' ? await this.prisma.location.findFirst({ where: { projectId, OR: [{ id: refId }, { name: refId }, { aliases: { has: refId } }] }, select: { id: true, name: true, aliases: true } })
-      : refType === 'chapter' ? await this.prisma.buildManuscriptUnit.findFirst({ where: { projectId, buildRunId, kind: 'CHAPTER', OR: [{ id: refId }, { key: refId }] }, select: { id: true, key: true, title: true } }) ?? await this.prisma.chapter.findFirst({ where: { projectId, OR: [{ id: refId }, { title: refId }] }, select: { id: true, title: true } })
-      : refType === 'scene' ? await this.prisma.buildManuscriptUnit.findFirst({ where: { projectId, buildRunId, kind: 'SCENE', OR: [{ id: refId }, { key: refId }] }, select: { id: true, key: true, title: true } }) ?? await this.prisma.scene.findFirst({ where: { chapter: { projectId }, OR: [{ id: refId }, { title: refId }] }, select: { id: true, title: true } })
-      : refType === 'build-unit' ? await this.prisma.buildManuscriptUnit.findFirst({ where: { projectId, buildRunId, OR: [{ id: refId }, { key: refId }] }, select: { id: true, key: true, title: true } })
-      : refType === 'artifact' ? await this.prisma.storyArtifact.findFirst({ where: { projectId, buildRunId, OR: [{ id: refId }, { key: refId }] }, select: { id: true, key: true, title: true } })
-      : refType === 'canon-fact' ? await this.prisma.canonFact.findFirst({ where: { projectId, buildRunId, OR: [{ id: refId }, { key: refId }], isCurrent: true }, select: { id: true, key: true, subjectId: true, predicate: true } })
-      : refType === 'entity-state' ? await this.prisma.entityState.findFirst({ where: { projectId, buildRunId, OR: [{ id: refId }, { key: refId }], isCurrent: true }, select: { id: true, key: true, entityId: true, stateKey: true } })
-      : refType === 'timeline-event' ? await this.prisma.timelineEvent.findFirst({ where: { projectId, buildRunId, OR: [{ id: refId }, { key: refId }], isCurrent: true }, select: { id: true, key: true, title: true } })
-      : refType === 'open-loop' ? await this.prisma.openLoop.findFirst({ where: { projectId, buildRunId, OR: [{ id: refId }, { key: refId }], isCurrent: true }, select: { id: true, key: true, title: true } })
-      : refType === 'setup-payoff' ? await this.prisma.setupPayoffLink.findFirst({ where: { projectId, buildRunId, OR: [{ id: refId }, { key: refId }], isCurrent: true }, select: { id: true, key: true, title: true } })
-      : refType === 'plot-thread' ? await this.prisma.plotThread.findFirst({ where: { projectId, buildRunId, OR: [{ id: refId }, { key: refId }], isCurrent: true }, select: { id: true, key: true, title: true } })
-      : null;
+    const values =
+      refType === "location"
+        ? await this.prisma.location.findFirst({
+            where: {
+              projectId,
+              OR: [{ id: refId }, { name: refId }, { aliases: { has: refId } }],
+            },
+            select: { id: true, name: true, aliases: true },
+          })
+        : refType === "chapter"
+          ? ((await this.prisma.buildManuscriptUnit.findFirst({
+              where: {
+                projectId,
+                buildRunId,
+                kind: "CHAPTER",
+                OR: [{ id: refId }, { key: refId }],
+              },
+              select: { id: true, key: true, title: true },
+            })) ??
+            (await this.prisma.chapter.findFirst({
+              where: { projectId, OR: [{ id: refId }, { title: refId }] },
+              select: { id: true, title: true },
+            })))
+          : refType === "scene"
+            ? ((await this.prisma.buildManuscriptUnit.findFirst({
+                where: {
+                  projectId,
+                  buildRunId,
+                  kind: "SCENE",
+                  OR: [{ id: refId }, { key: refId }],
+                },
+                select: { id: true, key: true, title: true },
+              })) ??
+              (await this.prisma.scene.findFirst({
+                where: {
+                  chapter: { projectId },
+                  OR: [{ id: refId }, { title: refId }],
+                },
+                select: { id: true, title: true },
+              })))
+            : refType === "build-unit"
+              ? await this.prisma.buildManuscriptUnit.findFirst({
+                  where: {
+                    projectId,
+                    buildRunId,
+                    OR: [{ id: refId }, { key: refId }],
+                  },
+                  select: { id: true, key: true, title: true },
+                })
+              : refType === "artifact"
+                ? await this.prisma.storyArtifact.findFirst({
+                    where: {
+                      projectId,
+                      buildRunId,
+                      OR: [{ id: refId }, { key: refId }],
+                    },
+                    select: { id: true, key: true, title: true },
+                  })
+                : refType === "canon-fact"
+                  ? await this.prisma.canonFact.findFirst({
+                      where: {
+                        projectId,
+                        buildRunId,
+                        OR: [{ id: refId }, { key: refId }],
+                        isCurrent: true,
+                      },
+                      select: {
+                        id: true,
+                        key: true,
+                        subjectId: true,
+                        predicate: true,
+                      },
+                    })
+                  : refType === "entity-state"
+                    ? await this.prisma.entityState.findFirst({
+                        where: {
+                          projectId,
+                          buildRunId,
+                          OR: [{ id: refId }, { key: refId }],
+                          isCurrent: true,
+                        },
+                        select: {
+                          id: true,
+                          key: true,
+                          entityId: true,
+                          stateKey: true,
+                        },
+                      })
+                    : refType === "timeline-event"
+                      ? await this.prisma.timelineEvent.findFirst({
+                          where: {
+                            projectId,
+                            buildRunId,
+                            OR: [{ id: refId }, { key: refId }],
+                            isCurrent: true,
+                          },
+                          select: { id: true, key: true, title: true },
+                        })
+                      : refType === "open-loop"
+                        ? await this.prisma.openLoop.findFirst({
+                            where: {
+                              projectId,
+                              buildRunId,
+                              OR: [{ id: refId }, { key: refId }],
+                              isCurrent: true,
+                            },
+                            select: { id: true, key: true, title: true },
+                          })
+                        : refType === "setup-payoff"
+                          ? await this.prisma.setupPayoffLink.findFirst({
+                              where: {
+                                projectId,
+                                buildRunId,
+                                OR: [{ id: refId }, { key: refId }],
+                                isCurrent: true,
+                              },
+                              select: { id: true, key: true, title: true },
+                            })
+                          : refType === "plot-thread"
+                            ? await this.prisma.plotThread.findFirst({
+                                where: {
+                                  projectId,
+                                  buildRunId,
+                                  OR: [{ id: refId }, { key: refId }],
+                                  isCurrent: true,
+                                },
+                                select: { id: true, key: true, title: true },
+                              })
+                            : null;
     return values ? searchableTerms(Object.values(values)) : [];
   }
 }
 
 function searchableTerms(values: unknown[]): string[] {
-  return [...new Set(values.flatMap((value) => Array.isArray(value) ? value : [value]).filter((value): value is string => typeof value === 'string' && value.trim().length > 1))].slice(0, 50);
+  return [
+    ...new Set(
+      values
+        .flatMap((value) => (Array.isArray(value) ? value : [value]))
+        .filter(
+          (value): value is string =>
+            typeof value === "string" && value.trim().length > 1,
+        ),
+    ),
+  ].slice(0, 50);
 }
 
-function searchSourceSpan(raw: Prisma.JsonValue | null, snippet: string, query: string, absoluteStart: number | null, lineStart: number | null): StorySearchHit['sourceSpan'] {
-  const span = raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...raw } : {};
+function searchSourceSpan(
+  raw: Prisma.JsonValue | null,
+  snippet: string,
+  query: string,
+  absoluteStart: number | null,
+  lineStart: number | null,
+): StorySearchHit["sourceSpan"] {
+  const span =
+    raw && typeof raw === "object" && !Array.isArray(raw) ? { ...raw } : {};
   const needle = query.trim();
-  const start = needle ? snippet.toLocaleLowerCase().indexOf(needle.toLocaleLowerCase()) : -1;
-  if (absoluteStart !== null) return {
-    ...span,
-    start: absoluteStart,
-    end: absoluteStart + needle.length,
-    ...(lineStart === null ? {} : { lineStart, lineEnd: lineStart + (needle.match(/\n/g)?.length ?? 0) }),
-    quote: start >= 0 ? snippet.slice(start, start + needle.length) : needle
-  } as StorySearchHit['sourceSpan'];
-  return Object.keys(span).length ? span as StorySearchHit['sourceSpan'] : null;
+  const start = needle
+    ? snippet.toLocaleLowerCase().indexOf(needle.toLocaleLowerCase())
+    : -1;
+  if (absoluteStart !== null)
+    return {
+      ...span,
+      start: absoluteStart,
+      end: absoluteStart + needle.length,
+      ...(lineStart === null
+        ? {}
+        : {
+            lineStart,
+            lineEnd: lineStart + (needle.match(/\n/g)?.length ?? 0),
+          }),
+      quote: start >= 0 ? snippet.slice(start, start + needle.length) : needle,
+    } as StorySearchHit["sourceSpan"];
+  return Object.keys(span).length
+    ? (span as StorySearchHit["sourceSpan"])
+    : null;
 }
 
-function referenceSourceSpan(raw: Prisma.JsonValue | null, snippet: string, terms: string[], absoluteStart: number | null, lineStart: number | null): StoryReferenceHit['sourceSpan'] {
-  const span = raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...raw } : {};
-  const matches = terms.map((term) => ({ term, start: snippet.toLocaleLowerCase().indexOf(term.toLocaleLowerCase()) })).filter((match) => match.start >= 0).sort((left, right) => left.start - right.start);
+function referenceSourceSpan(
+  raw: Prisma.JsonValue | null,
+  snippet: string,
+  terms: string[],
+  absoluteStart: number | null,
+  lineStart: number | null,
+): StoryReferenceHit["sourceSpan"] {
+  const span =
+    raw && typeof raw === "object" && !Array.isArray(raw) ? { ...raw } : {};
+  const matches = terms
+    .map((term) => ({
+      term,
+      start: snippet.toLocaleLowerCase().indexOf(term.toLocaleLowerCase()),
+    }))
+    .filter((match) => match.start >= 0)
+    .sort((left, right) => left.start - right.start);
   const match = matches[0];
-  if (match && absoluteStart !== null) return {
-    ...span,
-    start: absoluteStart,
-    end: absoluteStart + match.term.length,
-    ...(lineStart === null ? {} : { lineStart, lineEnd: lineStart + (match.term.match(/\n/g)?.length ?? 0) }),
-    quote: snippet.slice(match.start, match.start + match.term.length)
-  } as StoryReferenceHit['sourceSpan'];
-  if (match) return { ...span, start: match.start, end: match.start + match.term.length, quote: snippet.slice(match.start, match.start + match.term.length) } as StoryReferenceHit['sourceSpan'];
-  return Object.keys(span).length ? span as StoryReferenceHit['sourceSpan'] : null;
+  if (match && absoluteStart !== null)
+    return {
+      ...span,
+      start: absoluteStart,
+      end: absoluteStart + match.term.length,
+      ...(lineStart === null
+        ? {}
+        : {
+            lineStart,
+            lineEnd: lineStart + (match.term.match(/\n/g)?.length ?? 0),
+          }),
+      quote: snippet.slice(match.start, match.start + match.term.length),
+    } as StoryReferenceHit["sourceSpan"];
+  if (match)
+    return {
+      ...span,
+      start: match.start,
+      end: match.start + match.term.length,
+      quote: snippet.slice(match.start, match.start + match.term.length),
+    } as StoryReferenceHit["sourceSpan"];
+  return Object.keys(span).length
+    ? (span as StoryReferenceHit["sourceSpan"])
+    : null;
 }
 
-function clamp(value: number | undefined, min: number, max: number, fallback: number): number {
+function clamp(
+  value: number | undefined,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
   if (value === undefined) return fallback;
-  if (!Number.isInteger(value)) throw new HttpError(400, 'Pagination values must be integers');
+  if (!Number.isInteger(value))
+    throw new HttpError(400, "Pagination values must be integers");
   return Math.min(Math.max(value, min), max);
 }
 
-function latestEntityStates<T extends { entityType: string; entityId: string; stateKey: string; validFromOrder: number | null; storyOrder: number | null; version: number }>(states: T[]): T[] {
+function latestEntityStates<
+  T extends {
+    entityType: string;
+    entityId: string;
+    stateKey: string;
+    validFromOrder: number | null;
+    storyOrder: number | null;
+    version: number;
+  },
+>(states: T[]): T[] {
   const latest = new Map<string, T>();
   for (const state of states) {
     const key = `${state.entityType}:${state.entityId}:${state.stateKey}`;
     const current = latest.get(key);
     const order = state.validFromOrder ?? state.storyOrder ?? -1;
-    const currentOrder = current ? current.validFromOrder ?? current.storyOrder ?? -1 : -Infinity;
-    if (!current || order > currentOrder || (order === currentOrder && state.version > current.version)) latest.set(key, state);
+    const currentOrder = current
+      ? (current.validFromOrder ?? current.storyOrder ?? -1)
+      : -Infinity;
+    if (
+      !current ||
+      order > currentOrder ||
+      (order === currentOrder && state.version > current.version)
+    )
+      latest.set(key, state);
   }
   return [...latest.values()];
 }

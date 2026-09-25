@@ -1,21 +1,20 @@
 # AI system
 
-OpenTales AI is an opt-in project assistant for manuscript-aware chat and a durable Novel Build runtime. Interactive sessions retain approval-gated mutations. Novel Builds use separately authorized, fenced sandbox branches and still require explicit owner review before main changes.
+OpenTales AI is an opt-in project assistant for manuscript-aware chat and dynamic writing through tools. Agents keep plans and progress in project docs. Manual mode proposes mutations for approval; admin-only Auto mode executes permitted mutations immediately.
 
 ## Main pieces
 
-| Area | Location | Responsibility |
-| --- | --- | --- |
-| Backend AI controller | `packages/backend/src/controllers/AiController.ts` | Exposes settings, assistive endpoints, agent sessions, SSE, prompts, cancellation, and approval routes. |
-| Agent session use case | `packages/backend/src/useCases/ai/AiAgentSessionUseCase.ts` | Persists chat state, queues prompts, streams model output, records tool calls, and executes approved mutations. |
-| AI settings use case | `packages/backend/src/useCases/ai/ProjectAiSettingsUseCase.ts` | Stores project-level provider configuration, encrypted credentials, and provider authorization state. |
-| SDK client | `packages/sdk/src/client.ts` | Provides typed frontend calls for AI settings, assistive endpoints, agent sessions, streams, and approvals. |
-| Frontend AI store | `packages/frontend/src/lib/stores/ai.svelte.ts` | Holds settings, docs, active session, session list, stream state, generated feature results, and errors. |
-| Agent panel | `packages/frontend/src/lib/components/ide/AiAgentPanel.svelte` | Renders chat, session switching, queued prompts, pending approvals, and prompt input. |
-| Approval diff UI | `packages/frontend/src/lib/components/ide/AiApprovalEditor.svelte` | Opens proposed mutations as multi-pane Monaco diffs before approval. |
-| Novel Build worker | `packages/backend/src/useCases/ai/workflow/NovelBuildWorker.ts` | Claims persisted tasks, assembles context, invokes scoped agents, validates outputs, records traces/evals, and resumes after interruption. |
+| Area                   | Location                                                           | Responsibility                                                                                                  |
+| ---------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| Backend AI controller  | `packages/backend/src/controllers/AiController.ts`                 | Exposes settings, assistive endpoints, agent sessions, SSE, prompts, cancellation, and approval routes.         |
+| Agent session use case | `packages/backend/src/useCases/ai/AiAgentSessionUseCase.ts`        | Persists chat state, queues prompts, streams model output, records tool calls, and executes approved mutations. |
+| AI settings use case   | `packages/backend/src/useCases/ai/ProjectAiSettingsUseCase.ts`     | Stores project-level provider configuration, encrypted credentials, and provider authorization state.           |
+| SDK client             | `packages/sdk/src/client.ts`                                       | Provides typed frontend calls for AI settings, assistive endpoints, agent sessions, streams, and approvals.     |
+| Frontend AI store      | `packages/frontend/src/lib/stores/ai.svelte.ts`                    | Holds settings, docs, active session, session list, stream state, generated feature results, and errors.        |
+| Agent panel            | `packages/frontend/src/lib/components/ide/AiAgentPanel.svelte`     | Renders chat, session switching, queued prompts, pending approvals, and prompt input.                           |
+| Approval diff UI       | `packages/frontend/src/lib/components/ide/AiApprovalEditor.svelte` | Opens proposed mutations as multi-pane Monaco diffs before approval.                                            |
+
 | Context assembler | `packages/backend/src/useCases/ai/context/ContextAssembler.ts` | Builds token-budgeted, branch-aware and time-aware context packs. |
-| Build/story services | `packages/backend/src/useCases/novelBuild/` | Durable workflow, sandbox manuscript, canon/state, diagnostics, compilation, and human review. |
 
 ## Data model
 
@@ -25,7 +24,7 @@ The AI data model lives in `packages/backend/prisma/schema.prisma`.
 
 `ProjectAiSkill` stores project-scoped Agent Skills. Each skill has a unique `name`, `description`, full markdown `content`, and an `enabled` flag. Enabled skills are disclosed to the agent as a compact catalog and loaded on demand through read-only tools.
 
-`ProjectAiAgentSession` stores each chat session for a project. A project can have multiple sessions. Each session has a title, status, `MANUAL`/`AUTO` execution mode, active prompt, messages, queued prompts, tool calls, an optional active `BuildRun`, and an atomic counter for ordered session parts.
+`ProjectAiAgentSession` stores each chat session for a project. A project can have multiple sessions. Each session has a title, status, `MANUAL`/`AUTO` execution mode, active prompt, messages, queued prompts, tool calls, and an atomic counter for ordered session parts.
 
 `AiAgentMessage` stores persisted transcript messages with roles: `USER`, `ASSISTANT`, `SYSTEM`, and `TOOL`.
 
@@ -42,12 +41,12 @@ Project docs are separate from chat state. `ProjectDoc` uses the versioned `Writ
 AI must be enabled per project before calls can run. Settings are exposed through:
 
 ```ts
-client.getProjectAiSettings(projectId)
-client.updateProjectAiSettings(projectId, input)
-client.startGithubCopilotAuth(projectId)
-client.pollGithubCopilotAuth(projectId, input)
-client.startCodexAuth(projectId)
-client.pollCodexAuth(projectId, input)
+client.getProjectAiSettings(projectId);
+client.updateProjectAiSettings(projectId, input);
+client.startGithubCopilotAuth(projectId);
+client.pollGithubCopilotAuth(projectId, input);
+client.startCodexAuth(projectId);
+client.pollCodexAuth(projectId, input);
 ```
 
 Provider modes:
@@ -57,7 +56,7 @@ Provider modes:
 - `github-copilot`: Uses GitHub device authorization and the Copilot bearer-token transport.
 - `codex`: Uses [OpenAI device authorization](https://learn.chatgpt.com/docs/auth#login-on-headless-devices) for ChatGPT subscription access. The backend encrypts the access token, refresh token, expiry, and ChatGPT account routing identifier, refreshes expiring sessions with one deduplicated refresh, and sends Responses API requests to the Codex backend with the required account and residency headers.
 
-Codex models are derived from the cached models.dev OpenAI catalog and filtered through the subscription allow/deny policy documented in `CODEX.md`. They appear as `codex/<model-id>` in project settings, use the OpenAI Responses provider internally, and are costed at zero for Novel Build reservations because usage is covered by the connected ChatGPT subscription. Public API-key OpenAI usage remains separately priced.
+Codex models are derived from the cached models.dev OpenAI catalog and filtered through the subscription allow/deny policy documented in `CODEX.md`. They appear as `codex/<model-id>` in project settings, use the OpenAI Responses provider internally, and use the connected ChatGPT subscription. Public API-key OpenAI usage remains separately priced.
 
 The backend does not return raw API keys or OAuth credentials. It returns whether a credential exists. Sending `apiKey: null` clears a stored key or connected provider session, while omitting `apiKey` leaves the existing credential unchanged. Codex tokens cannot be entered manually; reconnect through the device flow.
 
@@ -68,10 +67,10 @@ Projects can define reusable Agent Skills from the AI settings UI. The frontend 
 Skill management uses:
 
 ```ts
-client.listProjectAiSkills(projectId)
-client.createProjectAiSkill(projectId, input)
-client.updateProjectAiSkill(projectId, skillId, input)
-client.deleteProjectAiSkill(projectId, skillId)
+client.listProjectAiSkills(projectId);
+client.createProjectAiSkill(projectId, input);
+client.updateProjectAiSkill(projectId, skillId, input);
+client.deleteProjectAiSkill(projectId, skillId);
 ```
 
 During agent runs, enabled skills follow progressive disclosure. The system prompt includes only name and description in an `<available_skills>` catalog. When a task matches a skill, the agent activates it with `readProjectAiSkill`, which returns the full skill content wrapped in `<skill_content name="...">` tags.
@@ -82,21 +81,21 @@ Project owners and admins can create revocable read-only or read/write credentia
 
 Hosted clients such as ChatGPT, Gemini, and Claude.ai connect through OAuth 2.1 with Dynamic Client Registration and PKCE S256. The browser consent flow signs the user into OpenTales, lists only accessible projects, and mints short-lived access plus rotating refresh tokens for the selected project and access level. API keys remain available for local clients that can supply a Bearer header; they are never OAuth client IDs.
 
-The MCP adapter registers the same tool objects used by interactive OpenTales agents, so names, Zod schemas, bounded reads, mutation use cases, and permission checks do not drift. Skills, agent prompts, and author instruction docs are also available through MCP resources and prompt templates. Build lifecycle tools expose resume, bounded retry, and explicit failed-boundary rerun; `task`, `askUser`, and fenced worker-lease tools remain internal because the external host owns orchestration/user interaction and the durable worker owns persisted Novel Build task execution. Full setup and security behavior are documented in [`mcp.md`](mcp.md).
+The MCP adapter registers the same tool objects used by interactive OpenTales agents, so names, Zod schemas, bounded reads, mutation use cases, and permission checks do not drift. Skills, agent prompts, and author instruction docs are also available through MCP resources and prompt templates. `task` and `askUser` remain internal because external hosts own orchestration and user interaction. Full setup and security behavior are documented in [`mcp.md`](mcp.md).
 
-The external story-writing harness also exposes optimistic prose tools. `readChapter`, `readScene`, `readProjectDoc`, `readSubmission`, and `readBuildUnit` return the current branch/head tokens. `updateChapter`, `updateScene`, `updateProjectDoc`, `updateSubmission`, and `updateBuildUnit` accept full replacement for empty bodies or exact-string edits. `applyStoryPatch` batches up to 50 canonical/proposal changes atomically with an idempotent receipt. Public build workspace tools cover isolated unit repair, compilation, comparison, review, and owner-controlled merge without exposing worker leases.
+The external story-writing harness also exposes optimistic prose tools. `readChapter`, `readScene`, `readProjectDoc`, `readSubmission` return the current branch/head tokens. `updateChapter`, `updateScene`, `updateProjectDoc`, `updateSubmission` accept full replacement for empty bodies or exact-string edits. `applyStoryPatch` batches up to 50 canonical/proposal changes atomically with an idempotent receipt.
 
 ## Agent sessions
 
 The agent panel supports multiple chat sessions per project. The frontend loads the session list and the active session through the SDK:
 
 ```ts
-client.listAiAgentSessions(projectId)
-client.createAiAgentSession(projectId, { title, buildRunId, approvalMode })
-client.updateAiAgentSession(projectId, sessionId, { approvalMode })
-client.getAiAgentSession(projectId, sessionId)
-client.queueAiAgentPrompt(projectId, { prompt, interrupt, buildRunId }, sessionId)
-client.cancelAiAgentSession(projectId, sessionId)
+client.listAiAgentSessions(projectId);
+client.createAiAgentSession(projectId, { title, approvalMode });
+client.updateAiAgentSession(projectId, sessionId, { approvalMode });
+client.getAiAgentSession(projectId, sessionId);
+client.queueAiAgentPrompt(projectId, { prompt, interrupt }, sessionId);
+client.cancelAiAgentSession(projectId, sessionId);
 ```
 
 Execution mode is durable per session and is captured into every queued prompt:
@@ -109,9 +108,14 @@ The mode cannot change while a prompt is running or queued. Switching to Auto th
 Each session has its own SSE stream:
 
 ```ts
-await client.streamAiAgentSession(projectId, sessionId, (event) => {
-  // event.session is a full session snapshot
-}, { signal })
+await client.streamAiAgentSession(
+  projectId,
+  sessionId,
+  (event) => {
+    // event.session is a full session snapshot
+  },
+  { signal },
+);
 ```
 
 The stream is authenticated with `fetch` so the SDK can send the bearer token. SSE is only the live transport: lifecycle boundaries carry a full bounded session snapshot, while high-frequency `text-delta` events omit `session` and carry an incremental stable part patch. Reloads and reconnects render `session.timeline`, whose sequenced parts live in PostgreSQL. New subscribers are registered in buffered mode before their initial snapshot is read, preventing a newer delta from being overwritten by a late initial snapshot. Heartbeats and response-backpressure buffering keep long-lived connections observable and ordered.
@@ -119,12 +123,12 @@ The stream is authenticated with `fetch` so the SDK can send the bearer token. S
 Older durable activity is cursor-paged without loading the whole trace:
 
 ```ts
-client.getAiAgentTimeline(projectId, { beforeSequence, limit }, sessionId)
+client.getAiAgentTimeline(projectId, { beforeSequence, limit }, sessionId);
 ```
 
 The response returns ordered `parts`, `nextBeforeSequence`, `nextLegacyCursor`, and `hasMore`. Durable pages use the numeric sequence cursor. Pre-sequencing sessions return `limitation: 'legacy-history-best-effort'` and an opaque timestamp/ID cursor carrying its sequence anchor, so each older page remains globally ordered even when the caller sends only that cursor. Historic text/tool boundaries still cannot be recovered exactly.
 
-Chat streaming remains an interactive transport. Novel Build execution does not depend on an SSE connection: task leases, traces, artifacts, checkpoints, and recovery state live in PostgreSQL.
+Chat streaming is an interactive transport. Session history and planning docs persist, while interrupted model calls must be resumed with a new prompt.
 
 ## Prompt lifecycle
 
@@ -168,8 +172,6 @@ Read-only tools include:
 - `readStoryStructure`
 - `listProjectAiSkills`
 - `readProjectAiSkill`
-- `listBuildRuns`
-- `getBuildState`
 
 The prompt tells the model to prefer summaries, grep, bounded reads, and lists before requesting full chapter text. This keeps the agent useful without loading the whole manuscript by default.
 
@@ -180,16 +182,16 @@ When the agent genuinely needs clarification, it can call `askUser` with one or 
 The frontend renders each question with selectable choices plus a custom-answer field by default. Submitted answers are posted through:
 
 ```ts
-client.answerAiQuestion(projectId, toolCallId, { answers }, sessionId)
+client.answerAiQuestion(projectId, toolCallId, { answers }, sessionId);
 ```
 
 Answers resolve the waiting tool call and are returned to the model as tool output so it can continue the same turn with the user's response in mind.
 
 ## Subagents
 
-Primary agent runs can call the `task` tool to delegate focused work to a subagent. The tool creates or resumes a regular AI agent session, persists and broadcasts `subtask-started`/`subtask-finished` lifecycle parts on the parent timeline, and returns a `task_id` plus the final `<task_result>` text so the primary agent can continue with the result. This `task_id` is the child AI session ID, not a `BuildRun.id`.
+Primary agent runs can call the `task` tool to delegate focused work to a subagent. The tool creates or resumes a regular AI agent session, persists and broadcasts `subtask-started`/`subtask-finished` lifecycle parts on the parent timeline, and returns a `task_id` plus the final `<task_result>` text so the primary agent can continue with the result. This `task_id` is the child AI session ID, used to resume that task.
 
-An explicitly supplied session/prompt `buildRunId` is project-scoped and validated. Otherwise the session retains its active run or infers the most recent runnable build. Delegated task contracts resolve the current parent binding at invocation time and inherit that ID in `scope.buildRunId`, including a build created earlier in the same turn. Agents use the bounded-summary `listBuildRuns` tool instead of asking authors for opaque IDs; when no build exists, `startNovelBuild` defaults to Plan & Review, proposes creation through the normal approval gate, and binds the returned run to the session after approval.
+Subagents receive a focused objective and scope. Read and update project docs to share plans and findings; resume a prior task using the returned session ID.
 
 Built-in subagents:
 
@@ -204,6 +206,7 @@ description: Reviews manuscript continuity and character consistency
 mode: subagent
 model: openai/gpt-5-mini
 ---
+
 You are a continuity reviewer. Focus on contradictions, timeline drift, and character voice.
 ```
 
@@ -227,8 +230,6 @@ Tools that require approval in Manual mode include:
 - `updateAsset`
 - `updateSubmission`
 - `reorderScenes`
-- Novel Build workspace mutations such as `updateBuildUnit`, `compileBuild`, and `mergeBuildReview`
-- `startNovelBuild`
 
 Folder and path mutations follow the active execution mode. A parent folder cannot contain duplicate child names across folders, docs, and foldered assets. Root docs and root folders appear in the file tree; root assets remain outside the tree unless moved into a folder.
 
@@ -237,8 +238,8 @@ The frontend renders pending calls in `AiAgentPanel.svelte`. Opening a pending c
 Approval uses:
 
 ```ts
-client.approveAiToolCall(projectId, toolCallId, { approved: true }, sessionId)
-client.approveAiToolCall(projectId, toolCallId, { approved: false }, sessionId)
+client.approveAiToolCall(projectId, toolCallId, { approved: true }, sessionId);
+client.approveAiToolCall(projectId, toolCallId, { approved: false }, sessionId);
 ```
 
 If approved, the backend executes the corresponding existing project use case. For example, `createChapter` runs `CreateChapterUseCase`, and `updateChapter` runs `UpdateChapterUseCase`. Approval/rejection uses a database compare-and-set, so concurrent decisions cannot execute one call twice. If the backend restarted after approval, receipt/idempotency-backed build mutations can replay safely; unsafe CRUD is moved to an actionable error instead of being guessed or left wedged. If rejected, the tool call is marked rejected and no project data changes.
@@ -254,25 +255,34 @@ Some AI features are not chat-session tools. They are direct request/response en
 Continuity review posts an AI review activity onto a submission:
 
 ```ts
-client.runContinuityReview(projectId, submissionId)
+client.runContinuityReview(projectId, submissionId);
 ```
 
 Rewrite suggestions return an original/suggested pair and rationale. Accepting a rewrite is a frontend editor action, not an AI persistence action:
 
 ```ts
-client.createRewriteSuggestion(projectId, { text, mode, context })
+client.createRewriteSuggestion(projectId, { text, mode, context });
 ```
 
 Character dialogue returns suggested dialogue lines for a character and situation:
 
 ```ts
-client.createCharacterDialogueSuggestion(projectId, { characterId, situation, count })
+client.createCharacterDialogueSuggestion(projectId, {
+  characterId,
+  situation,
+  count,
+});
 ```
 
 Outline expansion returns AI-draft outline text that should be previewed before users accept it:
 
 ```ts
-client.createOutlineExpansion(projectId, { synopsis, targetLength, povCharacterId, locationId })
+client.createOutlineExpansion(projectId, {
+  synopsis,
+  targetLength,
+  povCharacterId,
+  locationId,
+});
 ```
 
 ## Error handling
@@ -293,9 +303,6 @@ The frontend displays `ai.sessionError` below the transcript. Approval diff tabs
 - The frontend must never execute AI mutations directly. It should always call the approval endpoint.
 - Model output should be treated as untrusted content even when rendered as markdown.
 - Manuscript, attachments, imported research, and web material are serialized as untrusted data rather than prompt authority.
-- Durable task writes require the exact build/task/worker/lease generation and declared artifact, chapter, or scene scope.
-- Build workers do not receive canonical chapter/scene mutation tools. Generated prose stays on build-bound writing branches until owner merge.
-- Cost-bounded runs fail closed when model pricing is unknown; task duration/token/tool limits are enforced and accounted on failures.
 
 ## Operational notes
 
@@ -305,9 +312,9 @@ The backend Docker image should run Prisma migrations before starting the server
 pnpm exec prisma migrate deploy && node dist/src/server.js
 ```
 
-Because connection/runtime handles are in memory, restarting the backend disconnects active SSE streams and abort controllers. Persisted messages, prompts, tool calls, ordered timeline parts, task lifecycle, active build binding, and session status remain in the database and can be reloaded by the frontend. The interactive model invocation itself is not resumable: a stale `RUNNING` prompt is finalized as an actionable error before new queued work proceeds, and fallback approval/question actions likewise finalize the orphaned turn. The Novel Build worker remains the durable execution mechanism for long-running work.
+Because connection/runtime handles are in memory, restarting the backend disconnects active SSE streams and abort controllers. Persisted messages, prompts, tool calls, ordered timeline parts, task lifecycle, and session status remain in the database and can be reloaded by the frontend. The interactive model invocation itself is not resumable: a stale `RUNNING` prompt is finalized as an actionable error before new queued work proceeds, and fallback approval/question actions likewise finalize the orphaned turn. Resume long work by reading the persisted planning docs and session history.
 
-Novel Build workers are started by `server.ts` unless `NODE_ENV=test` or `AI_NOVEL_BUILD_WORKER_ENABLED=false`. On startup they recover expired leases and interrupted persisted traces. Configure model routing with `AI_MODEL_ROUTING_JSON`. Pricing is refreshed into a non-persistent TTL cache from models.dev; `AI_MODEL_PRICING_JSON` is an optional explicit override. See [`novel-build.md`](novel-build.md).
+See [agentic writing](agentic-writing.md) for the document-based workflow.
 
 For local gateway development, set backend provider credentials such as:
 

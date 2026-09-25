@@ -1,5 +1,7 @@
 # Failed story run review — 2026-08-26
 
+> Historical record: the deterministic build workflow described here has been retired. See [agentic writing](agentic-writing.md) for current behavior.
+
 ## Outcome
 
 The original attempt failed before the durable Novel Build executed a single task. After the repairs below, the same build was explicitly resumed against the project’s stored Yasui OpenAI-compatible provider with `gpt-5.6-terra` and is now advancing through the persisted planning graph.
@@ -8,17 +10,17 @@ At the verified recovery snapshot, Story Brief, Narrative Contract, eleven Chara
 
 ## Evidence from the failed attempt
 
-| Time (UTC) | Evidence | Finding |
-| --- | --- | --- |
-| 04:12 | Parent AI session `cmt9kvsk70001zc6e646dsskv` | The author explicitly asked to draft the story with the Novel Build skill. |
-| 04:21 | Build `e574c354-8c9e-4d93-8b84-22ed85809cfd` | The agent created a `PLAN_REVIEW` build and added a planning-only constraint, silently narrowing the requested drafting intent. |
-| 04:21 | `startNovelBuild` result | The tool returned 45,217 characters, including the full manifest and task graph, directly into model context. |
-| 04:21–04:49 | Child session `cmt9l78kc001dzc6eticrsoo4` | The parent delegated `story-brief` to a generic subagent instead of leaving the persisted task for the durable worker. |
-| 04:21 and 04:48 | `getBuildState` results | Each call returned 49,722 characters. The child loaded the same oversized state twice. |
-| 04:26 and 04:38 | `applyArtifactBatch` | Two approximately 21KB artifact proposals waited for Manual approval and each reached the ten-minute approval timeout. Neither was persisted. |
-| 04:49 | Child usage | The child accumulated 172,086 input and 8,273 output tokens (180,359 total) against a 128,000-token context budget. |
-| 04:54 | Parent session | The upstream provider failed after three attempts. |
-| 20:06 | Durable worker | After authorization, the build paused before inference because static `AI_MODEL_PRICING_JSON` had no `gpt-5.6-terra` entry. No trace was created and no build cost was incurred. |
+| Time (UTC)      | Evidence                                      | Finding                                                                                                                                                                          |
+| --------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 04:12           | Parent AI session `cmt9kvsk70001zc6e646dsskv` | The author explicitly asked to draft the story with the Novel Build skill.                                                                                                       |
+| 04:21           | Build `e574c354-8c9e-4d93-8b84-22ed85809cfd`  | The agent created a `PLAN_REVIEW` build and added a planning-only constraint, silently narrowing the requested drafting intent.                                                  |
+| 04:21           | `startNovelBuild` result                      | The tool returned 45,217 characters, including the full manifest and task graph, directly into model context.                                                                    |
+| 04:21–04:49     | Child session `cmt9l78kc001dzc6eticrsoo4`     | The parent delegated `story-brief` to a generic subagent instead of leaving the persisted task for the durable worker.                                                           |
+| 04:21 and 04:48 | `getBuildState` results                       | Each call returned 49,722 characters. The child loaded the same oversized state twice.                                                                                           |
+| 04:26 and 04:38 | `applyArtifactBatch`                          | Two approximately 21KB artifact proposals waited for Manual approval and each reached the ten-minute approval timeout. Neither was persisted.                                    |
+| 04:49           | Child usage                                   | The child accumulated 172,086 input and 8,273 output tokens (180,359 total) against a 128,000-token context budget.                                                              |
+| 04:54           | Parent session                                | The upstream provider failed after three attempts.                                                                                                                               |
+| 20:06           | Durable worker                                | After authorization, the build paused before inference because static `AI_MODEL_PRICING_JSON` had no `gpt-5.6-terra` entry. No trace was created and no build cost was incurred. |
 
 ## Root causes and repairs
 

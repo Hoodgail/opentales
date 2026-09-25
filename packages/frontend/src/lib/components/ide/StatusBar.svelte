@@ -1,22 +1,31 @@
 <script lang="ts">
-  import { Check, Circle, Flame, FileText, GitBranch, Target, Wifi } from 'lucide-svelte';
-  import { manuscript } from '$lib/stores/manuscript.svelte';
-  import { storyIde } from '$lib/stores/storyIde.svelte';
-  import { preferences } from '$lib/stores/preferences.svelte';
-  import { runLint } from '$lib/lint/engine';
-  import { mergeDiagnostics } from '$lib/lint/merge';
-  import type { Diagnostic } from '$lib/lint/types';
-  import { readingTime } from '$lib/data/pacing';
+  import {
+    Check,
+    Circle,
+    Flame,
+    FileText,
+    GitBranch,
+    Target,
+    Wifi,
+  } from "lucide-svelte";
+  import { manuscript } from "$lib/stores/manuscript.svelte";
+  import { preferences } from "$lib/stores/preferences.svelte";
+  import { runLint } from "$lib/lint/engine";
+  import { mergeDiagnostics } from "$lib/lint/merge";
+  import type { Diagnostic } from "$lib/lint/types";
+  import { readingTime } from "$lib/data/pacing";
 
   const activeTab = $derived(
-    manuscript.tabs.find((t) => t.id === manuscript.activeTabId) ?? null
+    manuscript.tabs.find((t) => t.id === manuscript.activeTabId) ?? null,
   );
   const activeChapter = $derived(
-    activeTab?.type === 'chapter'
-      ? manuscript.chapters.find((c) => c.id === activeTab.refId) ?? null
-      : null
+    activeTab?.type === "chapter"
+      ? (manuscript.chapters.find((c) => c.id === activeTab.refId) ?? null)
+      : null,
   );
-  const totalWords = $derived(manuscript.chapters.reduce((s, c) => s + c.wordCount, 0));
+  const totalWords = $derived(
+    manuscript.chapters.reduce((s, c) => s + c.wordCount, 0),
+  );
   const totalReading = $derived(readingTime(totalWords));
 
   // Continuously sync today's progress with the manuscript word count.
@@ -26,30 +35,19 @@
   });
 
   const diagnostics = $derived(
-    runLint({ chapters: manuscript.chapters, characters: manuscript.characters })
+    runLint({
+      chapters: manuscript.chapters,
+      characters: manuscript.characters,
+    }),
   );
-  const semanticDiagnostics = $derived((storyIde.diagnostics?.diagnostics ?? []).map((diagnostic): Diagnostic => ({
-    ruleId: diagnostic.code,
-    severity: diagnostic.severity,
-    category: diagnostic.category,
-    chapterId: diagnostic.evidence.find((item) => item.chapterId)?.chapterId ?? '',
-    chapterTitle: 'Story graph',
-    message: diagnostic.message,
-    source: 'semantic',
-    evidence: diagnostic.evidence.map((item) => ({
-      unitId: item.unitId,
-      chapterId: item.chapterId,
-      sceneId: item.sceneId,
-      artifactId: item.artifactId,
-      excerpt: item.quote
-    }))
-  })));
-  const issueCount = $derived(mergeDiagnostics(diagnostics, semanticDiagnostics).length);
-  const branchLabel = $derived(['build', 'story-bible', 'outline-studio'].includes(activeTab?.type ?? '') && storyIde.selectedRun ? storyIde.selectedRun.branchName : 'main');
+  const issueCount = $derived(diagnostics.length);
+  const branchLabel = "main";
 
   const goal = $derived(preferences.dailyWordGoal);
   const written = $derived(preferences.getTodayProgress());
-  const goalPct = $derived(goal > 0 ? Math.min(100, Math.round((written / goal) * 100)) : 0);
+  const goalPct = $derived(
+    goal > 0 ? Math.min(100, Math.round((written / goal) * 100)) : 0,
+  );
   const streak = $derived(preferences.streakDays());
 </script>
 
@@ -63,12 +61,12 @@
     </div>
     <button
       type="button"
-      onclick={() => void manuscript.setActiveView('problems')}
+      onclick={() => void manuscript.setActiveView("problems")}
       class="flex items-center gap-1.5 px-3 py-0.5 transition-colors hover:bg-accent-foreground/10"
       title="Open Problems panel"
     >
       <Check class="size-3" />
-      <span>{issueCount} {issueCount === 1 ? 'issue' : 'issues'}</span>
+      <span>{issueCount} {issueCount === 1 ? "issue" : "issues"}</span>
     </button>
     <div class="flex items-center gap-1.5 px-3 py-0.5">
       <Circle class="size-2 fill-current" />
@@ -80,7 +78,7 @@
     {#if goal > 0}
       <div
         class="flex items-center gap-1.5 px-3 py-0.5"
-        title={`Today: ${written.toLocaleString()} / ${goal.toLocaleString()} words${streak > 1 ? ` · ${streak}-day streak` : ''}`}
+        title={`Today: ${written.toLocaleString()} / ${goal.toLocaleString()} words${streak > 1 ? ` · ${streak}-day streak` : ""}`}
       >
         <Target class="size-3" />
         <span>{written.toLocaleString()} / {goal.toLocaleString()}</span>
@@ -89,7 +87,7 @@
         >
           <span
             class="block h-full bg-accent-foreground"
-            style:width={goalPct + '%'}
+            style:width={goalPct + "%"}
           ></span>
         </span>
         {#if streak > 1}
@@ -104,7 +102,9 @@
         <span>{activeChapter.wordCount.toLocaleString()} words</span>
       </div>
       <div class="flex items-center gap-1.5 px-3 py-0.5">
-        <span class="font-mono">{readingTime(activeChapter.wordCount).label}</span>
+        <span class="font-mono"
+          >{readingTime(activeChapter.wordCount).label}</span
+        >
       </div>
       <div class="flex items-center gap-1.5 px-3 py-0.5">
         <span class="font-mono">Markdown</span>
@@ -113,9 +113,18 @@
     <div class="flex items-center gap-1.5 px-3 py-0.5">
       <span>Total: {totalWords.toLocaleString()} · {totalReading.label}</span>
     </div>
-    <div class="flex items-center gap-1.5 px-3 py-0.5" title={manuscript.error ?? storyIde.error ?? (storyIde.connection === 'stale' ? 'Novel Build data is stale' : 'All changes synchronized')}>
+    <div
+      class="flex items-center gap-1.5 px-3 py-0.5"
+      title={manuscript.error ?? "All changes synchronized"}
+    >
       <Wifi class="size-3" />
-      <span>{manuscript.saving ? 'Saving...' : manuscript.error ? 'Save failed' : storyIde.connection === 'reconnecting' ? 'Reconnecting' : storyIde.connection === 'stale' ? 'Build stale' : 'Synced'}</span>
+      <span
+        >{manuscript.saving
+          ? "Saving..."
+          : manuscript.error
+            ? "Save failed"
+            : "Synced"}</span
+      >
     </div>
   </div>
 </footer>

@@ -1,1 +1,40 @@
-{"schemaVersion":1,"name":"novel-setup-payoff","version":"1.0.0","description":"Construct and validate explicit setup, reinforcement, misdirection, and payoff links.","kind":"planning","inputs":["plot-thread","scene-plan"],"outputs":["setup-payoff-map"],"runtimeRoles":["creator","librarian"],"allowedTools":["searchStory","queryOpenLoops","queryTimeline","linkSetupPayoff","applyArtifactBatch","reportTaskResult"],"maxIterations":2,"context":{"maxTokens":18000,"sections":["story-brief","active-task","characters","threads","canon"]},"rubric":"setup-payoff-v1","procedure":["Inventory explicit and implicit promises created by the scene graph.","Assign setup, optional reinforcement or misdirection, and intended payoff with stable keys.","Reject payoff-without-setup and unpaid major setup before persisting the VALIDATED map."],"references":[]}
+{
+  "schemaVersion": 1,
+  "name": "novel-setup-payoff",
+  "version": "1.1.0",
+  "description": "Construct and validate explicit setup, reinforcement, misdirection, and payoff links.",
+  "kind": "planning",
+  "inputs": ["plot-thread", "scene-plan"],
+  "outputs": ["setup-payoff-map"],
+  "runtimeRoles": ["creator", "librarian"],
+  "allowedTools": [
+    "listProjectFiles",
+    "listProjectDocs",
+    "readProjectDoc",
+    "grepProject",
+    "listChapters",
+    "readChapter",
+    "listScenes",
+    "readScene",
+    "listCharacters",
+    "readCharacter",
+    "listLocations",
+    "readLocation",
+    "readStoryStructure",
+    "createProjectDoc",
+    "updateProjectDoc"
+  ],
+  "maxIterations": 2,
+  "context": {
+    "maxTokens": 18000,
+    "sections": ["story-brief", "active-task", "characters", "threads", "canon"]
+  },
+  "rubric": "setup-payoff-v1",
+  "procedure": [
+    "Inventory explicit and implicit promises created by the scene graph.",
+    "Assign setup, optional reinforcement or misdirection, and intended payoff with stable keys.",
+    "Reject payoff-without-setup and unpaid major setup before persisting the map.",
+    "Choose the next step from the author's goal and current project state; keep progress in project docs and verify persisted tool results."
+  ],
+  "references": []
+}

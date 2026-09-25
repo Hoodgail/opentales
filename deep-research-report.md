@@ -1,5 +1,7 @@
 # Deep Research: Turning OpenTales into a Real Novel-Writing IDE and an Autonomous “Novel Build” System
 
+> Historical record: the deterministic build workflow described here has been retired. See [agentic writing](docs/agentic-writing.md) for current behavior.
+
 ## Executive assessment
 
 OpenTales has a much stronger foundation than “just a concept.” The repository already contains a desktop/web IDE shell, versioned writing data, chapters, scenes, characters, locations, acts, obstacles, project documents, search, deterministic manuscript linting, drafting/review workflows, AI settings and sessions, editable AI skills, subagents, approval-gated mutations, streaming, and manuscript-aware tool calls. The overall metaphor in the README—treating a novel as a “codebase of human meaning”—is unusually good because it gives OpenTales a coherent product direction rather than making it another text editor with a chatbot bolted on. fileciteturn4file0L2-L2 fileciteturn5file0L2-L2
@@ -36,19 +38,19 @@ That approach also creates your strongest differentiation from Scrivener, Plottr
 
 My overall assessment of the repository today is:
 
-| Area | My assessment | Main reason |
-|---|---:|---|
-| Product concept | **Excellent** | “IDE for stories” is a coherent and differentiated metaphor. |
-| Existing application shell | **Strong prototype** | Many major IDE surfaces already exist. |
-| Core writing UX | **Early** | Editing exists, but long-form planning/revision workflows remain shallow. |
-| Story data model | **Promising** | You already have more structured entities than a document-only editor. |
-| AI skills as craft references | **Better than expected** | Idea/outline/chapter instructions are thoughtful. |
-| AI skills as executable capabilities | **Weak** | Inputs, outputs, preconditions, postconditions, and evaluation contracts are informal. |
-| Agent orchestration | **Weak** | Eight-step chat loop is being asked to perform long-horizon workflow orchestration. |
-| Long-term agent memory | **Very weak** | Recent chat plus ad hoc document retrieval is not enough for a novel. |
-| Continuity intelligence | **Early** | Four simple deterministic lint rules are a start, not a semantic continuity engine. |
-| Evaluation infrastructure | **Critical gap** | Fixtures exist, but the repository exposes no real test/eval pipeline in package scripts. |
-| Autonomous full-book generation | **Not architecturally possible yet** | Needs durable workflows, branches, artifacts, memory, context packing, and validation gates. |
+| Area                                 |                        My assessment | Main reason                                                                                  |
+| ------------------------------------ | -----------------------------------: | -------------------------------------------------------------------------------------------- |
+| Product concept                      |                        **Excellent** | “IDE for stories” is a coherent and differentiated metaphor.                                 |
+| Existing application shell           |                 **Strong prototype** | Many major IDE surfaces already exist.                                                       |
+| Core writing UX                      |                            **Early** | Editing exists, but long-form planning/revision workflows remain shallow.                    |
+| Story data model                     |                        **Promising** | You already have more structured entities than a document-only editor.                       |
+| AI skills as craft references        |             **Better than expected** | Idea/outline/chapter instructions are thoughtful.                                            |
+| AI skills as executable capabilities |                             **Weak** | Inputs, outputs, preconditions, postconditions, and evaluation contracts are informal.       |
+| Agent orchestration                  |                             **Weak** | Eight-step chat loop is being asked to perform long-horizon workflow orchestration.          |
+| Long-term agent memory               |                        **Very weak** | Recent chat plus ad hoc document retrieval is not enough for a novel.                        |
+| Continuity intelligence              |                            **Early** | Four simple deterministic lint rules are a start, not a semantic continuity engine.          |
+| Evaluation infrastructure            |                     **Critical gap** | Fixtures exist, but the repository exposes no real test/eval pipeline in package scripts.    |
+| Autonomous full-book generation      | **Not architecturally possible yet** | Needs durable workflows, branches, artifacts, memory, context packing, and validation gates. |
 
 The encouraging part is that you do **not** need to throw away the current system. The existing Svelte application, Prisma/Postgres backend, AI SDK integration, approval system, project docs, structured manuscript entities, branch/version concepts, and progressive skill loading are all usable foundations. fileciteturn6file0L2-L2 fileciteturn34file0L2-L2
 
@@ -62,7 +64,7 @@ The UI skeleton is already broad. The Activity Bar exposes manuscript, character
 
 The chapter editor is also more mature than the documentation might suggest. It has Monaco-backed Markdown editing, POV/location metadata, typewriter mode, focus mode, preview, selection rewriting, AI dialogue insertion, and collaboration wiring. That is a credible technical editor foundation. fileciteturn54file0L2-L2
 
-The weakness is the *semantic depth* behind the surfaces.
+The weakness is the _semantic depth_ behind the surfaces.
 
 For example, the current Outline panel is effectively a master-outline document, a word-count-based pacing visualization, and an act/chapter list. It does not yet operate as an editable causal story model: there is no rich scene-card matrix, subplot lane view, timeline, setup/payoff graph, POV distribution view, tension curve, dependency graph, character-arc overlay, or drag-and-drop structural editing in this component. Its “AI Expand” behavior appends generated Markdown to the existing outline rather than translating the new planning material into the structured manuscript model. fileciteturn43file0L2-L2
 
@@ -83,8 +85,8 @@ streamText({
   tools,
   stopWhen: stepCountIs(8),
   system: systemPrompt,
-  messages: [{ role: 'user', content: messagePrompt }]
-})
+  messages: [{ role: "user", content: messagePrompt }],
+});
 ```
 
 so the autonomous reasoning/tool loop has only eight SDK steps. Vercel's own AI SDK documentation treats `stopWhen` as loop control for multi-step agents; the current documentation says its agent abstractions otherwise default to a substantially larger step budget. More importantly, an arbitrary small turn cap is a guardrail for a conversational agent, not a workflow architecture for a task that may legitimately require hundreds of operations. fileciteturn25file0L2-L2 citeturn1search11
@@ -115,16 +117,16 @@ That gap matters more for an agent product than it would for a conventional CRUD
 
 The central product change I recommend is to introduce a distinction OpenTales does not currently make strongly enough:
 
-| Concept | Responsibility |
-|---|---|
-| **Workflow** | Durable orchestration: what must happen, dependencies, retries, checkpoints. |
-| **Agent** | A model runtime with a particular tool scope, model policy, and context policy. |
-| **Skill** | Procedural knowledge about how to perform one class of work. |
-| **Tool** | A concrete read/action API into OpenTales. |
-| **Artifact** | Persistent structured output from a task. |
-| **Canon** | Authoritative facts and story state accepted for downstream work. |
+| Concept          | Responsibility                                                                        |
+| ---------------- | ------------------------------------------------------------------------------------- |
+| **Workflow**     | Durable orchestration: what must happen, dependencies, retries, checkpoints.          |
+| **Agent**        | A model runtime with a particular tool scope, model policy, and context policy.       |
+| **Skill**        | Procedural knowledge about how to perform one class of work.                          |
+| **Tool**         | A concrete read/action API into OpenTales.                                            |
+| **Artifact**     | Persistent structured output from a task.                                             |
+| **Canon**        | Authoritative facts and story state accepted for downstream work.                     |
 | **Context pack** | The smallest relevant subset of artifacts/canon/manuscript needed for one model call. |
-| **Eval** | Evidence that a task/artifact satisfies its declared completion criteria. |
+| **Eval**         | Evidence that a task/artifact satisfies its declared completion criteria.             |
 
 At the moment, too much of this is implicitly delegated to prompts.
 
@@ -193,7 +195,7 @@ The full-novel capability should instead be represented as a durable **Novel Bui
 
 This is mostly a **workflow**, not an unconstrained agent. That distinction is consistent with Anthropic's production guidance: workflows are preferable where the decomposition is known and predictability matters, while autonomous agents are useful inside open-ended portions where the correct steps cannot be predetermined. Prompt chaining, routing, parallel work, orchestrator-workers, and evaluator-optimizer loops can be combined rather than selecting “agent” as the architecture for everything. citeturn4view0
 
-A novel is an almost perfect hybrid case. The *high-level production pipeline* is predictable: establish premise, build canon, plan structure, break it into scenes, draft, validate, revise. The *creative decisions inside those phases* are open-ended. Therefore deterministic code should own the outer workflow while LLMs own creative operations inside it. citeturn6search3turn6search0
+A novel is an almost perfect hybrid case. The _high-level production pipeline_ is predictable: establish premise, build canon, plan structure, break it into scenes, draft, validate, revise. The _creative decisions inside those phases_ are open-ended. Therefore deterministic code should own the outer workflow while LLMs own creative operations inside it. citeturn6search3turn6search0
 
 The first new persistent entities should look conceptually like this:
 
@@ -256,23 +258,23 @@ Today, Markdown ProjectDocs contain a large amount of planning intelligence. Kee
 
 I would introduce at least these artifact classes:
 
-| Artifact | What it represents |
-|---|---|
-| `StoryBrief` | Premise, genre, target audience, tone, promises, constraints, thematic question. |
-| `NarrativeContract` | POV rules, tense, narrative distance, content constraints, stylistic dimensions. |
-| `CharacterBible` | Wants, needs, contradictions, backstory, arc, voice, knowledge, secrets. |
-| `WorldBible` | Rules, institutions, geography, factions, terminology, technology/magic constraints. |
-| `PlotThread` | Main plot, subplot, character arc, mystery, romance, thematic thread. |
-| `Beat` | Narrative event/function with cause, consequence, thread links and expected payoff. |
-| `ScenePlan` | POV, time, location, goal, obstacle, turn, outcome, revelations, dependencies. |
-| `TimelineEvent` | Absolute/relative chronological event. |
-| `CanonFact` | Atomic established proposition and its evidence/source. |
-| `EntityState` | Character location, injuries, possessions, knowledge, relationships at a point in story time. |
-| `OpenLoop` | Promise/question/clue/setup that requires later resolution. |
-| `ForeshadowingThread` | Setup, reinforcement, misdirection, payoff. |
-| `ChapterDraft` | Prose plus its provenance and plan version. |
-| `RevisionIssue` | Structured diagnostic with severity, scope, evidence and candidate resolution. |
-| `EvaluationResult` | Rubric scores and deterministic checks for an artifact. |
+| Artifact              | What it represents                                                                            |
+| --------------------- | --------------------------------------------------------------------------------------------- |
+| `StoryBrief`          | Premise, genre, target audience, tone, promises, constraints, thematic question.              |
+| `NarrativeContract`   | POV rules, tense, narrative distance, content constraints, stylistic dimensions.              |
+| `CharacterBible`      | Wants, needs, contradictions, backstory, arc, voice, knowledge, secrets.                      |
+| `WorldBible`          | Rules, institutions, geography, factions, terminology, technology/magic constraints.          |
+| `PlotThread`          | Main plot, subplot, character arc, mystery, romance, thematic thread.                         |
+| `Beat`                | Narrative event/function with cause, consequence, thread links and expected payoff.           |
+| `ScenePlan`           | POV, time, location, goal, obstacle, turn, outcome, revelations, dependencies.                |
+| `TimelineEvent`       | Absolute/relative chronological event.                                                        |
+| `CanonFact`           | Atomic established proposition and its evidence/source.                                       |
+| `EntityState`         | Character location, injuries, possessions, knowledge, relationships at a point in story time. |
+| `OpenLoop`            | Promise/question/clue/setup that requires later resolution.                                   |
+| `ForeshadowingThread` | Setup, reinforcement, misdirection, payoff.                                                   |
+| `ChapterDraft`        | Prose plus its provenance and plan version.                                                   |
+| `RevisionIssue`       | Structured diagnostic with severity, scope, evidence and candidate resolution.                |
+| `EvaluationResult`    | Rubric scores and deterministic checks for an artifact.                                       |
 
 This is one place where recent story-generation research is particularly useful. STORYTELLER reports gains from continuously integrating a storyline representation with a narrative entity knowledge graph rather than generating prose from an outline alone. citeturn9search2
 
@@ -424,16 +426,16 @@ The most important conceptual cleanup is to stop treating every specialization a
 
 You probably need only a small family of runtime agents:
 
-| Agent runtime | Purpose | Tool access |
-|---|---|---|
-| **Orchestrator** | Decomposition, scheduling, gap detection | Build/task/artifact tools; little direct prose mutation |
-| **Explorer** | Read-only project investigation | Search/read only |
-| **Creator** | Planning/artifact construction | Scoped structured artifact writes |
-| **Drafter** | Scene/chapter prose | Assigned chapter/scene + reads |
-| **Critic** | Independent evaluation | Read + diagnostics only |
-| **Reviser** | Apply accepted critique | Assigned artifact/prose mutation |
-| **Researcher** | Optional external factual research | Research notebook + web/references |
-| **Librarian** | Canon/state extraction and reconciliation | Canon/state tools |
+| Agent runtime    | Purpose                                   | Tool access                                             |
+| ---------------- | ----------------------------------------- | ------------------------------------------------------- |
+| **Orchestrator** | Decomposition, scheduling, gap detection  | Build/task/artifact tools; little direct prose mutation |
+| **Explorer**     | Read-only project investigation           | Search/read only                                        |
+| **Creator**      | Planning/artifact construction            | Scoped structured artifact writes                       |
+| **Drafter**      | Scene/chapter prose                       | Assigned chapter/scene + reads                          |
+| **Critic**       | Independent evaluation                    | Read + diagnostics only                                 |
+| **Reviser**      | Apply accepted critique                   | Assigned artifact/prose mutation                        |
+| **Researcher**   | Optional external factual research        | Research notebook + web/references                      |
+| **Librarian**    | Canon/state extraction and reconciliation | Canon/state tools                                       |
 
 Most “character expert,” “dialogue expert,” “worldbuilding expert,” “outline expert,” and similar specialization can be **skills loaded into those runtimes**, rather than independent agent personalities.
 
@@ -505,7 +507,7 @@ That preserves the human-readable/open-source Skill format while moving machine 
 
 The current long skills should also be split. `novel-chapters/SKILL.md`, for example, has a lot of useful material, but an agent does not need every sentence-level prose lesson every time it drafts a scene. Put the invariant workflow in the main skill and load POV, dialogue, exposition, fight scenes, romance, description, suspense, humor, line editing, and other craft references only when relevant. Anthropic's context-engineering guidance specifically recommends small high-signal contexts and warns against bloated instruction/tool environments. fileciteturn33file0L2-L2 citeturn5view1turn5view2
 
-I would also remove the named-book/author imitation anchors from the chapter-writing core prompt. The current skill frames the target using titles and authors such as *Red Rising*, *No Country for Old Men*, *The Name of the Wind*, and others. fileciteturn33file0L2-L2
+I would also remove the named-book/author imitation anchors from the chapter-writing core prompt. The current skill frames the target using titles and authors such as _Red Rising_, _No Country for Old Men_, _The Name of the Wind_, and others. fileciteturn33file0L2-L2
 
 Instead define voice in dimensions the system can actually track:
 
@@ -528,24 +530,24 @@ That creates a reusable **Narrative Contract** and is much easier to evaluate fo
 
 The skill library is currently missing the procedural decomposition required for a whole book. My recommended first-class skill set is:
 
-| Skill family | Capabilities |
-|---|---|
-| **Intake** | brainstorm extraction, constraint resolution, story brief |
-| **Architecture** | story engine, genre promise, theme tension, macro structure |
-| **Characters** | cast design, arcs, relationships, secrets, voice |
-| **World** | world rules, institutions, factions, terminology, locations |
-| **Plot** | threads, causality, reversals, midpoint, climax, ending |
-| **Scenes** | scene purpose, goal/conflict/turn/outcome, sequel/reaction |
-| **Continuity** | canon extraction, entity state, timeline, contradictions |
-| **Setup/payoff** | mysteries, clues, promises, motifs, foreshadowing |
-| **Research** | factual research, source notebook, fact confidence |
-| **Drafting** | prose generation from explicit scene contracts |
-| **Dialogue** | character-distinct dialogue and subtext |
-| **Developmental revision** | structure, causality, character, pacing |
-| **Line revision** | rhythm, specificity, repetition, clarity |
-| **Copy edit** | mechanical consistency |
-| **Finalization** | synopsis, front/back matter, export preparation |
-| **Series** | multi-book canon, series arcs, recurring entities |
+| Skill family               | Capabilities                                                |
+| -------------------------- | ----------------------------------------------------------- |
+| **Intake**                 | brainstorm extraction, constraint resolution, story brief   |
+| **Architecture**           | story engine, genre promise, theme tension, macro structure |
+| **Characters**             | cast design, arcs, relationships, secrets, voice            |
+| **World**                  | world rules, institutions, factions, terminology, locations |
+| **Plot**                   | threads, causality, reversals, midpoint, climax, ending     |
+| **Scenes**                 | scene purpose, goal/conflict/turn/outcome, sequel/reaction  |
+| **Continuity**             | canon extraction, entity state, timeline, contradictions    |
+| **Setup/payoff**           | mysteries, clues, promises, motifs, foreshadowing           |
+| **Research**               | factual research, source notebook, fact confidence          |
+| **Drafting**               | prose generation from explicit scene contracts              |
+| **Dialogue**               | character-distinct dialogue and subtext                     |
+| **Developmental revision** | structure, causality, character, pacing                     |
+| **Line revision**          | rhythm, specificity, repetition, clarity                    |
+| **Copy edit**              | mechanical consistency                                      |
+| **Finalization**           | synopsis, front/back matter, export preparation             |
+| **Series**                 | multi-book canon, series arcs, recurring entities           |
 
 Do **not** create one giant `one-shot-novel/SKILL.md` containing all of that. `novel-build` should be a workflow entrypoint that schedules the specialized capabilities.
 
@@ -616,25 +618,25 @@ Your current tool library already contains a surprisingly broad set of reads—p
 
 The next tools should therefore not simply be “more CRUD.” They should expose **story intelligence**:
 
-| Tool | Purpose |
-|---|---|
-| `searchStory` | Hybrid exact/FTS/semantic search across every story entity. |
-| `findReferences` | All places an entity/fact/thread is referenced. |
-| `getSceneContext` | Compiler-built context pack for a scene. |
-| `queryCanon` | Structured canonical facts with time/source filtering. |
-| `commitCanonDelta` | Persist validated state changes after a scene. |
-| `queryTimeline` | Events between times/scenes/entities. |
-| `queryEntityState` | “What does Mara know/own/believe at Scene 16?” |
-| `queryOpenLoops` | Outstanding mysteries, setups and promises. |
-| `linkSetupPayoff` | Explicitly connect setup/reinforcement/payoff. |
-| `runStoryLint` | Deterministic and AI-assisted diagnostics. |
-| `getArcState` | Progress of a character/subplot through the manuscript. |
-| `compareVersions` | Semantic + prose diff between revisions. |
-| `createCheckpoint` | Immutable build milestone. |
-| `applyArtifactBatch` | Atomic structured planning mutations. |
-| `applyChapterPatch` | Scoped prose edit against expected version. |
-| `getBuildState` | Current tasks, blockers and completion state. |
-| `reportTaskResult` | Typed subagent result + artifacts + evidence. |
+| Tool                 | Purpose                                                     |
+| -------------------- | ----------------------------------------------------------- |
+| `searchStory`        | Hybrid exact/FTS/semantic search across every story entity. |
+| `findReferences`     | All places an entity/fact/thread is referenced.             |
+| `getSceneContext`    | Compiler-built context pack for a scene.                    |
+| `queryCanon`         | Structured canonical facts with time/source filtering.      |
+| `commitCanonDelta`   | Persist validated state changes after a scene.              |
+| `queryTimeline`      | Events between times/scenes/entities.                       |
+| `queryEntityState`   | “What does Mara know/own/believe at Scene 16?”              |
+| `queryOpenLoops`     | Outstanding mysteries, setups and promises.                 |
+| `linkSetupPayoff`    | Explicitly connect setup/reinforcement/payoff.              |
+| `runStoryLint`       | Deterministic and AI-assisted diagnostics.                  |
+| `getArcState`        | Progress of a character/subplot through the manuscript.     |
+| `compareVersions`    | Semantic + prose diff between revisions.                    |
+| `createCheckpoint`   | Immutable build milestone.                                  |
+| `applyArtifactBatch` | Atomic structured planning mutations.                       |
+| `applyChapterPatch`  | Scoped prose edit against expected version.                 |
+| `getBuildState`      | Current tasks, blockers and completion state.               |
+| `reportTaskResult`   | Typed subagent result + artifacts + evidence.               |
 
 Bulk/atomic tools are important because an outline can legitimately create forty chapters and one hundred scenes. Having a model negotiate individual human approvals or tool steps for each object wastes context and massively increases failure surface.
 
@@ -642,10 +644,10 @@ Your existing versioned writing architecture gives you an elegant solution to au
 
 I would implement three autonomy modes:
 
-| Mode | Behavior |
-|---|---|
-| **Assist** | Current behavior: significant mutations require approval. |
-| **Plan & Review** | Human approves the generated build manifest; AI may then write freely to an isolated AI branch, stopping at declared checkpoints. |
+| Mode                 | Behavior                                                                                                                                                       |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Assist**           | Current behavior: significant mutations require approval.                                                                                                      |
+| **Plan & Review**    | Human approves the generated build manifest; AI may then write freely to an isolated AI branch, stopping at declared checkpoints.                              |
 | **Autonomous Draft** | Human authorizes a branch, scope, cost/token budget, and creative brief; agent works until completion or a true blocker. Final merge remains human-controlled. |
 
 That is much better than either extreme of “approve every paragraph” or “let an agent rewrite the canonical manuscript without limits.”
@@ -813,23 +815,23 @@ Today's four checks are useful seeds. fileciteturn52file0L2-L2
 
 Eventually I would expect families like:
 
-| Category | Examples |
-|---|---|
-| Continuity | eye/hair/name drift; inconsistent ages; dead character appears; object changes owner |
-| Chronology | impossible travel; event occurs before prerequisite; inconsistent dates |
-| Knowledge | character references something they have not learned |
-| Location | character simultaneously in incompatible places |
-| World rules | magic/technology/social rule violated |
-| Character | stated goal/voice/behavior discontinuity |
-| POV | head hopping, forbidden perspective, wrong narrative distance |
-| Setup/payoff | unresolved setup, payoff without setup, forgotten mystery |
-| Plot | missing causal bridge, dormant major subplot, duplicated beat |
-| Pacing | long low-conflict run, clustered revelations, uneven chapter sizes |
-| Repetition | repeated phrases, descriptions, beats, explanations |
-| Dialogue | speaker indistinctness, overused tags, exposition dialogue |
-| Style | tense drift, person drift, excessive filtering, configured banned tendencies |
-| Metadata | scene lacks POV/location/time where project requires them |
-| Publishing | chapter numbering, front matter, export requirements |
+| Category     | Examples                                                                             |
+| ------------ | ------------------------------------------------------------------------------------ |
+| Continuity   | eye/hair/name drift; inconsistent ages; dead character appears; object changes owner |
+| Chronology   | impossible travel; event occurs before prerequisite; inconsistent dates              |
+| Knowledge    | character references something they have not learned                                 |
+| Location     | character simultaneously in incompatible places                                      |
+| World rules  | magic/technology/social rule violated                                                |
+| Character    | stated goal/voice/behavior discontinuity                                             |
+| POV          | head hopping, forbidden perspective, wrong narrative distance                        |
+| Setup/payoff | unresolved setup, payoff without setup, forgotten mystery                            |
+| Plot         | missing causal bridge, dormant major subplot, duplicated beat                        |
+| Pacing       | long low-conflict run, clustered revelations, uneven chapter sizes                   |
+| Repetition   | repeated phrases, descriptions, beats, explanations                                  |
+| Dialogue     | speaker indistinctness, overused tags, exposition dialogue                           |
+| Style        | tense drift, person drift, excessive filtering, configured banned tendencies         |
+| Metadata     | scene lacks POV/location/time where project requires them                            |
+| Publishing   | chapter numbering, front matter, export requirements                                 |
 
 Each diagnostic needs **evidence and navigation**, not merely “AI says your pacing is poor.” The user should click a problem and jump to both sides of a contradiction.
 
@@ -1186,28 +1188,28 @@ I would **not** begin by adding another twenty prompts or another dozen personas
 
 The order of work matters.
 
-| Priority | Build | Why |
-|---|---|---|
-| **Critical** | Automated unit/integration/eval harness | You need measurements before changing agent behavior. |
-| **Critical** | Durable `BuildRun` / `BuildTask` workflow state | Foundation for long-horizon autonomy. |
-| **Critical** | AI sandbox branches + scoped authorization | Makes autonomous writing safe and reviewable. |
-| **Critical** | Structured artifacts and schemas | Removes Markdown/chat as machine source of truth. |
-| **Critical** | Context assembler | Necessary for coherent long-form generation. |
-| **Critical** | Canon/state ledger | Necessary for continuity at novel scale. |
-| **High** | Scene graph and scene-first planning | Gives drafting a granular executable plan. |
-| **High** | Tool capability scoping | Makes specialized agents reliable. |
-| **High** | Typed subagent task contracts | Eliminates vague delegation. |
-| **High** | Per-scene canon extraction | Keeps story state synchronized as prose evolves. |
-| **High** | Evaluator/revision loop | Converts first drafts into iterative output. |
-| **High** | Real project search / references | Needed by humans and agents alike. |
-| **High** | Story Bible UI | Makes structured canon usable without AI. |
-| **High** | Corkboard / plot grid / timeline | Core human novel-planning capability. |
-| **High** | Expanded Problems engine | Central differentiating IDE feature. |
-| **Medium** | Rich manuscript/continuous editing mode | Major writer UX improvement. |
-| **Medium** | Semantic snapshots/diffs | Excellent fit with your versioning architecture. |
-| **Medium** | DOCX/EPUB/PDF build pipeline | Completes book workflow. |
-| **Medium** | Optional research agent/notebook | Useful for historical/speculative research. |
-| **Later** | Third-party skill/plugin ecosystem | Valuable after the core capability model stabilizes. |
+| Priority     | Build                                           | Why                                                   |
+| ------------ | ----------------------------------------------- | ----------------------------------------------------- |
+| **Critical** | Automated unit/integration/eval harness         | You need measurements before changing agent behavior. |
+| **Critical** | Durable `BuildRun` / `BuildTask` workflow state | Foundation for long-horizon autonomy.                 |
+| **Critical** | AI sandbox branches + scoped authorization      | Makes autonomous writing safe and reviewable.         |
+| **Critical** | Structured artifacts and schemas                | Removes Markdown/chat as machine source of truth.     |
+| **Critical** | Context assembler                               | Necessary for coherent long-form generation.          |
+| **Critical** | Canon/state ledger                              | Necessary for continuity at novel scale.              |
+| **High**     | Scene graph and scene-first planning            | Gives drafting a granular executable plan.            |
+| **High**     | Tool capability scoping                         | Makes specialized agents reliable.                    |
+| **High**     | Typed subagent task contracts                   | Eliminates vague delegation.                          |
+| **High**     | Per-scene canon extraction                      | Keeps story state synchronized as prose evolves.      |
+| **High**     | Evaluator/revision loop                         | Converts first drafts into iterative output.          |
+| **High**     | Real project search / references                | Needed by humans and agents alike.                    |
+| **High**     | Story Bible UI                                  | Makes structured canon usable without AI.             |
+| **High**     | Corkboard / plot grid / timeline                | Core human novel-planning capability.                 |
+| **High**     | Expanded Problems engine                        | Central differentiating IDE feature.                  |
+| **Medium**   | Rich manuscript/continuous editing mode         | Major writer UX improvement.                          |
+| **Medium**   | Semantic snapshots/diffs                        | Excellent fit with your versioning architecture.      |
+| **Medium**   | DOCX/EPUB/PDF build pipeline                    | Completes book workflow.                              |
+| **Medium**   | Optional research agent/notebook                | Useful for historical/speculative research.           |
+| **Later**    | Third-party skill/plugin ecosystem              | Valuable after the core capability model stabilizes.  |
 
 The first architectural milestone should be **“autonomously build a complete book plan,” not “autonomously write a complete book.”**
 
@@ -1444,7 +1446,7 @@ That is a considerably more powerful product than “Scrivener with AI.”
 
 It also gives you a realistic path to the capability you actually want:
 
-> A human gives OpenTales a single brainstorm, chooses how much authority the AI has, and starts a Novel Build. OpenTales turns the brainstorm into structured story state, plans the book, identifies missing information, resolves what it can, constructs characters/world/plot/scenes, drafts incrementally from tightly assembled context, records what becomes canon after every scene, continuously checks the new prose against the rest of the story, independently critiques weak work, revises it, checkpoints every stage on an isolated branch, and eventually presents the author with a complete manuscript plus the entire inspectable reasoning *product* behind it: outline, story bible, timeline, arcs, diagnostics, revisions, and provenance.
+> A human gives OpenTales a single brainstorm, chooses how much authority the AI has, and starts a Novel Build. OpenTales turns the brainstorm into structured story state, plans the book, identifies missing information, resolves what it can, constructs characters/world/plot/scenes, drafts incrementally from tightly assembled context, records what becomes canon after every scene, continuously checks the new prose against the rest of the story, independently critiques weak work, revises it, checkpoints every stage on an isolated branch, and eventually presents the author with a complete manuscript plus the entire inspectable reasoning _product_ behind it: outline, story bible, timeline, arcs, diagnostics, revisions, and provenance.
 
 The current OpenTales repository already contains many of the right nouns—**chapters, scenes, characters, locations, acts, docs, versions, tools, skills, agents, approvals, problems**. fileciteturn29file0L2-L2 fileciteturn40file0L2-L2
 

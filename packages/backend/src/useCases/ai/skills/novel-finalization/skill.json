@@ -1,1 +1,53 @@
-{"schemaVersion":1,"name":"novel-finalization","version":"1.0.0","description":"Gate proof, final branch state, manuscript completeness, provenance, and export readiness.","kind":"revision","inputs":["story-brief","narrative-contract","chapter-draft","revision-issue"],"outputs":["chapter-draft","revision-issue","export-manifest"],"runtimeRoles":["critic","reviser","orchestrator"],"allowedTools":["getBuildState","searchStory","queryCanon","queryOpenLoops","runStoryLint","compareVersions","listBuildUnits","readBuildUnit","applyBuildUnitPatch","applyChapterPatch","compileBuildManuscript","createCheckpoint","reportTaskResult"],"maxIterations":2,"context":{"maxTokens":28000,"sections":["story-brief","narrative-contract","active-task","recent-causal","threads","canon","style"]},"rubric":"finalization-v1","procedure":["Verify all planned chapters, checkpoints, accepted branch heads, and required story resolutions exist.","Run proof and continuity diagnostics; apply only bounded final corrections.","Require export readiness and observable provenance before the immutable final checkpoint."],"references":[]}
+{
+  "schemaVersion": 1,
+  "name": "novel-finalization",
+  "version": "1.1.0",
+  "description": "Gate proof, final branch state, manuscript completeness, provenance, and export readiness.",
+  "kind": "revision",
+  "inputs": [
+    "story-brief",
+    "narrative-contract",
+    "chapter-draft",
+    "revision-issue"
+  ],
+  "outputs": ["chapter-draft", "revision-issue", "export-manifest"],
+  "runtimeRoles": ["critic", "reviser", "orchestrator"],
+  "allowedTools": [
+    "listProjectFiles",
+    "listProjectDocs",
+    "readProjectDoc",
+    "grepProject",
+    "listChapters",
+    "readChapter",
+    "listScenes",
+    "readScene",
+    "listCharacters",
+    "readCharacter",
+    "listLocations",
+    "readLocation",
+    "readStoryStructure",
+    "createProjectDoc",
+    "updateProjectDoc"
+  ],
+  "maxIterations": 2,
+  "context": {
+    "maxTokens": 28000,
+    "sections": [
+      "story-brief",
+      "narrative-contract",
+      "active-task",
+      "recent-causal",
+      "threads",
+      "canon",
+      "style"
+    ]
+  },
+  "rubric": "finalization-v1",
+  "procedure": [
+    "Read the current plan and manuscript to identify unfinished work.",
+    "Review continuity, unresolved promises, prose, and publication requirements.",
+    "Apply requested corrections through writing tools and record completion or remaining issues in project docs.",
+    "Choose the next step from the author's goal and current project state; keep progress in project docs and verify persisted tool results."
+  ],
+  "references": []
+}

@@ -16,45 +16,46 @@ import type {
   StoryDiagnosticsResult,
   StoryReference,
   StorySourceSpan,
-  TimelineEvent
-} from '@opentales/sdk';
+  TimelineEvent,
+} from "@opentales/sdk";
 
 /**
- * The complete set requested by the Novel Build research document. This is
+ * The complete set requested by the original story-state design. This is
  * deliberately kept next to the engine so rules cannot silently drift out of
  * sync with the Problems surface.
  */
 export const STORY_DIAGNOSTIC_CATEGORIES = [
-  'schema',
-  'cross-link',
-  'continuity',
-  'chronology',
-  'knowledge',
-  'location',
-  'world-rule',
-  'character',
-  'pov',
-  'setup-payoff',
-  'plot',
-  'pacing',
-  'repetition',
-  'dialogue',
-  'style',
-  'metadata',
-  'publishing',
-  'workflow'
+  "schema",
+  "cross-link",
+  "continuity",
+  "chronology",
+  "knowledge",
+  "location",
+  "world-rule",
+  "character",
+  "pov",
+  "setup-payoff",
+  "plot",
+  "pacing",
+  "repetition",
+  "dialogue",
+  "style",
+  "metadata",
+  "publishing",
+  "workflow",
 ] as const satisfies readonly StoryDiagnosticCategory[];
 
-export type StoryDiagnosticsCategory = (typeof STORY_DIAGNOSTIC_CATEGORIES)[number];
+export type StoryDiagnosticsCategory =
+  (typeof STORY_DIAGNOSTIC_CATEGORIES)[number];
 
-export type PlanningMode = 'pantser' | 'hybrid' | 'planner';
+export type PlanningMode = "pantser" | "hybrid" | "planner";
 export type DiagnosticsPhase =
-  | 'planning'
-  | 'drafting'
-  | 'revising'
-  | 'finalizing'
-  | 'publishing'
-  | 'completed';
+  | "planning"
+  | "drafting"
+  | "revising"
+  | "finalizing"
+  | "publishing"
+  | "completed";
 
 export interface StoryDiagnosticsMetadata {
   /** Human-selected workflow style; pantsers are not forced to fill planning metadata. */
@@ -84,12 +85,12 @@ export interface DiagnosticKnowledgeClaim {
 export interface DiagnosticKnowledgeDelta {
   characterId: string;
   knowledgeKey: string;
-  operation: 'gain' | 'lose';
+  operation: "gain" | "lose";
 }
 
 export interface DiagnosticCharacterSignal {
   characterId: string;
-  kind: 'goal' | 'voice' | 'behavior';
+  kind: "goal" | "voice" | "behavior";
   value: string;
   /** Keys/traits from the Character Bible that an extractor found contradicted. */
   contradicts: string[];
@@ -114,14 +115,15 @@ export interface DiagnosticDialogueTurn {
   end?: number;
 }
 
-export interface DiagnosticSceneSnapshot extends Omit<Scene, 'writingId' | 'branchId' | 'headVersionId'> {
+export interface DiagnosticSceneSnapshot
+  extends Omit<Scene, "writingId" | "branchId" | "headVersionId"> {
   writingId?: string;
   branchId?: string | null;
   headVersionId?: string | null;
   /** Scene-plan dependency keys or scene IDs, when materialized on the scene. */
   dependencyIds?: string[];
   /** Allows an intentional flashback/flash-forward to bypass linear-order warnings. */
-  chronologyMode?: 'linear' | 'flashback' | 'flashforward';
+  chronologyMode?: "linear" | "flashback" | "flashforward";
   knowledgeClaims?: DiagnosticKnowledgeClaim[];
   normalizedKnowledgeDeltas?: DiagnosticKnowledgeDelta[];
   interiorityCharacterIds?: string[];
@@ -132,11 +134,12 @@ export interface DiagnosticSceneSnapshot extends Omit<Scene, 'writingId' | 'bran
   metadata?: JsonObject;
 }
 
-export interface DiagnosticChapterSnapshot extends Omit<Chapter, 'scenes' | 'writingId' | 'branchId' | 'headVersionId'> {
+export interface DiagnosticChapterSnapshot
+  extends Omit<Chapter, "scenes" | "writingId" | "branchId" | "headVersionId"> {
   writingId?: string;
   headVersionId?: string | null;
   scenes: DiagnosticSceneSnapshot[];
-  /** Optional provenance for chapter prose generated on a Novel Build branch. */
+  /** Optional provenance for chapter prose generated on a historical writing branch. */
   sourceArtifactId?: string | null;
   branchId?: string | null;
 }
@@ -171,12 +174,12 @@ export interface MetadataDiagnosticRules {
 }
 
 export interface PovDiagnosticRules {
-  mode?: 'single' | 'multiple' | 'omniscient';
+  mode?: "single" | "multiple" | "omniscient";
   allowedCharacterIds?: string[];
   requiredCharacterId?: string;
-  person?: 'first' | 'second' | 'third';
-  tense?: 'past' | 'present';
-  narrativeDistance?: 'close' | 'medium' | 'distant' | string;
+  person?: "first" | "second" | "third";
+  tense?: "past" | "present";
+  narrativeDistance?: "close" | "medium" | "distant" | string;
   singlePovPerChapter?: boolean;
 }
 
@@ -224,7 +227,7 @@ export interface PublishingDiagnosticRules {
   requireSequentialChapterNumbers?: boolean;
   requireUniqueChapterTitles?: boolean;
   requireFinalChapterStatus?: boolean;
-  requiredArtifactTypes?: StoryArtifact['type'][];
+  requiredArtifactTypes?: StoryArtifact["type"][];
   targetWordCountMin?: number;
   targetWordCountMax?: number;
 }
@@ -277,7 +280,7 @@ export interface StoryDiagnosticsEngineOptions {
 export interface DiagnosticDraft {
   code: string;
   category: StoryDiagnosticsCategory;
-  severity: StoryDiagnostic['severity'];
+  severity: StoryDiagnostic["severity"];
   message: string;
   evidence: StorySourceSpan[];
   relatedRefs: StoryReference[];
