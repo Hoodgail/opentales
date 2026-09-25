@@ -1,1 +1,47 @@
-{"schemaVersion":1,"name":"novel-obstacles","version":"1.0.0","description":"Build escalating internal, external, and interpersonal pressure that forces revealing choices.","kind":"planning","inputs":["story-brief","character-bible"],"outputs":["plot-thread","beat"],"runtimeRoles":["creator"],"allowedTools":["searchStory","queryCanon","createProjectDoc","updateProjectDoc","applyArtifactBatch","reportTaskResult"],"maxIterations":2,"context":{"maxTokens":18000,"sections":["story-brief","active-task","characters","world","threads","canon"]},"rubric":"conflict-v1","procedure":["Convert abstract stakes into obstacles that narrow options and expose values.","Escalate through consequence and choice rather than repeated difficulty.","Persist causal conflict threads and beats linked to character pressure."],"references":[]}
+{
+  "schemaVersion": 1,
+  "name": "novel-obstacles",
+  "version": "1.1.0",
+  "description": "Build escalating internal, external, and interpersonal pressure that forces revealing choices.",
+  "kind": "planning",
+  "inputs": ["story-brief", "character-bible"],
+  "outputs": ["plot-thread", "beat"],
+  "runtimeRoles": ["creator"],
+  "allowedTools": [
+    "createProjectDoc",
+    "updateProjectDoc",
+    "listProjectFiles",
+    "listProjectDocs",
+    "readProjectDoc",
+    "grepProject",
+    "listChapters",
+    "readChapter",
+    "listScenes",
+    "readScene",
+    "listCharacters",
+    "readCharacter",
+    "listLocations",
+    "readLocation",
+    "readStoryStructure"
+  ],
+  "maxIterations": 2,
+  "context": {
+    "maxTokens": 18000,
+    "sections": [
+      "story-brief",
+      "active-task",
+      "characters",
+      "world",
+      "threads",
+      "canon"
+    ]
+  },
+  "rubric": "conflict-v1",
+  "procedure": [
+    "Convert abstract stakes into obstacles that narrow options and expose values.",
+    "Escalate through consequence and choice rather than repeated difficulty.",
+    "Persist causal conflict threads and beats linked to character pressure.",
+    "Choose the next step from the author's goal and current project state; keep progress in project docs and verify persisted tool results."
+  ],
+  "references": []
+}

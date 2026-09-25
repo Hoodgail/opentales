@@ -1,23 +1,51 @@
 {
   "schemaVersion": 1,
   "name": "novel-dialogue",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Draft or revise dialogue inside an assigned scene while preserving character knowledge, voice, agenda, and subtext.",
   "kind": "drafting",
   "inputs": ["narrative-contract", "character-bible", "scene-plan"],
   "outputs": ["chapter-draft"],
   "runtimeRoles": ["drafter", "reviser"],
-  "allowedTools": ["getSceneContext", "queryCanon", "queryEntityState", "applyChapterPatch", "updateChapter", "updateScene", "reportTaskResult"],
+  "allowedTools": [
+    "updateChapter",
+    "updateScene",
+    "listProjectFiles",
+    "listProjectDocs",
+    "readProjectDoc",
+    "grepProject",
+    "listChapters",
+    "readChapter",
+    "listScenes",
+    "readScene",
+    "listCharacters",
+    "readCharacter",
+    "listLocations",
+    "readLocation",
+    "readStoryStructure",
+    "createProjectDoc",
+    "updateProjectDoc",
+    "createChapter",
+    "createScene"
+  ],
   "maxIterations": 2,
   "context": {
     "maxTokens": 16000,
-    "sections": ["narrative-contract", "active-task", "characters", "recent-causal", "canon", "style"]
+    "sections": [
+      "narrative-contract",
+      "active-task",
+      "characters",
+      "recent-causal",
+      "canon",
+      "style"
+    ]
   },
   "rubric": "dialogue-quality-v1",
   "procedure": [
     "Identify each speaker's current knowledge, agenda, leverage, and forbidden disclosures.",
     "Write compressed dialogue in which competing wants alter the scene state.",
-    "Apply changes only within the assigned chapter/scene scope and report evidence."
+    "Apply changes only within the assigned chapter/scene scope and report evidence.",
+    "Choose the next step from the author's goal and current project state; keep progress in project docs and verify persisted tool results."
   ],
   "references": []
 }

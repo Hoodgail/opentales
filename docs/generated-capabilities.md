@@ -4,7 +4,7 @@
 
 Route fragments are mounted below the authenticated project router; consult the route source for the full prefix.
 
-## Novel Build and scenes
+## Scenes
 
 | Method | Route fragment |
 | --- | --- |
@@ -14,45 +14,6 @@ Route fragments are mounted below the authenticated project router; consult the 
 | GET | `/:projectId/chapters/:chapterId/scenes/:sceneId` |
 | PATCH | `/:projectId/chapters/:chapterId/scenes/:sceneId` |
 | DELETE | `/:projectId/chapters/:chapterId/scenes/:sceneId` |
-| GET | `/:projectId/builds` |
-| POST | `/:projectId/builds` |
-| GET | `/:projectId/builds/:buildRunId` |
-| POST | `/:projectId/builds/:buildRunId/authorization` |
-| POST | `/:projectId/builds/:buildRunId/pause` |
-| POST | `/:projectId/builds/:buildRunId/resume` |
-| POST | `/:projectId/builds/:buildRunId/cancel` |
-| POST | `/:projectId/builds/:buildRunId/tasks/:taskId/retry` |
-| POST | `/:projectId/builds/:buildRunId/tasks/:taskId/rerun` |
-| POST | `/:projectId/builds/:buildRunId/replan` |
-| POST | `/:projectId/builds/:buildRunId/branches/from-checkpoint` |
-| GET | `/:projectId/builds/:buildRunId/units` |
-| POST | `/:projectId/builds/:buildRunId/units` |
-| POST | `/:projectId/builds/:buildRunId/units/reorder` |
-| GET | `/:projectId/builds/:buildRunId/units/:unitId` |
-| PATCH | `/:projectId/builds/:buildRunId/units/:unitId` |
-| POST | `/:projectId/builds/:buildRunId/compile` |
-| GET | `/:projectId/builds/:buildRunId/compilations/:compilationId` |
-| GET | `/:projectId/builds/:buildRunId/comparison` |
-| GET | `/:projectId/builds/:buildRunId/reviews` |
-| POST | `/:projectId/builds/:buildRunId/reviews` |
-| GET | `/:projectId/builds/:buildRunId/reviews/:reviewId` |
-| POST | `/:projectId/builds/:buildRunId/reviews/:reviewId/approve` |
-| POST | `/:projectId/builds/:buildRunId/reviews/:reviewId/merge` |
-| POST | `/:projectId/builds/:buildRunId/reviews/:reviewId/reject` |
-| POST | `/:projectId/builds/:buildRunId/exports` |
-| POST | `/:projectId/builds/:buildRunId/pins/unpin` |
-| POST | `/:projectId/builds/:buildRunId/checkpoints` |
-| GET | `/:projectId/builds/:buildRunId/artifacts` |
-| POST | `/:projectId/builds/:buildRunId/artifacts/batch` |
-| GET | `/:projectId/builds/:buildRunId/story-state` |
-| GET | `/:projectId/builds/:buildRunId/story-state/delta` |
-| GET | `/:projectId/builds/:buildRunId/story-state/history/:entityKind/:key` |
-| POST | `/:projectId/builds/:buildRunId/story-state/temporal` |
-| POST | `/:projectId/builds/:buildRunId/story-state/batch` |
-| GET | `/:projectId/builds/:buildRunId/observability` |
-| POST | `/:projectId/builds/:buildRunId/search` |
-| POST | `/:projectId/builds/:buildRunId/references` |
-| GET | `/:projectId/builds/:buildRunId/diagnostics` |
 
 ## Publishing
 
@@ -98,26 +59,25 @@ Route fragments are mounted below the authenticated project router; consult the 
 
 | Skill | Version | Kind | Allowed tools |
 | --- | --- | --- | ---: |
-| `novel-build` | `1.1.0` | `workflow` | 23 |
-| `novel-chapters` | `2.0.0` | `drafting` | 13 |
-| `novel-characters` | `1.2.0` | `planning` | 3 |
-| `novel-climax` | `1.0.0` | `planning` | 7 |
-| `novel-continuity` | `1.1.0` | `continuity` | 14 |
-| `novel-copy-edit` | `1.0.0` | `revision` | 9 |
-| `novel-critic` | `2.0.0` | `critique` | 11 |
-| `novel-developmental-revision` | `1.0.0` | `revision` | 14 |
-| `novel-dialogue` | `2.0.0` | `drafting` | 7 |
-| `novel-finalization` | `1.0.0` | `revision` | 13 |
-| `novel-idea` | `1.0.0` | `planning` | 5 |
-| `novel-intake` | `1.0.0` | `planning` | 3 |
-| `novel-line-revision` | `1.0.0` | `revision` | 9 |
-| `novel-obstacles` | `1.0.0` | `planning` | 6 |
-| `novel-outline` | `2.0.0` | `planning` | 5 |
-| `novel-perspective` | `1.0.0` | `planning` | 6 |
-| `novel-research` | `1.0.0` | `research` | 5 |
-| `novel-scenes` | `1.0.0` | `planning` | 6 |
-| `novel-series` | `1.0.0` | `planning` | 8 |
-| `novel-settings` | `1.0.0` | `planning` | 6 |
-| `novel-setup-payoff` | `1.0.0` | `planning` | 6 |
-| `novel-voice` | `1.0.0` | `planning` | 6 |
-| `novel-world` | `1.0.0` | `planning` | 4 |
+| `novel-chapters` | `2.1.0` | `drafting` | 19 |
+| `novel-characters` | `1.3.0` | `planning` | 18 |
+| `novel-climax` | `1.1.0` | `planning` | 15 |
+| `novel-continuity` | `1.2.0` | `continuity` | 15 |
+| `novel-copy-edit` | `1.1.0` | `revision` | 15 |
+| `novel-critic` | `2.1.0` | `critique` | 13 |
+| `novel-developmental-revision` | `1.1.0` | `revision` | 15 |
+| `novel-dialogue` | `2.1.0` | `drafting` | 19 |
+| `novel-finalization` | `1.1.0` | `revision` | 15 |
+| `novel-idea` | `1.1.0` | `planning` | 15 |
+| `novel-intake` | `1.1.0` | `planning` | 15 |
+| `novel-line-revision` | `1.1.0` | `revision` | 16 |
+| `novel-obstacles` | `1.1.0` | `planning` | 15 |
+| `novel-outline` | `2.1.0` | `planning` | 15 |
+| `novel-perspective` | `1.1.0` | `planning` | 15 |
+| `novel-research` | `1.1.0` | `research` | 15 |
+| `novel-scenes` | `1.1.0` | `planning` | 15 |
+| `novel-series` | `1.1.0` | `planning` | 15 |
+| `novel-settings` | `1.1.0` | `planning` | 15 |
+| `novel-setup-payoff` | `1.1.0` | `planning` | 15 |
+| `novel-voice` | `1.1.0` | `planning` | 15 |
+| `novel-world` | `1.1.0` | `planning` | 15 |

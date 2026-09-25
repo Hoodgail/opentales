@@ -1,5 +1,7 @@
 # Novel Build and MCP reliability audit
 
+> Historical validation report: this workflow has been retired. See [agentic writing](agentic-writing.md) for current behavior.
+
 Base revision: `9f8b15f` (master). Validation date: 2026-09-20.
 
 ## Confirmed defects and changes

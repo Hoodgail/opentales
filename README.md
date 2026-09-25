@@ -35,7 +35,7 @@
 ## Why OpenTales?
 
 A novel is a codebase of human meaning — characters, places, plot threads, and prose all interconnected. OpenTales treats it that way. It's a desktop-class writing IDE that gives long-form fiction the same scaffolding software gets: structure, navigation, version history, refactor tools, and a distraction-free editor for the parts that matter most.
- 
+
 ## Features
 
 - **Monaco-powered editor.** The same editor that powers VS Code, tuned for prose. Markdown highlighting, multi-cursor, find-and-replace.
@@ -44,8 +44,7 @@ A novel is a codebase of human meaning — characters, places, plot threads, and
 - **Settings with atmosphere.** Upload reference imagery for every location.
 - **Plot, voice, and obstacles.** Premise, theme, POV, climax, and obstacles live in their own structured panels.
 - **Episodic chapters.** Acts, chapters, and scene beats organized like a project tree.
-- **Durable Novel Builds.** Turn one brainstorm into a structured, restart-safe plan and sandboxed scene-by-scene manuscript workflow.
-- **Story compiler.** Versioned canon, entity state, timeline, setups/payoffs, semantic search, and evidence-backed diagnostics.
+- **Agentic writing.** Plan, draft, and revise dynamically with agents that read, create, and edit project docs and manuscript content.
 - **Reviewable AI branches.** Inspect, edit, compare, approve, merge, or reject generated prose without changing main prematurely.
 - **External writing-agent harness.** Connect hosted Claude through OAuth or create project-scoped MCP keys for Codex, Claude Code, and other agents. Agents can safely create, exact-edit, replace, reorder, invalidate, review, and merge story work through versioned, permission-checked tools with optimistic concurrency and idempotent batch patches.
 - **Publishing pipeline.** Validated DOCX, PDF, EPUB3, Markdown, text, HTML, and project archives with safe import previews.
@@ -94,28 +93,28 @@ packages/backend/prisma/schema.prisma  Canonical data model
 
 ## Requirements
 
-| | |
-| --- | --- |
-| Node.js | 20+ |
-| pnpm | 10+ |
+|            |     |
+| ---------- | --- |
+| Node.js    | 20+ |
+| pnpm       | 10+ |
 | PostgreSQL | 15+ |
 
 ## Scripts
 
-| command | description |
-| --- | --- |
-| `pnpm dev:web` | Start the SvelteKit frontend at `http://localhost:5173` |
-| `pnpm dev:backend` | Start the backend API at `http://localhost:4000` |
-| `pnpm dev` | Start frontend + Electron together |
-| `pnpm check` | Frontend type checks (`svelte-check`) |
-| `pnpm check:backend` | Backend type checks (`tsc --noEmit`) |
-| `pnpm check:sdk` | SDK type checks |
-| `pnpm lint` | Run all frontend, SDK, and backend static checks |
-| `pnpm test` | Run unit/contract tests and documentation link validation |
-| `pnpm eval` | Run deterministic agent/artifact and continuity evals |
-| `pnpm test:coverage` | Run coverage gates, including critical Novel Build modules |
-| `pnpm build` | Build frontend, SDK, and backend |
-| `pnpm package` | Build and package the Electron app |
+| command              | description                                               |
+| -------------------- | --------------------------------------------------------- |
+| `pnpm dev:web`       | Start the SvelteKit frontend at `http://localhost:5173`   |
+| `pnpm dev:backend`   | Start the backend API at `http://localhost:4000`          |
+| `pnpm dev`           | Start frontend + Electron together                        |
+| `pnpm check`         | Frontend type checks (`svelte-check`)                     |
+| `pnpm check:backend` | Backend type checks (`tsc --noEmit`)                      |
+| `pnpm check:sdk`     | SDK type checks                                           |
+| `pnpm lint`          | Run all frontend, SDK, and backend static checks          |
+| `pnpm test`          | Run unit/contract tests and documentation link validation |
+| `pnpm eval`          | Run deterministic agent/artifact and continuity evals     |
+| `pnpm test:coverage` | Run coverage gates, for agent and writing tools           |
+| `pnpm build`         | Build frontend, SDK, and backend                          |
+| `pnpm package`       | Build and package the Electron app                        |
 
 ## Stack
 
@@ -130,19 +129,19 @@ packages/backend/prisma/schema.prisma  Canonical data model
 
 ## Documentation
 
-| | |
-| --- | --- |
-| **[Getting started](docs/getting-started.md)** | Local setup walkthrough — your first project in five minutes. |
-| **[Architecture](docs/architecture.md)** | High-level system design, package layout, data model, and conventions. |
-| **[AI system](docs/ai-system.md)** | How project AI settings, agent sessions, streaming, tool calls, and Manual/Auto execution modes work. |
-| **[External agents over MCP](docs/mcp.md)** | Project-scoped API keys, remote tools/resources/prompts, client setup, security, and deployment. |
-| **[Novel Builds](docs/novel-build.md)** | Durable workflow, story state, sandbox branches, diagnostics, review/merge, and export/import. |
-| **[Generated capabilities](docs/generated-capabilities.md)** | Source-derived route and built-in skill inventory, checked in CI. |
-| **[Export and import](docs/export-import.md)** | Private verified manuscript exports, secure downloads, import preview, and transactional apply. |
-| **[Future directions](docs/future-directions.md)** | Roadmap, refactor opportunities, and brainstormed features for novel writing. |
-| **[Contributing](CONTRIBUTING.md)** | How to set up a working copy and submit your first PR. |
-| **[Backend README](packages/backend/README.md)** | Backend-specific notes. |
-| **[SDK README](packages/sdk/README.md)** | SDK usage and shape. |
+|                                                              |                                                                                                       |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| **[Getting started](docs/getting-started.md)**               | Local setup walkthrough — your first project in five minutes.                                         |
+| **[Architecture](docs/architecture.md)**                     | High-level system design, package layout, data model, and conventions.                                |
+| **[AI system](docs/ai-system.md)**                           | How project AI settings, agent sessions, streaming, tool calls, and Manual/Auto execution modes work. |
+| **[External agents over MCP](docs/mcp.md)**                  | Project-scoped API keys, remote tools/resources/prompts, client setup, security, and deployment.      |
+| **[Agentic writing](docs/agentic-writing.md)**               | Flexible document-based planning, drafting, and revision.                                             |
+| **[Generated capabilities](docs/generated-capabilities.md)** | Source-derived route and built-in skill inventory, checked in CI.                                     |
+| **[Export and import](docs/export-import.md)**               | Private verified manuscript exports, secure downloads, import preview, and transactional apply.       |
+| **[Future directions](docs/future-directions.md)**           | Roadmap, refactor opportunities, and brainstormed features for novel writing.                         |
+| **[Contributing](CONTRIBUTING.md)**                          | How to set up a working copy and submit your first PR.                                                |
+| **[Backend README](packages/backend/README.md)**             | Backend-specific notes.                                                                               |
+| **[SDK README](packages/sdk/README.md)**                     | SDK usage and shape.                                                                                  |
 
 Project docs are organized by folders and paths, not by `kind`. The `kind` field remains metadata for filtering and internal AI behavior, especially `instructions` docs that are injected into agent prompts.
 

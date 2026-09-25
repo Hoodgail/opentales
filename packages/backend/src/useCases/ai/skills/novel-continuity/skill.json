@@ -1,1 +1,49 @@
-{"schemaVersion":1,"name":"novel-continuity","version":"1.1.0","description":"Extract, validate, query, and diagnose canonical story state with provenance.","kind":"continuity","inputs":["chapter-draft","scene-plan","timeline"],"outputs":["timeline","revision-issue"],"runtimeRoles":["librarian","critic"],"allowedTools":["searchStory","findReferences","getSceneContext","listBuildUnits","readBuildUnit","queryCanon","queryTimeline","queryEntityState","queryOpenLoops","applyArtifactBatch","commitCanonDelta","linkSetupPayoff","runStoryLint","reportTaskResult"],"maxIterations":2,"context":{"maxTokens":22000,"sections":["story-brief","narrative-contract","active-task","characters","recent-causal","threads","canon"]},"rubric":"continuity-v1","procedure":["Extract atomic facts and state changes with chapter, scene, and source-span provenance.","Validate time, knowledge, location, possession, injury, relationship, and world-rule changes against current canon.","Persist assigned timeline artifacts with applyArtifactBatch; commit scene-derived canon with provenance.","Commit one idempotent delta or report evidence-backed contradictions; never rewrite prose."],"references":[]}
+{
+  "schemaVersion": 1,
+  "name": "novel-continuity",
+  "version": "1.2.0",
+  "description": "Extract, validate, query, and diagnose canonical story state with provenance.",
+  "kind": "continuity",
+  "inputs": ["chapter-draft", "scene-plan", "timeline"],
+  "outputs": ["timeline", "revision-issue"],
+  "runtimeRoles": ["librarian", "critic"],
+  "allowedTools": [
+    "listProjectFiles",
+    "listProjectDocs",
+    "readProjectDoc",
+    "grepProject",
+    "listChapters",
+    "readChapter",
+    "listScenes",
+    "readScene",
+    "listCharacters",
+    "readCharacter",
+    "listLocations",
+    "readLocation",
+    "readStoryStructure",
+    "createProjectDoc",
+    "updateProjectDoc"
+  ],
+  "maxIterations": 2,
+  "context": {
+    "maxTokens": 22000,
+    "sections": [
+      "story-brief",
+      "narrative-contract",
+      "active-task",
+      "characters",
+      "recent-causal",
+      "threads",
+      "canon"
+    ]
+  },
+  "rubric": "continuity-v1",
+  "procedure": [
+    "Read the relevant manuscript and existing canon notes.",
+    "Check time, knowledge, location, possession, injury, relationships, and world rules.",
+    "Record evidence-backed findings and canon updates in project docs, citing chapters and scenes.",
+    "Reconcile conflicts with the author's intent; report uncertainties explicitly.",
+    "Choose the next step from the author's goal and current project state; keep progress in project docs and verify persisted tool results."
+  ],
+  "references": []
+}

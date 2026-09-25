@@ -1,1 +1,46 @@
-{"schemaVersion":1,"name":"novel-voice","version":"1.0.0","description":"Define an original abstract voice profile using attention, rhythm, diction, distance, imagery, interiority, and exposition behavior.","kind":"planning","inputs":["story-brief","character-bible"],"outputs":["narrative-contract"],"runtimeRoles":["creator"],"allowedTools":["searchStory","compareVersions","createProjectDoc","updateProjectDoc","applyArtifactBatch","reportTaskResult"],"maxIterations":2,"context":{"maxTokens":16000,"sections":["story-brief","narrative-contract","active-task","characters","style"]},"rubric":"voice-v1","procedure":["Describe voice in trackable dimensions rather than named-author imitation.","Connect attention, syntax, metaphor, omission, and value to the narrating consciousness.","Persist an evaluable Narrative Contract with drift criteria."],"references":[]}
+{
+  "schemaVersion": 1,
+  "name": "novel-voice",
+  "version": "1.1.0",
+  "description": "Define an original abstract voice profile using attention, rhythm, diction, distance, imagery, interiority, and exposition behavior.",
+  "kind": "planning",
+  "inputs": ["story-brief", "character-bible"],
+  "outputs": ["narrative-contract"],
+  "runtimeRoles": ["creator"],
+  "allowedTools": [
+    "createProjectDoc",
+    "updateProjectDoc",
+    "listProjectFiles",
+    "listProjectDocs",
+    "readProjectDoc",
+    "grepProject",
+    "listChapters",
+    "readChapter",
+    "listScenes",
+    "readScene",
+    "listCharacters",
+    "readCharacter",
+    "listLocations",
+    "readLocation",
+    "readStoryStructure"
+  ],
+  "maxIterations": 2,
+  "context": {
+    "maxTokens": 16000,
+    "sections": [
+      "story-brief",
+      "narrative-contract",
+      "active-task",
+      "characters",
+      "style"
+    ]
+  },
+  "rubric": "voice-v1",
+  "procedure": [
+    "Describe voice in trackable dimensions rather than named-author imitation.",
+    "Connect attention, syntax, metaphor, omission, and value to the narrating consciousness.",
+    "Persist an evaluable Narrative Contract with drift criteria.",
+    "Choose the next step from the author's goal and current project state; keep progress in project docs and verify persisted tool results."
+  ],
+  "references": []
+}

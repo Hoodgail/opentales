@@ -4,25 +4,25 @@ import {
   type CollaborationDocumentRef,
   type CollaborationEditInput,
   type CollaborationLocation,
-  type CollaborationPresence
-} from '@opentales/sdk';
-import { browser } from '$app/environment';
-import { manuscript } from '$lib/stores/manuscript.svelte';
+  type CollaborationPresence,
+} from "@opentales/sdk";
+import { browser } from "$app/environment";
+import { manuscript } from "$lib/stores/manuscript.svelte";
 
 const api = new OpenTalesClient({
-  baseUrl: import.meta.env.VITE_API_URL ?? 'http://localhost:4000',
-  token: browserLocalStorage().getItem('opentales.token') ?? undefined
+  baseUrl: import.meta.env.VITE_API_URL ?? "http://localhost:4000",
+  token: browserLocalStorage().getItem("opentales.token") ?? undefined,
 });
 
 function browserLocalStorage(): Storage {
-  if (typeof localStorage !== 'undefined') return localStorage;
+  if (typeof localStorage !== "undefined") return localStorage;
   return {
     length: 0,
     clear: () => undefined,
     getItem: () => null,
     key: () => null,
     removeItem: () => undefined,
-    setItem: () => undefined
+    setItem: () => undefined,
   };
 }
 
@@ -35,7 +35,7 @@ let tabClientId: string | null = null;
 export function createCollaborationClientId(): string {
   if (tabClientId) return tabClientId;
   tabClientId =
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    typeof crypto !== "undefined" && "randomUUID" in crypto
       ? crypto.randomUUID()
       : `client-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   return tabClientId;
@@ -66,23 +66,29 @@ function createStore() {
       .streamProjectCollaboration(
         nextProjectId,
         (event) => {
-          if (event.type === 'project-presence') {
-            collaborators.splice(0, collaborators.length, ...event.collaborators);
+          if (event.type === "project-presence") {
+            collaborators.splice(
+              0,
+              collaborators.length,
+              ...event.collaborators,
+            );
             const followed = followedClientId
-              ? event.collaborators.find((presence) => presence.clientId === followedClientId)
+              ? event.collaborators.find(
+                  (presence) => presence.clientId === followedClientId,
+                )
               : null;
             if (followed?.location) goToLocation(followed.location);
             return;
           }
-          if (event.type === 'document-event') {
+          if (event.type === "document-event") {
             notifyDocumentSubscribers(event.document, event.event);
           }
         },
-        { signal: abort.signal }
+        { signal: abort.signal },
       )
       .catch((error) => {
         if (abort?.signal.aborted) return;
-        console.warn('Project collaboration stream failed', error);
+        console.warn("Project collaboration stream failed", error);
       });
   }
 
@@ -91,56 +97,69 @@ function createStore() {
     pagehideCleanup = null;
     if (!projectId) return;
     void api
-      .leaveProjectCollaboration(projectId, { clientId: createCollaborationClientId() })
-      .catch((error) => console.warn('Project collaboration leave failed', error));
+      .leaveProjectCollaboration(projectId, {
+        clientId: createCollaborationClientId(),
+      })
+      .catch((error) =>
+        console.warn("Project collaboration leave failed", error),
+      );
   }
 
   function registerPagehideCleanup(nextProjectId: string) {
     const clientId = createCollaborationClientId();
-    const token = browserLocalStorage().getItem('opentales.token');
+    const token = browserLocalStorage().getItem("opentales.token");
     const leave = () => {
       const body = JSON.stringify({ clientId });
       const url = `${api.baseUrl}/projects/${nextProjectId}/collaboration/leave`;
       void fetch(url, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          accept: 'application/json',
-          authorization: token ? `Bearer ${token}` : '',
-          'content-type': 'application/json'
+          accept: "application/json",
+          authorization: token ? `Bearer ${token}` : "",
+          "content-type": "application/json",
         },
         body,
-        keepalive: true
+        keepalive: true,
       });
     };
-    window.addEventListener('pagehide', leave, { once: true });
-    pagehideCleanup = () => window.removeEventListener('pagehide', leave);
+    window.addEventListener("pagehide", leave, { once: true });
+    pagehideCleanup = () => window.removeEventListener("pagehide", leave);
   }
 
   function currentLocation(field?: string): CollaborationLocation | null {
-    const tab = manuscript.tabs.find((candidate) => candidate.id === manuscript.activeTabId);
+    const tab = manuscript.tabs.find(
+      (candidate) => candidate.id === manuscript.activeTabId,
+    );
     if (!tab) return null;
-    // Workspace projections (continuous manuscript, build graph, Story Bible)
+    // Workspace projections (continuous manuscript, Story Bible)
     // are not collaboration documents themselves. Presence continues to be
     // reported once a concrete chapter/artifact editor is opened.
-    if (tab.type === 'manuscript' || tab.type === 'build' || tab.type === 'story-bible' || tab.type === 'outline-studio' || tab.type === 'publishing' || tab.type === 'revisions') return null;
+    if (
+      tab.type === "manuscript" ||
+      tab.type === "story-bible" ||
+      tab.type === "outline-studio" ||
+      tab.type === "publishing" ||
+      tab.type === "revisions"
+    )
+      return null;
     return {
       tabType: tab.type,
       refId: tab.refId,
       title: tab.title,
-      field
+      field,
     };
   }
 
   function goToLocation(location: CollaborationLocation) {
-    if (location.tabType === 'settings') {
-      void manuscript.setActiveView('settings');
+    if (location.tabType === "settings") {
+      void manuscript.setActiveView("settings");
       return;
     }
     void manuscript.openTab({
       id: tabIdFor(location),
       type: location.tabType,
       refId: location.refId,
-      title: location.title
+      title: location.title,
     });
   }
 
@@ -154,7 +173,7 @@ function createStore() {
 
   function subscribeDocument(
     document: CollaborationDocumentRef,
-    onEvent: (event: CollaborationDocumentEvent) => void
+    onEvent: (event: CollaborationDocumentEvent) => void,
   ) {
     const key = documentKey(document);
     const subscribers = documentSubscribers.get(key) ?? new Set();
@@ -168,7 +187,7 @@ function createStore() {
 
   function notifyDocumentSubscribers(
     document: CollaborationDocumentRef,
-    event: CollaborationDocumentEvent
+    event: CollaborationDocumentEvent,
   ) {
     const subscribers = documentSubscribers.get(documentKey(document));
     if (!subscribers) return;
@@ -187,7 +206,7 @@ function createStore() {
     currentLocation,
     goToLocation,
     follow,
-    unfollow
+    unfollow,
   };
 }
 
@@ -196,10 +215,10 @@ function documentKey(document: CollaborationDocumentRef): string {
 }
 
 function tabIdFor(location: CollaborationLocation): string {
-  if (location.tabType === 'settings') return 'settings';
-  if (location.tabType === 'ai-skill') return `tab-ai-skill-${location.refId}`;
-  if (location.tabType === 'structure') return 'tab-structure';
-  if (location.tabType === 'outline') return 'tab-outline';
+  if (location.tabType === "settings") return "settings";
+  if (location.tabType === "ai-skill") return `tab-ai-skill-${location.refId}`;
+  if (location.tabType === "structure") return "tab-structure";
+  if (location.tabType === "outline") return "tab-outline";
   return `tab-${location.refId}`;
 }
 
@@ -210,7 +229,7 @@ export type {
   CollaborationDocumentEvent,
   CollaborationEditInput,
   CollaborationLocation,
-  CollaborationPresence
+  CollaborationPresence,
 };
 
 export { api as collaborationApi };

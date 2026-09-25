@@ -33,13 +33,16 @@ import {
   type UpdateLocationInput,
   type UpdateObstacleInput,
   type UpdateProjectInput,
-  type UpdateSceneInput
-} from '@opentales/sdk';
-import { syncAiProjectContext, syncAiToken } from '$lib/stores/ai.svelte';
-import { syncCollaborationToken } from '$lib/stores/collaboration.svelte';
-import { storyIde, syncStoryIdeToken } from '$lib/stores/storyIde.svelte';
-import { exportImport, syncExportImportToken } from '$lib/stores/exportImport.svelte';
-import { revisions, syncRevisionsToken } from '$lib/stores/revisions.svelte';
+  type UpdateSceneInput,
+} from "@opentales/sdk";
+import { syncAiProjectContext, syncAiToken } from "$lib/stores/ai.svelte";
+import { syncCollaborationToken } from "$lib/stores/collaboration.svelte";
+import { syncStoryIdeToken } from "$lib/stores/storyIde.svelte";
+import {
+  exportImport,
+  syncExportImportToken,
+} from "$lib/stores/exportImport.svelte";
+import { revisions, syncRevisionsToken } from "$lib/stores/revisions.svelte";
 import type {
   Act,
   ActivityView,
@@ -47,41 +50,41 @@ import type {
   Character,
   Location,
   OpenTab,
-  StoryStructure
-} from '$lib/data/manuscript-types';
+  StoryStructure,
+} from "$lib/data/manuscript-types";
 
 const api = new OpenTalesClient({
-  baseUrl: import.meta.env.VITE_API_URL ?? 'http://localhost:4000',
-  token: browserLocalStorage().getItem('opentales.token') ?? undefined
+  baseUrl: import.meta.env.VITE_API_URL ?? "http://localhost:4000",
+  token: browserLocalStorage().getItem("opentales.token") ?? undefined,
 });
 
-const initialToken = browserLocalStorage().getItem('opentales.token');
+const initialToken = browserLocalStorage().getItem("opentales.token");
 
 function browserLocalStorage(): Storage {
-  if (typeof localStorage !== 'undefined') return localStorage;
+  if (typeof localStorage !== "undefined") return localStorage;
   return {
     length: 0,
     clear: () => undefined,
     getItem: () => null,
     key: () => null,
     removeItem: () => undefined,
-    setItem: () => undefined
+    setItem: () => undefined,
   };
 }
 
 function emptyStructure(): StoryStructure {
   return {
-    title: 'OpenTales',
-    genre: '',
-    perspective: '',
-    pov: '',
-    voice: '',
-    tone: '',
+    title: "OpenTales",
+    genre: "",
+    perspective: "",
+    pov: "",
+    voice: "",
+    tone: "",
     themes: [],
-    logline: '',
-    outline: '',
-    climax: '',
-    obstacles: []
+    logline: "",
+    outline: "",
+    climax: "",
+    obstacles: [],
   };
 }
 
@@ -97,12 +100,12 @@ function applyProject(
     projectMeta: {
       title: string;
       description: string;
-      visibility: 'private' | 'public';
+      visibility: "private" | "public";
       coverUrl: string | null;
-      coverOrientation: 'landscape' | 'portrait';
+      coverOrientation: "landscape" | "portrait";
       orgSlug: string;
     };
-  }
+  },
 ) {
   state.projectId.value = project.id;
   state.characters.splice(0, state.characters.length, ...project.characters);
@@ -135,17 +138,17 @@ function createStore() {
   const projectMeta = $state<{
     title: string;
     description: string;
-    visibility: 'private' | 'public';
+    visibility: "private" | "public";
     coverUrl: string | null;
-    coverOrientation: 'landscape' | 'portrait';
+    coverOrientation: "landscape" | "portrait";
     orgSlug: string;
   }>({
-    title: '',
-    description: '',
-    visibility: 'private',
+    title: "",
+    description: "",
+    visibility: "private",
     coverUrl: null,
-    coverOrientation: 'landscape',
-    orgSlug: ''
+    coverOrientation: "landscape",
+    orgSlug: "",
   });
   let currentUserRole = $state<Role | null>(null);
   let membersLoaded = $state(false);
@@ -167,7 +170,7 @@ function createStore() {
   let authenticated = $state(Boolean(initialToken));
   let saving = $state(false);
   let error = $state<string | null>(null);
-  let activeView = $state<ActivityView>('explorer');
+  let activeView = $state<ActivityView>("explorer");
   const tabs = $state<OpenTab[]>([]);
   let activeTabId = $state<string | null>(null);
   let selectedId = $state<string | null>(null);
@@ -194,13 +197,18 @@ function createStore() {
     return pendingEntityVersions.get(key) === version;
   }
 
-  function applySavedCharacterPatch(character: Character, input: UpdateCharacterInput, saved: Character) {
+  function applySavedCharacterPatch(
+    character: Character,
+    input: UpdateCharacterInput,
+    saved: Character,
+  ) {
     if (input.name !== undefined) character.name = saved.name;
     if (input.role !== undefined) character.role = saved.role;
     if (input.age !== undefined) character.age = saved.age;
     if (input.occupation !== undefined) character.occupation = saved.occupation;
     if (input.traits !== undefined) character.traits = saved.traits;
-    if (input.description !== undefined) character.description = saved.description;
+    if (input.description !== undefined)
+      character.description = saved.description;
     if (input.appearance !== undefined) character.appearance = saved.appearance;
     if (input.motivation !== undefined) character.motivation = saved.motivation;
     if (input.arc !== undefined) character.arc = saved.arc;
@@ -213,10 +221,13 @@ function createStore() {
   function queuePatch<T extends Record<string, unknown>>(
     key: string,
     input: T,
-    persistPatch: (input: T, version: number) => Promise<void>
+    persistPatch: (input: T, version: number) => Promise<void>,
   ) {
     const version = nextEntityVersion(key);
-    pendingPatchInputs.set(key, { ...(pendingPatchInputs.get(key) ?? {}), ...input });
+    pendingPatchInputs.set(key, {
+      ...(pendingPatchInputs.get(key) ?? {}),
+      ...input,
+    });
     const existingTimer = patchTimers.get(key);
     if (existingTimer) clearTimeout(existingTimer);
     patchTimers.set(
@@ -230,9 +241,10 @@ function createStore() {
         });
         inFlightPatchPromises.set(key, running);
         void running.finally(() => {
-          if (inFlightPatchPromises.get(key) === running) inFlightPatchPromises.delete(key);
+          if (inFlightPatchPromises.get(key) === running)
+            inFlightPatchPromises.delete(key);
         });
-      }, AUTOSAVE_DELAY_MS)
+      }, AUTOSAVE_DELAY_MS),
     );
   }
 
@@ -249,7 +261,7 @@ function createStore() {
 
     try {
       const session = await api.login({ emailOrUsername, password });
-      browserLocalStorage().setItem('opentales.token', session.token);
+      browserLocalStorage().setItem("opentales.token", session.token);
       syncAiToken(session.token);
       syncCollaborationToken(session.token);
       syncStoryIdeToken(session.token);
@@ -262,8 +274,8 @@ function createStore() {
       api.setToken(undefined);
       syncStoryIdeToken(undefined);
       syncExportImportToken(undefined);
-      browserLocalStorage().removeItem('opentales.token');
-      error = caught instanceof Error ? caught.message : 'Login failed';
+      browserLocalStorage().removeItem("opentales.token");
+      error = caught instanceof Error ? caught.message : "Login failed";
     } finally {
       authenticating = false;
     }
@@ -280,7 +292,7 @@ function createStore() {
 
     try {
       const session = await api.register(input);
-      browserLocalStorage().setItem('opentales.token', session.token);
+      browserLocalStorage().setItem("opentales.token", session.token);
       syncAiToken(session.token);
       syncCollaborationToken(session.token);
       syncStoryIdeToken(session.token);
@@ -293,8 +305,8 @@ function createStore() {
       api.setToken(undefined);
       syncStoryIdeToken(undefined);
       syncExportImportToken(undefined);
-      browserLocalStorage().removeItem('opentales.token');
-      error = caught instanceof Error ? caught.message : 'Registration failed';
+      browserLocalStorage().removeItem("opentales.token");
+      error = caught instanceof Error ? caught.message : "Registration failed";
     } finally {
       authenticating = false;
     }
@@ -307,26 +319,32 @@ function createStore() {
     syncStoryIdeToken(undefined);
     syncExportImportToken(undefined);
     syncRevisionsToken(undefined);
-    browserLocalStorage().removeItem('opentales.token');
+    browserLocalStorage().removeItem("opentales.token");
     authenticated = false;
     error = null;
     clearProject();
   }
 
-  async function loadProject(targetProjectId?: string, options: { silent?: boolean } = {}) {
+  async function loadProject(
+    targetProjectId?: string,
+    options: { silent?: boolean } = {},
+  ) {
     if (!options.silent) initializing = true;
     error = null;
 
     try {
       let summaries = await api.listProjects();
       if (summaries.length === 0) {
-        await api.createProject({ title: 'Untitled Manuscript', slug: 'untitled-manuscript' });
+        await api.createProject({
+          title: "Untitled Manuscript",
+          slug: "untitled-manuscript",
+        });
         summaries = await api.listProjects();
       }
       projects.splice(0, projects.length, ...summaries);
 
       const target = targetProjectId
-        ? summaries.find((p) => p.id === targetProjectId) ?? summaries[0]
+        ? (summaries.find((p) => p.id === targetProjectId) ?? summaries[0])
         : summaries[0];
 
       if (target.id !== projectId.value) {
@@ -337,7 +355,15 @@ function createStore() {
       }
 
       const project = await api.getProject(target.id);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, {
+        projectId,
+        characters,
+        locations,
+        chapters,
+        acts,
+        structure,
+        projectMeta,
+      });
 
       if (!options.silent) {
         tabs.splice(0, tabs.length);
@@ -348,9 +374,9 @@ function createStore() {
         if (firstChapter) {
           const tab = {
             id: `tab-${firstChapter.id}`,
-            type: 'chapter',
+            type: "chapter",
             refId: firstChapter.id,
-            title: firstChapter.title
+            title: firstChapter.title,
           } satisfies OpenTab;
           tabs.splice(0, tabs.length, tab);
           activeTabId = tab.id;
@@ -358,13 +384,18 @@ function createStore() {
         }
       }
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : 'Failed to load manuscript';
-      if (message === 'Invalid authentication token' || message === 'Authentication required') {
+      const message =
+        caught instanceof Error ? caught.message : "Failed to load manuscript";
+      if (
+        message === "Invalid authentication token" ||
+        message === "Authentication required"
+      ) {
         await logout();
-        error = 'Please sign in again.';
+        error = "Please sign in again.";
         return;
       }
-      error = caught instanceof Error ? caught.message : 'Failed to load manuscript';
+      error =
+        caught instanceof Error ? caught.message : "Failed to load manuscript";
     } finally {
       if (!options.silent) initializing = false;
     }
@@ -376,7 +407,6 @@ function createStore() {
 
   function clearProject() {
     syncAiProjectContext(null);
-    storyIde.reset();
     exportImport.reset();
     revisions.reset();
     for (const timer of patchTimers.values()) clearTimeout(timer);
@@ -395,17 +425,18 @@ function createStore() {
     membersLoaded = false;
     submissions.splice(0, submissions.length);
     submissionsLoaded = false;
-    for (const key of Object.keys(submissionDetails)) delete submissionDetails[key];
+    for (const key of Object.keys(submissionDetails))
+      delete submissionDetails[key];
     trash.splice(0, trash.length);
     trashLoaded = false;
     projectStats = null;
     Object.assign(structure, emptyStructure());
-    projectMeta.title = '';
-    projectMeta.description = '';
-    projectMeta.visibility = 'private';
+    projectMeta.title = "";
+    projectMeta.description = "";
+    projectMeta.visibility = "private";
     projectMeta.coverUrl = null;
-    projectMeta.coverOrientation = 'landscape';
-    projectMeta.orgSlug = '';
+    projectMeta.coverOrientation = "landscape";
+    projectMeta.orgSlug = "";
     tabs.splice(0, tabs.length);
     activeTabId = null;
     selectedId = null;
@@ -441,7 +472,8 @@ function createStore() {
       const payload = await api.listMembers(projectId.value);
       applyMembers(payload);
     } catch (caught) {
-      error = caught instanceof Error ? caught.message : 'Failed to load members';
+      error =
+        caught instanceof Error ? caught.message : "Failed to load members";
     } finally {
       membersLoading = false;
     }
@@ -457,7 +489,8 @@ function createStore() {
       submissions.splice(0, submissions.length, ...list);
       submissionsLoaded = true;
     } catch (caught) {
-      error = caught instanceof Error ? caught.message : 'Failed to load submissions';
+      error =
+        caught instanceof Error ? caught.message : "Failed to load submissions";
     } finally {
       submissionsLoading = false;
     }
@@ -473,7 +506,7 @@ function createStore() {
       trash.splice(0, trash.length, ...list);
       trashLoaded = true;
     } catch (caught) {
-      error = caught instanceof Error ? caught.message : 'Failed to load trash';
+      error = caught instanceof Error ? caught.message : "Failed to load trash";
     } finally {
       trashLoading = false;
     }
@@ -482,8 +515,19 @@ function createStore() {
   async function restoreTrashChapter(chapterId: string) {
     if (!projectId.value) return;
     await persist(async () => {
-      const project = await api.restoreTrashChapter(projectId.value!, chapterId);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      const project = await api.restoreTrashChapter(
+        projectId.value!,
+        chapterId,
+      );
+      applyProject(project, {
+        projectId,
+        characters,
+        locations,
+        chapters,
+        acts,
+        structure,
+        projectMeta,
+      });
     });
     const idx = trash.findIndex((item) => item.id === chapterId);
     if (idx >= 0) trash.splice(idx, 1);
@@ -493,7 +537,15 @@ function createStore() {
     if (!projectId.value) return;
     await persist(async () => {
       const project = await api.purgeTrashChapter(projectId.value!, chapterId);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, {
+        projectId,
+        characters,
+        locations,
+        chapters,
+        acts,
+        structure,
+        projectMeta,
+      });
     });
     const idx = trash.findIndex((item) => item.id === chapterId);
     if (idx >= 0) trash.splice(idx, 1);
@@ -507,7 +559,10 @@ function createStore() {
       const stats = await api.getProjectStats(projectId.value, days);
       projectStats = stats;
     } catch (caught) {
-      error = caught instanceof Error ? caught.message : 'Failed to load writing stats';
+      error =
+        caught instanceof Error
+          ? caught.message
+          : "Failed to load writing stats";
     } finally {
       projectStatsLoading = false;
     }
@@ -521,7 +576,8 @@ function createStore() {
       if (idx >= 0) submissions[idx] = stripDetail(detail);
       return detail;
     } catch (caught) {
-      error = caught instanceof Error ? caught.message : 'Failed to load submission';
+      error =
+        caught instanceof Error ? caught.message : "Failed to load submission";
       return null;
     }
   }
@@ -535,7 +591,7 @@ function createStore() {
   }
 
   async function submitDraft(input: {
-    kind: 'chapter-edit' | 'new-chapter';
+    kind: "chapter-edit" | "new-chapter";
     title: string;
     message?: string;
     chapterId?: string;
@@ -549,7 +605,8 @@ function createStore() {
       submissions.unshift(summary);
       return summary;
     } catch (caught) {
-      error = caught instanceof Error ? caught.message : 'Failed to submit draft';
+      error =
+        caught instanceof Error ? caught.message : "Failed to submit draft";
       return null;
     }
   }
@@ -563,11 +620,20 @@ function createStore() {
       // The canonical text changed — reload manuscript.
       if (projectId.value) {
         const project = await api.getProject(projectId.value);
-        applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+        applyProject(project, {
+          projectId,
+          characters,
+          locations,
+          chapters,
+          acts,
+          structure,
+          projectMeta,
+        });
       }
       return detail;
     } catch (caught) {
-      error = caught instanceof Error ? caught.message : 'Failed to merge submission';
+      error =
+        caught instanceof Error ? caught.message : "Failed to merge submission";
       return null;
     }
   }
@@ -580,7 +646,10 @@ function createStore() {
       if (idx >= 0) submissions[idx] = stripDetail(detail);
       return detail;
     } catch (caught) {
-      error = caught instanceof Error ? caught.message : 'Failed to decline submission';
+      error =
+        caught instanceof Error
+          ? caught.message
+          : "Failed to decline submission";
       return null;
     }
   }
@@ -588,14 +657,15 @@ function createStore() {
   async function commentOnSubmission(
     id: string,
     body: string,
-    anchor?: SubmissionCommentAnchor
+    anchor?: SubmissionCommentAnchor,
   ) {
     try {
       const detail = await api.commentSubmission(id, { body, anchor });
       submissionDetails[id] = detail;
       return detail;
     } catch (caught) {
-      error = caught instanceof Error ? caught.message : 'Failed to post comment';
+      error =
+        caught instanceof Error ? caught.message : "Failed to post comment";
       return null;
     }
   }
@@ -605,22 +675,32 @@ function createStore() {
     return api.listBetaShareLinks(projectId.value);
   }
 
-  async function createBetaShareLink(input: CreateBetaShareLinkInput): Promise<BetaShareLink | null> {
+  async function createBetaShareLink(
+    input: CreateBetaShareLinkInput,
+  ): Promise<BetaShareLink | null> {
     if (!projectId.value) return null;
     try {
       return await api.createBetaShareLink(projectId.value, input);
     } catch (caught) {
-      error = caught instanceof Error ? caught.message : 'Failed to create share link';
+      error =
+        caught instanceof Error
+          ? caught.message
+          : "Failed to create share link";
       return null;
     }
   }
 
-  async function revokeBetaShareLink(shareLinkId: string): Promise<BetaShareLink | null> {
+  async function revokeBetaShareLink(
+    shareLinkId: string,
+  ): Promise<BetaShareLink | null> {
     if (!projectId.value) return null;
     try {
       return await api.revokeBetaShareLink(projectId.value, shareLinkId);
     } catch (caught) {
-      error = caught instanceof Error ? caught.message : 'Failed to revoke share link';
+      error =
+        caught instanceof Error
+          ? caught.message
+          : "Failed to revoke share link";
       return null;
     }
   }
@@ -628,7 +708,11 @@ function createStore() {
   async function changeMemberRole(userId: string, role: Role) {
     if (!projectId.value) return;
     await persist(async () => {
-      const payload = await api.updateMemberRole(projectId.value!, userId, role);
+      const payload = await api.updateMemberRole(
+        projectId.value!,
+        userId,
+        role,
+      );
       applyMembers(payload);
     });
   }
@@ -641,7 +725,9 @@ function createStore() {
     });
   }
 
-  async function createInvite(input: CreateInviteInput): Promise<ProjectInvite | null> {
+  async function createInvite(
+    input: CreateInviteInput,
+  ): Promise<ProjectInvite | null> {
     if (!projectId.value) return null;
     const ref: { value: ProjectInvite | null } = { value: null };
     await persist(async () => {
@@ -660,9 +746,11 @@ function createStore() {
     });
   }
 
-  async function acceptInvite(token: string): Promise<AcceptInviteResult | null> {
+  async function acceptInvite(
+    token: string,
+  ): Promise<AcceptInviteResult | null> {
     if (!authenticated) {
-      error = 'Sign in to accept this invitation';
+      error = "Sign in to accept this invitation";
       return null;
     }
     const ref: { value: AcceptInviteResult | null } = { value: null };
@@ -692,12 +780,14 @@ function createStore() {
         chapters,
         acts,
         structure,
-        projectMeta
+        projectMeta,
       });
     });
   }
 
-  async function createNewProject(input: CreateProjectInput): Promise<ProjectSummary | null> {
+  async function createNewProject(
+    input: CreateProjectInput,
+  ): Promise<ProjectSummary | null> {
     const result: { value: ProjectSummary | null } = { value: null };
     await persist(async () => {
       result.value = await api.createProject(input);
@@ -708,7 +798,10 @@ function createStore() {
     return result.value;
   }
 
-  async function uploadAsset(file: Blob, kind: AssetKind = 'image'): Promise<Asset | null> {
+  async function uploadAsset(
+    file: Blob,
+    kind: AssetKind = "image",
+  ): Promise<Asset | null> {
     if (!projectId.value) return null;
     let asset: Asset | null = null;
     await persist(async () => {
@@ -719,8 +812,8 @@ function createStore() {
 
   async function setActiveView(v: ActivityView) {
     activeView = v;
-    if (v === 'members') void loadMembers();
-    if (v === 'inbox') void loadSubmissions();
+    if (v === "members") void loadMembers();
+    if (v === "inbox") void loadSubmissions();
   }
 
   async function openTab(tab: OpenTab) {
@@ -758,30 +851,38 @@ function createStore() {
   }
 
   async function createProjectMcpApiKey(
-    input: CreateProjectMcpApiKeyInput
+    input: CreateProjectMcpApiKeyInput,
   ): Promise<CreateProjectMcpApiKeyResult | null> {
     if (!projectId.value) return null;
     try {
       return await api.createProjectMcpApiKey(projectId.value, input);
     } catch (caught) {
-      error = caught instanceof Error ? caught.message : 'Failed to create MCP API key';
+      error =
+        caught instanceof Error
+          ? caught.message
+          : "Failed to create MCP API key";
       return null;
     }
   }
 
-  async function revokeProjectMcpApiKey(keyId: string): Promise<ProjectMcpApiKey | null> {
+  async function revokeProjectMcpApiKey(
+    keyId: string,
+  ): Promise<ProjectMcpApiKey | null> {
     if (!projectId.value) return null;
     try {
       return await api.revokeProjectMcpApiKey(projectId.value, keyId);
     } catch (caught) {
-      error = caught instanceof Error ? caught.message : 'Failed to revoke MCP API key';
+      error =
+        caught instanceof Error
+          ? caught.message
+          : "Failed to revoke MCP API key";
       return null;
     }
   }
 
   async function navigateToChapter(
     chapterId: string,
-    location: { line?: number; endLine?: number; column?: number } = {}
+    location: { line?: number; endLine?: number; column?: number } = {},
   ) {
     const chapter = chapters.find((candidate) => candidate.id === chapterId);
     if (!chapter) return;
@@ -791,13 +892,13 @@ function createStore() {
       line: Math.max(1, location.line ?? 1),
       endLine: location.endLine,
       column: location.column,
-      nonce: (navigationTarget?.nonce ?? 0) + 1
+      nonce: (navigationTarget?.nonce ?? 0) + 1,
     };
     await openTab({
       id: `tab-${chapter.id}`,
-      type: 'chapter',
+      type: "chapter",
       refId: chapter.id,
-      title: chapter.title
+      title: chapter.title,
     });
   }
 
@@ -818,7 +919,11 @@ function createStore() {
 
   function hasPendingChapterSave(id: string): boolean {
     const patchKey = `chapter:${id}`;
-    return patchTimers.has(patchKey) || pendingPatchInputs.has(patchKey) || inFlightPatchPromises.has(patchKey);
+    return (
+      patchTimers.has(patchKey) ||
+      pendingPatchInputs.has(patchKey) ||
+      inFlightPatchPromises.has(patchKey)
+    );
   }
 
   /** Ensure an exact WritingVersion exists before persisting a version-anchored annotation. */
@@ -831,15 +936,19 @@ function createStore() {
 
     const timer = patchTimers.get(patchKey);
     const queued = pendingPatchInputs.get(patchKey);
-    if (!timer && !queued) return chapters.find((candidate) => candidate.id === id) ?? null;
+    if (!timer && !queued)
+      return chapters.find((candidate) => candidate.id === id) ?? null;
     if (timer) clearTimeout(timer);
     patchTimers.delete(patchKey);
     pendingPatchInputs.delete(patchKey);
     const version = nextEntityVersion(patchKey);
     let saved: Chapter | null = null;
     await persist(async () => {
-      saved = await api.updateChapter(projectId.value!, id, { content: chapter.content });
-      if (isLatestEntityVersion(patchKey, version) && saved) Object.assign(chapter, saved);
+      saved = await api.updateChapter(projectId.value!, id, {
+        content: chapter.content,
+      });
+      if (isLatestEntityVersion(patchKey, version) && saved)
+        Object.assign(chapter, saved);
     });
     return saved;
   }
@@ -849,13 +958,17 @@ function createStore() {
     if (!chapter || !projectId.value) return;
 
     Object.assign(chapter, updates);
-    queuePatch(`chapter:${id}`, updates as Record<string, unknown>, async (input, version) => {
-      const updated = await api.updateChapter(projectId.value!, id, input);
-      if (isLatestEntityVersion(`chapter:${id}`, version)) {
-        const current = chapters.find((candidate) => candidate.id === id);
-        if (current) Object.assign(current, updated);
-      }
-    });
+    queuePatch(
+      `chapter:${id}`,
+      updates as Record<string, unknown>,
+      async (input, version) => {
+        const updated = await api.updateChapter(projectId.value!, id, input);
+        if (isLatestEntityVersion(`chapter:${id}`, version)) {
+          const current = chapters.find((candidate) => candidate.id === id);
+          if (current) Object.assign(current, updated);
+        }
+      },
+    );
   }
 
   function updateCharacter(id: string, updates: UpdateCharacterInput) {
@@ -863,13 +976,17 @@ function createStore() {
     if (!character || !projectId.value) return;
 
     Object.assign(character, updates);
-    queuePatch(`character:${id}`, updates as Record<string, unknown>, async (input, version) => {
-      const updated = await api.updateCharacter(projectId.value!, id, input);
-      if (isLatestEntityVersion(`character:${id}`, version)) {
-        const current = characters.find((candidate) => candidate.id === id);
-        if (current) applySavedCharacterPatch(current, input, updated);
-      }
-    });
+    queuePatch(
+      `character:${id}`,
+      updates as Record<string, unknown>,
+      async (input, version) => {
+        const updated = await api.updateCharacter(projectId.value!, id, input);
+        if (isLatestEntityVersion(`character:${id}`, version)) {
+          const current = characters.find((candidate) => candidate.id === id);
+          if (current) applySavedCharacterPatch(current, input, updated);
+        }
+      },
+    );
   }
 
   function updateLocation(id: string, updates: UpdateLocationInput) {
@@ -877,22 +994,26 @@ function createStore() {
     if (!location || !projectId.value) return;
 
     Object.assign(location, updates);
-    queuePatch(`location:${id}`, updates as Record<string, unknown>, async (input, version) => {
-      const updated = await api.updateLocation(projectId.value!, id, input);
-      if (isLatestEntityVersion(`location:${id}`, version)) {
-        const current = locations.find((candidate) => candidate.id === id);
-        if (current) Object.assign(current, updated);
-      }
-    });
+    queuePatch(
+      `location:${id}`,
+      updates as Record<string, unknown>,
+      async (input, version) => {
+        const updated = await api.updateLocation(projectId.value!, id, input);
+        if (isLatestEntityVersion(`location:${id}`, version)) {
+          const current = locations.find((candidate) => candidate.id === id);
+          if (current) Object.assign(current, updated);
+        }
+      },
+    );
   }
 
   async function setCharacterAvatar(id: string, file: Blob) {
     if (!projectId.value) return;
-    const asset = await uploadAsset(file, 'image');
+    const asset = await uploadAsset(file, "image");
     if (!asset) return;
     await persist(async () => {
       const updated = await api.updateCharacter(projectId.value!, id, {
-        avatarAssetId: asset.id
+        avatarAssetId: asset.id,
       });
       const character = characters.find((candidate) => candidate.id === id);
       if (character) Object.assign(character, updated);
@@ -901,13 +1022,13 @@ function createStore() {
 
   async function addCharacterAsset(id: string, file: Blob) {
     if (!projectId.value) return;
-    const asset = await uploadAsset(file, 'image');
+    const asset = await uploadAsset(file, "image");
     if (!asset) return;
     await persist(async () => {
       const character = characters.find((candidate) => candidate.id === id);
       const updated = await api.attachCharacterAsset(projectId.value!, id, {
         assetId: asset.id,
-        order: character?.assets.length ?? 0
+        order: character?.assets.length ?? 0,
       });
       if (character) Object.assign(character, updated);
     });
@@ -916,7 +1037,11 @@ function createStore() {
   async function removeCharacterAsset(id: string, attachmentId: string) {
     if (!projectId.value) return;
     await persist(async () => {
-      const updated = await api.detachCharacterAsset(projectId.value!, id, attachmentId);
+      const updated = await api.detachCharacterAsset(
+        projectId.value!,
+        id,
+        attachmentId,
+      );
       const character = characters.find((candidate) => candidate.id === id);
       if (character) Object.assign(character, updated);
     });
@@ -924,18 +1049,18 @@ function createStore() {
 
   async function setProjectCover(file: Blob) {
     if (!projectId.value) return;
-    const asset = await uploadAsset(file, 'image');
+    const asset = await uploadAsset(file, "image");
     if (!asset) return;
     await updateProject({ coverAssetId: asset.id });
   }
 
   async function setLocationImage(id: string, file: Blob) {
     if (!projectId.value) return;
-    const asset = await uploadAsset(file, 'image');
+    const asset = await uploadAsset(file, "image");
     if (!asset) return;
     await persist(async () => {
       const updated = await api.updateLocation(projectId.value!, id, {
-        imageAssetId: asset.id
+        imageAssetId: asset.id,
       });
       const location = locations.find((candidate) => candidate.id === id);
       if (location) Object.assign(location, updated);
@@ -946,15 +1071,22 @@ function createStore() {
     if (!projectId.value) return;
 
     Object.assign(structure, updates);
-    queuePatch('structure', updates as Record<string, unknown>, async (input, version) => {
-      const updated = await api.updateStructure(projectId.value!, input);
-      if (isLatestEntityVersion('structure', version)) {
-        Object.assign(structure, updated);
-      }
-    });
+    queuePatch(
+      "structure",
+      updates as Record<string, unknown>,
+      async (input, version) => {
+        const updated = await api.updateStructure(projectId.value!, input);
+        if (isLatestEntityVersion("structure", version)) {
+          Object.assign(structure, updated);
+        }
+      },
+    );
   }
 
-  function findCreated<T extends { id: string }>(known: Set<string>, after: T[]): T | null {
+  function findCreated<T extends { id: string }>(
+    known: Set<string>,
+    after: T[],
+  ): T | null {
     return after.find((item) => !known.has(item.id)) ?? null;
   }
 
@@ -967,7 +1099,15 @@ function createStore() {
     await persist(async () => {
       const project = await api.createAct(projectId.value!, { title });
       created = findCreated(known, project.acts);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, {
+        projectId,
+        characters,
+        locations,
+        chapters,
+        acts,
+        structure,
+        projectMeta,
+      });
     });
 
     return created;
@@ -981,7 +1121,15 @@ function createStore() {
 
     await persist(async () => {
       const project = await api.updateAct(projectId.value!, actId, { title });
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, {
+        projectId,
+        characters,
+        locations,
+        chapters,
+        acts,
+        structure,
+        projectMeta,
+      });
     });
   }
 
@@ -990,11 +1138,21 @@ function createStore() {
 
     await persist(async () => {
       const project = await api.deleteAct(projectId.value!, actId);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, {
+        projectId,
+        characters,
+        locations,
+        chapters,
+        acts,
+        structure,
+        projectMeta,
+      });
     });
   }
 
-  async function createCharacter(input: CreateCharacterInput): Promise<Character | null> {
+  async function createCharacter(
+    input: CreateCharacterInput,
+  ): Promise<Character | null> {
     if (!projectId.value) return null;
 
     const known = new Set(characters.map((character) => character.id));
@@ -1003,16 +1161,24 @@ function createStore() {
     await persist(async () => {
       const project = await api.createCharacter(projectId.value!, input);
       created = findCreated(known, project.characters);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, {
+        projectId,
+        characters,
+        locations,
+        chapters,
+        acts,
+        structure,
+        projectMeta,
+      });
     });
 
     if (created) {
       const newCharacter: Character = created;
       await openTab({
         id: `tab-${newCharacter.id}`,
-        type: 'character',
+        type: "character",
         refId: newCharacter.id,
-        title: newCharacter.name
+        title: newCharacter.name,
       });
     }
 
@@ -1024,13 +1190,23 @@ function createStore() {
 
     await persist(async () => {
       const project = await api.deleteCharacter(projectId.value!, characterId);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, {
+        projectId,
+        characters,
+        locations,
+        chapters,
+        acts,
+        structure,
+        projectMeta,
+      });
     });
 
     await closeTab(`tab-${characterId}`);
   }
 
-  async function createLocation(input: CreateLocationInput): Promise<Location | null> {
+  async function createLocation(
+    input: CreateLocationInput,
+  ): Promise<Location | null> {
     if (!projectId.value) return null;
 
     const known = new Set(locations.map((location) => location.id));
@@ -1039,16 +1215,24 @@ function createStore() {
     await persist(async () => {
       const project = await api.createLocation(projectId.value!, input);
       created = findCreated(known, project.locations);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, {
+        projectId,
+        characters,
+        locations,
+        chapters,
+        acts,
+        structure,
+        projectMeta,
+      });
     });
 
     if (created) {
       const newLocation: Location = created;
       await openTab({
         id: `tab-${newLocation.id}`,
-        type: 'location',
+        type: "location",
         refId: newLocation.id,
-        title: newLocation.name
+        title: newLocation.name,
       });
     }
 
@@ -1060,13 +1244,23 @@ function createStore() {
 
     await persist(async () => {
       const project = await api.deleteLocation(projectId.value!, locationId);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, {
+        projectId,
+        characters,
+        locations,
+        chapters,
+        acts,
+        structure,
+        projectMeta,
+      });
     });
 
     await closeTab(`tab-${locationId}`);
   }
 
-  async function createChapter(input: CreateChapterInput): Promise<Chapter | null> {
+  async function createChapter(
+    input: CreateChapterInput,
+  ): Promise<Chapter | null> {
     if (!projectId.value) return null;
 
     const known = new Set(chapters.map((chapter) => chapter.id));
@@ -1075,16 +1269,24 @@ function createStore() {
     await persist(async () => {
       const project = await api.createChapter(projectId.value!, input);
       created = findCreated(known, project.chapters);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, {
+        projectId,
+        characters,
+        locations,
+        chapters,
+        acts,
+        structure,
+        projectMeta,
+      });
     });
 
     if (created) {
       const newChapter: Chapter = created;
       await openTab({
         id: `tab-${newChapter.id}`,
-        type: 'chapter',
+        type: "chapter",
         refId: newChapter.id,
-        title: newChapter.title
+        title: newChapter.title,
       });
     }
 
@@ -1096,7 +1298,15 @@ function createStore() {
 
     await persist(async () => {
       const project = await api.deleteChapter(projectId.value!, chapterId);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, {
+        projectId,
+        characters,
+        locations,
+        chapters,
+        acts,
+        structure,
+        projectMeta,
+      });
     });
 
     // The chapter is now in trash on the server; force a reload next time.
@@ -1109,26 +1319,49 @@ function createStore() {
 
     await persist(async () => {
       const project = await api.createObstacle(projectId.value!, input);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, {
+        projectId,
+        characters,
+        locations,
+        chapters,
+        acts,
+        structure,
+        projectMeta,
+      });
     });
   }
 
   function updateObstacle(obstacleId: string, updates: UpdateObstacleInput) {
     if (!projectId.value) return;
 
-    const obstacle = structure.obstacles.find((candidate) => candidate.id === obstacleId);
+    const obstacle = structure.obstacles.find(
+      (candidate) => candidate.id === obstacleId,
+    );
     if (obstacle) Object.assign(obstacle, updates);
 
-    queuePatch(`obstacle:${obstacleId}`, updates as Record<string, unknown>, async (input, version) => {
-      const updated = await api.updateObstacle(projectId.value!, obstacleId, input);
-      if (isLatestEntityVersion(`obstacle:${obstacleId}`, version)) {
-        const current = structure.obstacles.find((candidate) => candidate.id === obstacleId);
-        if (current) Object.assign(current, updated);
-      }
-    });
+    queuePatch(
+      `obstacle:${obstacleId}`,
+      updates as Record<string, unknown>,
+      async (input, version) => {
+        const updated = await api.updateObstacle(
+          projectId.value!,
+          obstacleId,
+          input,
+        );
+        if (isLatestEntityVersion(`obstacle:${obstacleId}`, version)) {
+          const current = structure.obstacles.find(
+            (candidate) => candidate.id === obstacleId,
+          );
+          if (current) Object.assign(current, updated);
+        }
+      },
+    );
   }
 
-  async function createScene(chapterId: string, input: CreateSceneInput): Promise<Scene | null> {
+  async function createScene(
+    chapterId: string,
+    input: CreateSceneInput,
+  ): Promise<Scene | null> {
     if (!projectId.value) return null;
     let created: Scene | null = null;
     await persist(async () => {
@@ -1142,15 +1375,29 @@ function createStore() {
     return created;
   }
 
-  async function updateScene(sceneId: string, chapterId: string, input: Omit<UpdateSceneInput, 'expectedRevision'>): Promise<Scene | null> {
+  async function updateScene(
+    sceneId: string,
+    chapterId: string,
+    input: Omit<UpdateSceneInput, "expectedRevision">,
+  ): Promise<Scene | null> {
     if (!projectId.value) return null;
     let updated: Scene | null = null;
     await persist(async () => {
       const chapter = chapters.find((candidate) => candidate.id === chapterId);
-      const existing = chapter?.scenes.find((candidate) => candidate.id === sceneId);
-      if (!existing) throw new Error('Scene is no longer available; refresh the manuscript.');
-      updated = await api.updateScene(projectId.value!, chapterId, sceneId, { ...input, expectedRevision: existing.revision });
-      const index = chapter?.scenes.findIndex((candidate) => candidate.id === sceneId) ?? -1;
+      const existing = chapter?.scenes.find(
+        (candidate) => candidate.id === sceneId,
+      );
+      if (!existing)
+        throw new Error(
+          "Scene is no longer available; refresh the manuscript.",
+        );
+      updated = await api.updateScene(projectId.value!, chapterId, sceneId, {
+        ...input,
+        expectedRevision: existing.revision,
+      });
+      const index =
+        chapter?.scenes.findIndex((candidate) => candidate.id === sceneId) ??
+        -1;
       if (chapter && index >= 0 && updated) {
         chapter.scenes[index] = updated;
         if (input.order !== undefined) {
@@ -1162,7 +1409,10 @@ function createStore() {
     return updated;
   }
 
-  async function reorderScenes(chapterId: string, sceneIds: string[]): Promise<Scene[]> {
+  async function reorderScenes(
+    chapterId: string,
+    sceneIds: string[],
+  ): Promise<Scene[]> {
     if (!projectId.value) return [];
     const chapter = chapters.find((candidate) => candidate.id === chapterId);
     if (!chapter) return [];
@@ -1170,7 +1420,9 @@ function createStore() {
     await persist(async () => {
       reordered = await api.reorderScenes(projectId.value!, chapterId, {
         sceneIds,
-        expectedRevisions: Object.fromEntries(chapter.scenes.map((scene) => [scene.id, scene.revision]))
+        expectedRevisions: Object.fromEntries(
+          chapter.scenes.map((scene) => [scene.id, scene.revision]),
+        ),
       });
       chapter.scenes.splice(0, chapter.scenes.length, ...reordered);
     });
@@ -1193,13 +1445,21 @@ function createStore() {
 
     await persist(async () => {
       const project = await api.deleteObstacle(projectId.value!, obstacleId);
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, {
+        projectId,
+        characters,
+        locations,
+        chapters,
+        acts,
+        structure,
+        projectMeta,
+      });
     });
   }
 
   async function addCharacterRelationship(
     fromCharacterId: string,
-    input: CreateCharacterRelationshipInput
+    input: CreateCharacterRelationshipInput,
   ) {
     if (!projectId.value) return;
 
@@ -1207,22 +1467,41 @@ function createStore() {
       const project = await api.createCharacterRelationship(
         projectId.value!,
         fromCharacterId,
-        input
+        input,
       );
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, {
+        projectId,
+        characters,
+        locations,
+        chapters,
+        acts,
+        structure,
+        projectMeta,
+      });
     });
   }
 
-  async function removeCharacterRelationship(fromCharacterId: string, relationshipId: string) {
+  async function removeCharacterRelationship(
+    fromCharacterId: string,
+    relationshipId: string,
+  ) {
     if (!projectId.value) return;
 
     await persist(async () => {
       const project = await api.deleteCharacterRelationship(
         projectId.value!,
         fromCharacterId,
-        relationshipId
+        relationshipId,
       );
-      applyProject(project, { projectId, characters, locations, chapters, acts, structure, projectMeta });
+      applyProject(project, {
+        projectId,
+        characters,
+        locations,
+        chapters,
+        acts,
+        structure,
+        projectMeta,
+      });
     });
   }
 
@@ -1232,7 +1511,8 @@ function createStore() {
     try {
       await operation();
     } catch (caught) {
-      error = caught instanceof Error ? caught.message : 'Failed to save changes';
+      error =
+        caught instanceof Error ? caught.message : "Failed to save changes";
     } finally {
       saving = false;
     }
@@ -1402,7 +1682,7 @@ function createStore() {
     get projectStatsLoading() {
       return projectStatsLoading;
     },
-    loadProjectStats
+    loadProjectStats,
   };
 }
 

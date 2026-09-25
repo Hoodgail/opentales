@@ -11,7 +11,7 @@ Be kind. We're trying to make a tool that respects the craft; that respect exten
 ## Ways to contribute
 
 - **Bug reports.** File an issue with reproduction steps, expected vs. actual behaviour, browser/OS, and a screenshot or screen recording if you can. The smaller the repro, the faster the fix.
-- **Feature ideas.** Open a discussion or issue describing the *problem* first, then your proposed solution. We care more about the writing experience than the feature checklist.
+- **Feature ideas.** Open a discussion or issue describing the _problem_ first, then your proposed solution. We care more about the writing experience than the feature checklist.
 - **Documentation.** Typos, gaps, ambiguous setup steps — all fair game. Touch the README, `docs/`, or inline JSDoc.
 - **Pull requests.** See [Development workflow](#development-workflow) below.
 
@@ -96,13 +96,13 @@ If your PR touches the schema, also include the Prisma migration (don't hand-edi
 - Backend: clean architecture (controller → use case → repository). Don't reach into Prisma from controllers.
 - Folder tree mutations must use the shared project file helpers so cross-table sibling-name checks stay transaction-safe and expandable to new item types.
 - Tailwind v4 utility classes, no inline styles unless dynamic.
-- Comments are sparing. Names should carry the meaning; comments should explain *why*, not *what*.
+- Comments are sparing. Names should carry the meaning; comments should explain _why_, not _what_.
 
 ## Testing
 
 Vitest runs backend, SDK, and frontend suites. Put backend tests under `packages/backend/src/**/*.test.ts` and frontend tests next to their components or stores. `pnpm test` also validates local documentation links.
 
-Novel Build, workflow, and export/import integration tests use real PostgreSQL. Set `NOVEL_BUILD_TEST_DATABASE_URL`, `AI_WORKER_TEST_DATABASE_URL`, `EXPORT_IMPORT_TEST_DATABASE_URL`, `REVISION_TEST_DATABASE_URL`, and `RENAME_REFACTOR_TEST_DATABASE_URL` to an isolated migrated database; never point them at a development or production database. CI configures these automatically.
+Export/import, revision, and refactoring integration tests use real PostgreSQL. Set `EXPORT_IMPORT_TEST_DATABASE_URL`, `REVISION_TEST_DATABASE_URL`, and `RENAME_REFACTOR_TEST_DATABASE_URL` to an isolated migrated database; never point them at a development or production database. CI configures these automatically.
 
 Agent changes must add outcome and behavior evidence. Use deterministic graders for schemas, permissions, state, and tool contracts; use the synthetic continuity benchmark for diagnostics; use `pnpm --dir packages/backend eval:model` only when intentionally running credentialed repeated rubric trials.
 

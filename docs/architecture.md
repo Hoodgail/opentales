@@ -27,7 +27,7 @@ OpenTales is a pnpm monorepo with four packages:
 - The **backend** owns the database. Nothing else talks to Prisma.
 - The **SDK** is the only blessed way to talk to the backend. The frontend never builds raw `fetch()` calls.
 - The **frontend** is a SvelteKit static site. The same build is mounted by Electron via `file://`.
-- **Electron** adds a chrome-less window, native file dialogs, and the auto-updater. It does *not* own application logic.
+- **Electron** adds a chrome-less window, native file dialogs, and the auto-updater. It does _not_ own application logic.
 
 ## Backend (`packages/backend`)
 
@@ -60,9 +60,7 @@ Defined in `packages/backend/prisma/schema.prisma`. The big idea:
 
 - **Multi-tenant.** Everything lives under an `Org`. `Membership(orgId, userId, role)` controls access; `Role` is one of `OWNER | ADMIN | EDITOR | VIEWER`.
 - **Versioned writing.** A single shared model — `Writing → WritingBranch → WritingVersion` — captures any prose-like document. Chapter content, character bios, location descriptions, plot beats, and obstacle text are all writings under the hood. This gives every text field free version history and makes the drafts/inbox feature (PR #6) work uniformly across entity types.
-- **Durable creative workflows.** `BuildRun → BuildTask` persists a fenced dependency graph, budgets, attempts, immutable transitions, checkpoints, traces, evaluations, and author directives. Workers can resume after process loss without treating SSE or chat memory as execution state.
-- **Story intermediate representation.** Schema-versioned artifacts and immutable canon/entity/timeline/thread ledgers form the machine-readable story model alongside human-readable project docs.
-- **Sandbox manuscripts.** `BuildManuscriptUnit` maps planned chapters/scenes to build-bound writings and branches. Compilations and frozen reviews let owners inspect and explicitly merge without changing main during generation.
+- **Agent plans.** Planning notes, story bibles, and progress are ordinary versioned project docs. Historical workflow records remain stored for export and revision compatibility.
 - **Projects.** A `Project` belongs to an `Org` and has `acts → chapters → writings`, plus orthogonal collections of `characters`, `locations`, `obstacles`, and a `structure` (premise/POV/voice/theme/climax). Chapters can be `published` individually; the project itself has a `visibility` (private / unlisted / public).
 - **Submissions (drafts inbox).** A `Submission` is a proposed change targeting a specific `WritingBranch`. EDITORs open submissions, OWNER/ADMINs merge or decline. The diff is computed against the snapshot taken at submit time, so the base can keep moving without invalidating in-flight reviews.
 - **Assets.** Uploaded files are rows in `Asset` with the bytes on local disk under `ASSETS_DIR`. Avatars/covers reference an `assetId`, and the public `GET /assets/:assetId` route streams them.
@@ -141,7 +139,7 @@ The IDE in `packages/frontend/src/routes/projects/+page.svelte` mounts a desktop
 
 The activity bar swaps which `SidePanel` is active. On desktop, `svelte-splitpanes` owns the bounded, touch-capable separator between that panel and the editor. Dragging persists the width, double-clicking or dragging to the snap edge collapses it, and the activity-bar control plus keyboard-accessible separator can collapse, expand, or resize it without a pointer. Each panel is its own component under `lib/components/ide/`. The inspector remains context-sensitive: open a chapter, get a chapter inspector; open a character, get a character inspector.
 
-Novel Build adds synchronized Build, Story Bible, Outline Studio, Search, Problems, continuous manuscript, and Publish surfaces. These are projections over backend story/build state, not independent client-only copies. Partial failures are retained per slice and retried; stale data is never relabeled as belonging to another build.
+The outline, search, Problems, continuous manuscript, and publishing surfaces operate on project content. Plans, canon notes, and agent progress live in editable project docs.
 
 On mobile (PR #7) the side and inspector panels become drawers and the activity bar collapses into a bottom nav.
 
@@ -150,7 +148,7 @@ On mobile (PR #7) the side and inspector panels become drawers and the activity 
 A typed wrapper around the backend's HTTP API. Method names mirror REST resources:
 
 ```ts
-const sdk = createSdk({ baseUrl: '...', tokenStore });
+const sdk = createSdk({ baseUrl: "...", tokenStore });
 
 await sdk.projects.list();
 await sdk.projects.create({ orgId, title });
@@ -177,13 +175,11 @@ The frontend is a Progressive Web App:
 - `service-worker.ts` precaches the build artifacts (Vite hashed assets), uses **network-first** for everything else, and falls back to the cached SPA shell on offline navigation.
 - `InstallPrompt.svelte` shows a non-intrusive "Install OpenTales" toast when `beforeinstallprompt` fires.
 
-The service worker keeps the shell available offline, but PostgreSQL remains the authority for project and build state. Offline editing should not be described as local-first manuscript persistence until a durable sync layer exists.
+The service worker keeps the shell available offline, but PostgreSQL remains the authority for project state. Offline editing should not be described as local-first manuscript persistence until a durable sync layer exists.
 
-## Novel workflow and context engine
+## Agentic writing
 
-The deterministic outer workflow owns scheduling, leases, checkpoints, revision bounds, and completion gates. Model calls own creative decisions inside typed tasks. The worker receives narrowly scoped tools and a layered context pack assembled from the active build branch, explicit input artifacts, temporally valid canon/state, causal predecessors, and relevant skills.
-
-Build prose is composed from ordered scene/chapter manuscript units. The final gate requires a validated compilation plus provenance-bound publishing assets. See [`novel-build.md`](novel-build.md) for the full state machine, authorization model, and operational controls.
+Agents choose their next step from the author’s goal and current project contents. They read, create, and edit docs for planning and progress, and use chapter, scene, character, and relationship tools to write. See [agentic writing](agentic-writing.md).
 
 The service worker is only registered in production builds (`import.meta.env.PROD`). In dev, you get a fresh fetch on every reload.
 
@@ -191,12 +187,12 @@ The service worker is only registered in production builds (`import.meta.env.PRO
 
 For a feature shipping today, three URL surfaces matter:
 
-| Surface | Auth | Renders |
-|---|---|---|
-| `/` | none | Landing page (prerendered HTML, SEO-tuned) |
-| `/projects` | required | The IDE |
-| `/read/:org/:project` | none | Read view of a public project's published chapters |
-| `/mcp` | project MCP key | Stateless Streamable HTTP tools, resources, and prompts for one project |
+| Surface               | Auth            | Renders                                                                 |
+| --------------------- | --------------- | ----------------------------------------------------------------------- |
+| `/`                   | none            | Landing page (prerendered HTML, SEO-tuned)                              |
+| `/projects`           | required        | The IDE                                                                 |
+| `/read/:org/:project` | none            | Read view of a public project's published chapters                      |
+| `/mcp`                | project MCP key | Stateless Streamable HTTP tools, resources, and prompts for one project |
 
 Anything else is internal (`/invite/:token`, the API).
 

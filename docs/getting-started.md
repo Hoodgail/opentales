@@ -74,7 +74,7 @@ The seeded project has AI disabled. Enable and configure a provider in Project S
 
 For ChatGPT subscription models, first allow device code login in your ChatGPT security settings. Then choose **Codex**, select **Connect with ChatGPT**, open the OpenAI device page, and enter the displayed code. Keep Project Settings open while OpenTales polls for approval. The connected session refreshes automatically; use **Disconnect** and save settings to remove it. GitHub Copilot uses the adjacent GitHub device flow, while OpenAI-compatible providers accept a project API key and optional base URL.
 
-To start a Novel Build, open **Build**, enter the brainstorm and target, choose an autonomy mode, set token/cost limits where appropriate, and review the generated scope. **Plan & Review** is the recommended first run: it pauses after planning and writes prose only to an isolated build manuscript after authorization. See [`novel-build.md`](novel-build.md).
+Open **AI Agent** and describe your writing goal. The agent can read existing docs, create a plan in **Docs & Notes**, draft chapters, and revise the plan as the story develops. Manual mode proposes changes for approval; admin-only Auto mode executes permitted changes immediately. See [agentic writing](agentic-writing.md).
 
 ## 5. (Optional) Run the Electron desktop app
 
@@ -82,7 +82,7 @@ To start a Novel Build, open **Build**, enter the brainstorm and target, choose 
 pnpm dev
 ```
 
-This boots the SvelteKit dev server *and* launches the Electron shell pointing at it. Closing the Electron window will stop the dev session.
+This boots the SvelteKit dev server _and_ launches the Electron shell pointing at it. Closing the Electron window will stop the dev session.
 
 To produce a packaged installer:
 
@@ -115,11 +115,11 @@ Once you're logged in:
 1. **Create a project** from the title bar (or use the seeded one).
 2. **Add an Act** in the explorer (`Acts → +`), then **add a chapter** inside it.
 3. Click the chapter — Monaco opens with markdown highlighting.
-4. Write something. The status bar shows live word count; chapter status flips to *in-progress* automatically.
+4. Write something. The status bar shows live word count; chapter status flips to _in-progress_ automatically.
 5. Open the **Characters** activity tab to add a character; relate them to chapters via the inspector.
 6. Open **Locations** to add a setting and upload a reference image.
 
-When you're ready to share, head to **Project settings → Visibility** and flip the project to *public*. Individual chapters need their own *Publish* toggle. The public read view lives at `/read/:orgSlug/:projectSlug`.
+When you're ready to share, head to **Project settings → Visibility** and flip the project to _public_. Individual chapters need their own _Publish_ toggle. The public read view lives at `/read/:orgSlug/:projectSlug`.
 
 ## Common issues
 
@@ -129,7 +129,7 @@ When you're ready to share, head to **Project settings → Visibility** and flip
 
 **Avatar/cover uploads return a broken image.** The backend writes to `ASSETS_DIR` and serves them via `GET /assets/:assetId`. Check that the process can write to that directory and that `PUBLIC_BASE_URL` matches where the API is reachable.
 
-**Service worker keeps serving stale assets in dev.** Open DevTools → *Application* → *Service Workers* → *Unregister*, then hard reload. The SW is registered only in production builds, but a stale registration from a previous prod build can persist.
+**Service worker keeps serving stale assets in dev.** Open DevTools → _Application_ → _Service Workers_ → _Unregister_, then hard reload. The SW is registered only in production builds, but a stale registration from a previous prod build can persist.
 
 **A cost-bounded build pauses before the first model call.** OpenTales refreshes pricing automatically from models.dev and never treats an unknown price as free. Check backend access to `https://models.dev/api.json`; for a private/custom relay whose model cannot be resolved, add an explicitly sourced/versioned `AI_MODEL_PRICING_JSON` override.
 
