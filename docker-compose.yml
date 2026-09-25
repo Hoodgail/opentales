@@ -8,13 +8,16 @@ services:
     environment:
       NODE_ENV: production
       PORT: 4000
-      DATABASE_URL: ${DATABASE_URL:-postgresql://opentales:opentales@postgres:5432/opentales?schema=public}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must point to your PostgreSQL service}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       CORS_ORIGIN: ${CORS_ORIGIN:-https://opentales.hoodgail.me}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://opentales-api.hoodgail.me}
       MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-https://opentales.hoodgail.me,https://claude.ai,https://chatgpt.com,https://gemini.google.com}
       MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-https://opentales.hoodgail.me/mcp}
       MCP_OAUTH_ISSUER: ${MCP_OAUTH_ISSUER:-https://opentales.hoodgail.me}
+      OPENCODE_DATA_DIR: /app/data/opencode
+    volumes:
+      - opencode-data:/app/data/opencode
     expose:
       - "4000"
     networks:
@@ -22,7 +25,8 @@ services:
       - dokploy-network
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.opentales-api.rule=Host(`opentales-api.lumina.pw`)"
+      - "traefik.docker.network=dokploy-network"
+      - "traefik.http.routers.opentales-api.rule=Host(`${API_HOST:-opentales-api.hoodgail.me}`)"
       - "traefik.http.routers.opentales-api.entrypoints=web"
       - "traefik.http.services.opentales-api.loadbalancer.server.port=4000"
 
@@ -37,12 +41,17 @@ services:
     expose:
       - "80"
     networks:
+      - default
       - dokploy-network
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.opentales.rule=Host(`opentales.lumina.pw`)"
+      - "traefik.docker.network=dokploy-network"
+      - "traefik.http.routers.opentales.rule=Host(`${WEB_HOST:-opentales.hoodgail.me}`)"
       - "traefik.http.routers.opentales.entrypoints=web"
       - "traefik.http.services.opentales.loadbalancer.server.port=80"
+
+volumes:
+  opencode-data:
 
 networks:
   dokploy-network:

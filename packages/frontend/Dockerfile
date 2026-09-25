@@ -1,5 +1,6 @@
-FROM node:22-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
+ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/frontend/package.json packages/frontend/package.json
