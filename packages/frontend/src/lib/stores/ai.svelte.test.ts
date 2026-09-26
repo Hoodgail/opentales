@@ -45,7 +45,8 @@ describe("AI settings store", () => {
       .mockResolvedValueOnce(newer);
     const store = createAiStore();
     const old = store.loadModelCatalog('project-1');
-    await store.loadModelCatalog('project-1');
+    await store.loadModelCatalog('project-1', true);
+    expect(list).toHaveBeenLastCalledWith('project-1', { refresh: true });
     resolveOld({ providers: [], updatedAt: 'old', source: 'models.dev' });
     await old;
     expect(store.modelCatalog).toEqual(newer);

@@ -57,6 +57,8 @@ describe('provider model discovery', () => {
     expect(fetcher).toHaveBeenCalledWith('https://provider.example/api/v2/models', expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer key-a' }), redirect: 'error' }));
     await providerModelCatalog('cache-test', 'https://provider.example/api/v2', 'key-b', fallback);
     expect(fetcher).toHaveBeenCalledTimes(2);
+    await providerModelCatalog('cache-test', 'https://provider.example/api/v2', 'key-b', fallback, true);
+    expect(fetcher).toHaveBeenCalledTimes(3);
   });
 
   it('does not replace failed, malformed, or empty provider lists with catalog models', async () => {

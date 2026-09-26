@@ -42,7 +42,7 @@ export class AiController {
   };
 
   models = async (req: Request, res: Response) => {
-    res.json(await this.modelsUseCase.list(this.userId(req), req.params.projectId, req.query.source === 'catalog'));
+    res.json(await this.modelsUseCase.list(this.userId(req), req.params.projectId, req.query.source === 'catalog', req.query.refresh === 'true'));
   };
 
   discoverModels = async (req: Request, res: Response) => {

@@ -159,5 +159,7 @@ describe('provider discovery and model options', () => {
     expect(fetcher.mock.calls[0]).toEqual(['https://api.test/projects/project/ai/models/discover', expect.objectContaining({ method: 'POST', body: JSON.stringify({ baseUrl: 'https://provider.test', apiKey: 'provider-secret' }) })]);
     await client.updateAiAgentSession('project', 'session', { reasoningEffort: 'high', serviceTier: 'fast' });
     expect(fetcher.mock.calls[1]).toEqual(['https://api.test/projects/project/ai/agent-sessions/session', expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ reasoningEffort: 'high', serviceTier: 'fast' }) })]);
+    await client.listAiModels('project', { refresh: true });
+    expect(fetcher.mock.calls[2]).toEqual(['https://api.test/projects/project/ai/models?refresh=true', expect.any(Object)]);
   });
 });

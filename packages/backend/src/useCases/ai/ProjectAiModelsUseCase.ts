@@ -40,7 +40,7 @@ export class ProjectAiModelsUseCase {
     this.access = new ProjectAccessRepository(prisma);
   }
 
-  async list(userId: string, projectId: string, referenceOnly = false): Promise<AiModelCatalog> {
+  async list(userId: string, projectId: string, referenceOnly = false, refresh = false): Promise<AiModelCatalog> {
     await withTimeout(
       this.access.assertProjectAccess(userId, projectId),
       ACCESS_TIMEOUT_MS,
@@ -48,7 +48,7 @@ export class ProjectAiModelsUseCase {
     );
     if (referenceOnly) return loadCatalog();
     const settings = await this.prisma.projectAiSettings.findUnique({ where: { projectId } });
-    return loadProjectCatalog(projectId, settings);
+    return loadProjectCatalog(projectId, settings, refresh);
   }
 
   async discover(userId: string, projectId: string, input: DiscoverAiModelsInput): Promise<AiModelCatalog> {
@@ -64,9 +64,9 @@ export class ProjectAiModelsUseCase {
   }
 }
 
-export function loadProjectCatalog(projectId: string, settings: ProjectProviderSettings | null): Promise<AiModelCatalog> {
+export function loadProjectCatalog(projectId: string, settings: ProjectProviderSettings | null, refresh = false): Promise<AiModelCatalog> {
   if (settings?.providerKind === 'OPENAI_COMPATIBLE' && settings.baseUrl) {
-    return providerModelCatalog(projectId, settings.baseUrl, settings.apiKey ? decryptSecret(settings.apiKey) : null, loadCatalog);
+    return providerModelCatalog(projectId, settings.baseUrl, settings.apiKey ? decryptSecret(settings.apiKey) : null, loadCatalog, refresh);
   }
   return loadCatalog();
 }

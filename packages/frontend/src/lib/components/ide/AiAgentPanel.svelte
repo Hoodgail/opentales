@@ -626,7 +626,7 @@
           <div class="composer-toolbar">
             <div class="composer-options">
               <div class="composer-model">
-                <AiModelPicker choices={modelChoices} value={currentModel} loading={ai.modelCatalogLoading} error={ai.modelCatalogError} disabled={optionsDisabled} onSelect={(model) => changeOptions({ model })} onRefresh={() => { if (projectId) void ai.loadModelCatalog(projectId); }} />
+                <AiModelPicker choices={modelChoices} value={currentModel} loading={ai.modelCatalogLoading} error={ai.modelCatalogError} disabled={optionsDisabled} onSelect={(model) => changeOptions({ model })} onRefresh={() => { if (projectId) void ai.loadModelCatalog(projectId, true); }} />
               </div>
               <AiReasoningPicker efforts={selectedModel?.reasoningEfforts ?? []} effort={root?.model?.reasoningEffort ?? null} supportsFast={selectedModel?.supportsFast ?? false} serviceTier={root?.model?.serviceTier ?? 'standard'} disabled={optionsDisabled} onSelect={(options) => void changeOptions(options)} />
               <AiOptionPicker label="Execution mode" value={mode} options={[{ id: 'manual', name: 'Review changes', description: 'Approve each change before it is applied.' }, { id: 'auto', name: 'Full access', description: 'Apply project changes immediately. Admins only.' }]} disabled={optionsDisabled} onSelect={(id) => void setMode(id as AiAgentApprovalMode)}>

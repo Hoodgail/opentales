@@ -1346,8 +1346,11 @@ export class OpenTalesClient {
     );
   }
 
-  listAiModels(projectId: string, options: { source?: 'catalog' } = {}): Promise<AiModelCatalog> {
-    return this.request<AiModelCatalog>(`/projects/${projectId}/ai/models${options.source === 'catalog' ? '?source=catalog' : ''}`);
+  listAiModels(projectId: string, options: { source?: 'catalog'; refresh?: boolean } = {}): Promise<AiModelCatalog> {
+    const query = new URLSearchParams();
+    if (options.source === 'catalog') query.set('source', 'catalog');
+    if (options.refresh) query.set('refresh', 'true');
+    return this.request<AiModelCatalog>(`/projects/${projectId}/ai/models${query.size ? `?${query}` : ''}`);
   }
 
   discoverAiModels(projectId: string, input: DiscoverAiModelsInput): Promise<AiModelCatalog> {
