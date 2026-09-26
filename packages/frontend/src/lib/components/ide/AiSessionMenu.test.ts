@@ -66,4 +66,18 @@ describe("AiSessionMenu", () => {
     expect(select).toHaveBeenCalledWith("session-2");
     expect(screen.queryByRole("dialog")).toBeNull();
   });
+
+  it('escapes clipped panel ancestors and closes when focus leaves', async () => {
+    const { container } = render(AiSessionMenu, { title: 'Active session', sessions: [session('session-2')], activeSessionId: 'session-2', loading: false, onCreate: vi.fn(), onSelect: vi.fn() });
+    container.style.overflow = 'hidden';
+    await fireEvent.click(screen.getByRole('button', { name: 'Switch AI session' }));
+    const menu = screen.getByRole('dialog');
+    expect(menu.parentElement).toBe(document.body);
+    expect((menu as HTMLElement).style.position).toBe('fixed');
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    outside.focus();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    outside.remove();
+  });
 });

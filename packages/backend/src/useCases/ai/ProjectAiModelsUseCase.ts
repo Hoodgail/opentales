@@ -2,7 +2,12 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { PrismaClient } from '@prisma/client';
-import type { AiModelCatalog, AiModelCatalogModel, AiModelCatalogProvider } from '@opentales/sdk';
+import type { AiModelCatalog, AiModelCatalogModel, AiModelCatalogProvider, DiscoverAiModelsInput } from '@opentales/sdk';
+import { z } from 'zod';
+import { decryptSecret } from '../../utils/secretBox.js';
+import { normalizeOpenAiBaseUrl, type ProjectProviderSettings } from './opencode/providers.js';
+import { providerModelCatalog } from './providerModels.js';
+import { normalizeModel } from './modelMetadata.js';
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
 import { withTimeout } from '../../utils/promiseTimeout.js';
 import {
@@ -35,17 +40,38 @@ export class ProjectAiModelsUseCase {
     this.access = new ProjectAccessRepository(prisma);
   }
 
-  async list(userId: string, projectId: string): Promise<AiModelCatalog> {
+  async list(userId: string, projectId: string, referenceOnly = false, refresh = false): Promise<AiModelCatalog> {
     await withTimeout(
       this.access.assertProjectAccess(userId, projectId),
       ACCESS_TIMEOUT_MS,
       'Timed out while checking project access'
     );
-    return loadCatalog();
+    if (referenceOnly) return loadCatalog();
+    const settings = await this.prisma.projectAiSettings.findUnique({ where: { projectId } });
+    return loadProjectCatalog(projectId, settings, refresh);
+  }
+
+  async discover(userId: string, projectId: string, input: DiscoverAiModelsInput): Promise<AiModelCatalog> {
+    await this.access.assertPermission(userId, projectId, 'project:admin');
+    const parsed = z.object({ baseUrl: z.string().trim().min(1).max(2048), apiKey: z.string().max(8192).nullable().optional() }).parse(input);
+    const baseUrl = normalizeOpenAiBaseUrl(parsed.baseUrl);
+    const settings = await this.prisma.projectAiSettings.findUnique({ where: { projectId } });
+    // Unsaved endpoint edits must not receive a key belonging to the saved host.
+    const reuse = settings?.providerKind === 'OPENAI_COMPATIBLE'
+      && normalizeOpenAiBaseUrl(settings.baseUrl ?? 'https://api.openai.com/v1') === baseUrl;
+    const apiKey = parsed.apiKey !== undefined ? parsed.apiKey : reuse && settings.apiKey ? decryptSecret(settings.apiKey) : null;
+    return providerModelCatalog(`${projectId}:preview`, baseUrl, apiKey, loadCatalog, true);
   }
 }
 
-async function loadCatalog(): Promise<AiModelCatalog> {
+export function loadProjectCatalog(projectId: string, settings: ProjectProviderSettings | null, refresh = false): Promise<AiModelCatalog> {
+  if (settings?.providerKind === 'OPENAI_COMPATIBLE' && settings.baseUrl) {
+    return providerModelCatalog(projectId, settings.baseUrl, settings.apiKey ? decryptSecret(settings.apiKey) : null, loadCatalog, refresh);
+  }
+  return loadCatalog();
+}
+
+export async function loadCatalog(): Promise<AiModelCatalog> {
   if (memoryCache && Date.now() - memoryCache.loadedAt < CACHE_TTL_MS) return memoryCache.catalog;
 
   const cached = await readDiskCache();
@@ -61,8 +87,9 @@ async function loadCatalog(): Promise<AiModelCatalog> {
     });
     if (!response.ok) throw new Error(`models.dev responded ${response.status}`);
     const raw = await response.json() as Record<string, unknown>;
-    await writeDiskCache(raw);
     const catalog = normalizeCatalog(raw);
+    if (!catalog.providers.length) throw new Error('models.dev returned an empty catalog');
+    await writeDiskCache(raw).catch(() => undefined);
     memoryCache = { loadedAt: Date.now(), catalog };
     return catalog;
   } catch {
@@ -75,7 +102,8 @@ async function readDiskCache(): Promise<AiModelCatalog | null> {
     const stat = await fs.stat(CACHE_PATH);
     if (Date.now() - stat.mtimeMs >= CACHE_TTL_MS) return null;
     const text = await fs.readFile(CACHE_PATH, 'utf8');
-    return normalizeCatalog(JSON.parse(text) as Record<string, unknown>, stat.mtime.toISOString());
+    const catalog = normalizeCatalog(JSON.parse(text) as Record<string, unknown>, stat.mtime.toISOString());
+    return catalog.providers.length ? catalog : null;
   } catch {
     return null;
   }
@@ -86,7 +114,7 @@ async function writeDiskCache(raw: Record<string, unknown>) {
   await fs.writeFile(CACHE_PATH, JSON.stringify(raw), 'utf8');
 }
 
-function normalizeCatalog(raw: Record<string, unknown>, updatedAt = new Date().toISOString()): AiModelCatalog {
+export function normalizeCatalog(raw: Record<string, unknown>, updatedAt = new Date().toISOString()): AiModelCatalog {
   const providers = Object.entries(raw)
     .map(([providerId, value]) => normalizeProvider(providerId, value))
     .filter((provider): provider is AiModelCatalogProvider => Boolean(provider));
@@ -147,36 +175,6 @@ function normalizeProvider(providerId: string, value: unknown): AiModelCatalogPr
   };
 }
 
-function normalizeModel(providerId: string, modelId: string, value: unknown): AiModelCatalogModel | null {
-  if (!isRecord(value)) return null;
-  const provider = isRecord(value.provider) ? value.provider : {};
-  const releaseDate = stringValue(value.release_date) ?? stringValue(value.releaseDate) ?? null;
-  const cost = isRecord(value.cost) ? value.cost : null;
-  const limit = isRecord(value.limit) ? value.limit : null;
-
-  return {
-    id: modelId,
-    providerId,
-    name: stringValue(value.name) ?? modelId,
-    family: stringValue(value.family) ?? modelId.split(/[\-._]/)[0] ?? modelId,
-    releaseDate,
-    status: stringValue(value.status) ?? 'active',
-    api: {
-      id: stringValue(value.id) ?? modelId,
-      url: stringValue(provider.api) ?? null,
-      npm: stringValue(provider.npm) ?? null
-    },
-    cost: cost ? { input: numberValue(cost.input), output: numberValue(cost.output) } : null,
-    context: numberValue(value.context) ?? (limit ? numberValue(limit.context) : null),
-    maxInput: numberValue(value.max_input) ?? (limit ? numberValue(limit.input) : null),
-    maxOutput: numberValue(value.max_output) ?? (limit ? numberValue(limit.output) : null),
-    supportsTools: Boolean(value.tool_call ?? value.tools),
-    supportsVision: Boolean(value.vision ?? value.attachment),
-    latest: false,
-    visible: false
-  };
-}
-
 function markLatestModels(providers: AiModelCatalogProvider[]) {
   const now = Date.now();
   for (const provider of providers) {
@@ -217,8 +215,4 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringValue(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-function numberValue(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }

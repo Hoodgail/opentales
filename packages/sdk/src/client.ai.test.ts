@@ -151,3 +151,15 @@ describe('AI session SDK contracts', () => {
     expect(fetcher.mock.calls[1]?.[1]).toMatchObject({ method: 'POST' });
   });
 });
+describe('provider discovery and model options', () => {
+  it('posts unsaved credentials in the body and carries session effort/speed choices', async () => {
+    const fetcher = vi.fn(async () => new Response('{}', { headers: { 'content-type': 'application/json' } }));
+    const client = new OpenTalesClient({ baseUrl: 'https://api.test', token: 'session-token', fetcher });
+    await client.discoverAiModels('project', { baseUrl: 'https://provider.test', apiKey: 'provider-secret' });
+    expect(fetcher.mock.calls[0]).toEqual(['https://api.test/projects/project/ai/models/discover', expect.objectContaining({ method: 'POST', body: JSON.stringify({ baseUrl: 'https://provider.test', apiKey: 'provider-secret' }) })]);
+    await client.updateAiAgentSession('project', 'session', { reasoningEffort: 'high', serviceTier: 'fast' });
+    expect(fetcher.mock.calls[1]).toEqual(['https://api.test/projects/project/ai/agent-sessions/session', expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ reasoningEffort: 'high', serviceTier: 'fast' }) })]);
+    await client.listAiModels('project', { refresh: true });
+    expect(fetcher.mock.calls[2]).toEqual(['https://api.test/projects/project/ai/models?refresh=true', expect.any(Object)]);
+  });
+});

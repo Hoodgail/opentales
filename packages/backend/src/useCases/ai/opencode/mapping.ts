@@ -12,6 +12,7 @@ import type {
 import { parseMetadata } from './host.js';
 import { modelFromKey } from './providers.js';
 import { projectIdFromWorkspace } from './paths.js';
+import { variantOptions } from './modelVariants.js';
 
 /**
  * Pure projections from OpenCode wire objects (as returned by the embedded
@@ -36,7 +37,8 @@ export function toModelRef(model: Json | undefined | null): AiAgentModelRef | nu
   return {
     providerId: String(model.providerID ?? ''),
     modelId: String(model.id),
-    model: modelFromKey(String(model.id))
+    model: modelFromKey(String(model.id)),
+    ...variantOptions(model.variant)
   };
 }
 

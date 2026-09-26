@@ -67,6 +67,18 @@ Codex models are derived from the cached models.dev OpenAI catalog and filtered 
 
 The backend does not return raw API keys or OAuth credentials. It returns whether a credential exists. Sending `apiKey: null` clears a stored key or connected provider session, while omitting `apiKey` leaves the existing credential unchanged. Codex tokens cannot be entered manually; reconnect through the device flow.
 
+## Provider models and session controls
+
+For an OpenAI-compatible provider with a custom base URL, `GET /projects/:projectId/ai/models` discovers the authenticated `/models` list. Only IDs advertised by that endpoint appear in settings and the composer, including IDs absent from models.dev. A bare origin gets `/v1`; explicit API paths are preserved. Discovery is cached in memory for five minutes, scoped to the project, endpoint, and credential. The OpenCode workspace receives normalized model metadata and a placeholder key; real credentials are never written there.
+
+Provider metadata takes precedence, field by field, over matching models.dev metadata: pricing per million tokens, context and input/output limits, tool and image support, reasoning efforts, and Fast mode support. Explicit zero prices and false capabilities are preserved. Missing metadata stays unknown when no reference match exists. An unavailable or invalid `/models` endpoint shows a retryable error instead of substituting unrelated catalog models.
+
+Project admins can use **Load models** in AI settings before saving. `client.discoverAiModels(projectId, { baseUrl, apiKey })` performs this preview without changing project settings. Omit `apiKey` to reuse the saved credential only for the same endpoint, or pass `null` for an unauthenticated endpoint. `client.listAiModels(projectId, { source: 'catalog' })` requests the reference catalog when changing provider kinds. Pass `{ refresh: true }` to bypass the provider cache; the composer's Refresh button and saving settings do this automatically.
+
+The composer has searchable provider models, local favorites, agent and approval-mode menus, and supported reasoning/service-tier choices. Selecting a model, effort, or speed changes the session without changing the project default. `createAiAgentSession` and `updateAiAgentSession` accept `model`, `reasoningEffort` (or `null` for the model default), and `serviceTier: 'standard' | 'fast'`. Unsupported choices are rejected; changing models resets effort and speed. Controls are locked during a run.
+
+OpenCode persists these choices as model variants. Effort is sent as `reasoning_effort` for compatible Chat Completions or `reasoning.effort` for Codex Responses. Fast mode uses `service_tier: 'priority'`; Standard explicitly uses `'default'` on models supporting Fast mode. See OpenAI's [reasoning guide](https://developers.openai.com/api/docs/guides/reasoning) and [Fast mode guide](https://developers.openai.com/api/docs/guides/priority-processing). Available effort values and Fast support come from model metadata.
+
 ## Agent skills
 
 Projects can define reusable Agent Skills from the AI settings UI. The frontend edits skill markdown with `MonacoMarkdownEditor`, using the live collaboration system for skill content so co-authors see remote edits and presence like other project documents.

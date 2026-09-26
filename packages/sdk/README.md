@@ -108,6 +108,7 @@ Important DTOs:
 | `startCodexAuth(projectId)`                                  | `POST /projects/:projectId/ai-settings/codex/auth/start`                   |
 | `pollCodexAuth(projectId, input)`                            | `POST /projects/:projectId/ai-settings/codex/auth/poll`                    |
 | `listAiModels(projectId)`                                    | `GET /projects/:projectId/ai/models`                                       |
+| `discoverAiModels(projectId, input)`                         | `POST /projects/:projectId/ai/models/discover` (admin-only preview)          |
 | `listProjectMcpApiKeys(projectId)`                           | `GET /projects/:projectId/mcp-api-keys`                                    |
 | `createProjectMcpApiKey(projectId, input)`                   | `POST /projects/:projectId/mcp-api-keys`                                   |
 | `revokeProjectMcpApiKey(projectId, keyId)`                   | `DELETE /projects/:projectId/mcp-api-keys/:keyId`                          |
@@ -132,6 +133,8 @@ Important DTOs:
 | `streamAiAgentEvents(projectId, onEvent, options)`           | `GET /projects/:projectId/ai/agent-events` (SSE)                           |
 
 Agent sessions run on the backend's embedded OpenCode V2 host. `AiAgentSession` returns the summary, recent messages (`getAiAgentMessages` pages older ones), and pending `permissions` and `questions` for the session and its subagents. `streamAiAgentEvents` delivers live activity for every session the caller owns in a project, including subagent children. Manual mode approvals are OpenCode permission replies (`once`, `always`, `reject`); `auto` is admin-only. See [`docs/ai-system.md`](../../docs/ai-system.md).
+
+`listAiModels` lists the saved custom endpoint's advertised models and fills missing metadata from models.dev. `discoverAiModels` previews an unsaved endpoint using `{ baseUrl, apiKey? }`. A saved key is reused only for the same endpoint. `createAiAgentSession` and `updateAiAgentSession` accept `model`, `reasoningEffort` (`null` for default), and `serviceTier` (`standard` or `fast`); these choices belong to the session and do not overwrite the project model.
 
 Agents use project doc, chapter, scene, character, and relationship tools to plan and write dynamically. Publishing methods include secure export create/list/download/regenerate/delete and import preview/apply. See [agentic writing](../../docs/agentic-writing.md).
 

@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { PrismaClient } from '@prisma/client';
+import { aiModelChoices, type AiProviderKind } from '@opentales/sdk';
+import { loadProjectCatalog } from '../ProjectAiModelsUseCase.js';
 import { HttpError } from '../../../http/HttpError.js';
 import { loadAiAgents, type AiAgentInfo } from '../agents.js';
 import { loadAiSkillCatalog, loadAiSkillReferences, safeCatalogName, type AiSkillCatalogItem } from '../markdownCatalog.js';
@@ -39,7 +41,8 @@ const HIDDEN_NATIVE_AGENTS = ['build', 'plan'];
  */
 export async function syncProjectWorkspace(
   prisma: PrismaClient,
-  projectId: string
+  projectId: string,
+  extraModels: readonly string[] = []
 ): Promise<ProjectWorkspace> {
   const directory = projectWorkspaceDirectory(projectId);
   const [settings, project, agents, skills] = await Promise.all([
@@ -52,7 +55,9 @@ export async function syncProjectWorkspace(
   if (!settings?.enabled) throw new HttpError(400, 'AI is not enabled for this project');
 
   const agentModels = agents.map((agent) => agent.model).filter((model): model is string => Boolean(model));
-  const provider = providerConfigFor(settings, agentModels);
+  const catalog = await loadProjectCatalog(projectId, settings);
+  const kind = settings.providerKind.toLowerCase().replaceAll('_', '-') as AiProviderKind;
+  const provider = providerConfigFor(settings, [...agentModels, ...extraModels], aiModelChoices(catalog, kind));
 
   const agentConfig: Record<string, unknown> = {};
   for (const id of HIDDEN_NATIVE_AGENTS) agentConfig[id] = { disabled: true };

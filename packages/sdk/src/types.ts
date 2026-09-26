@@ -651,8 +651,13 @@ export interface AiModelCatalogModel {
   context: number | null;
   maxInput: number | null;
   maxOutput: number | null;
-  supportsTools: boolean;
-  supportsVision: boolean;
+  supportsTools: boolean | null;
+  supportsVision: boolean | null;
+  /** Supported API effort values, in the provider's order. */
+  reasoningEfforts?: string[];
+  supportsFast?: boolean;
+  /** Model author, which may differ from the configured endpoint. */
+  vendor?: string;
   latest: boolean;
   visible: boolean;
 }
@@ -669,7 +674,13 @@ export interface AiModelCatalogProvider {
 export interface AiModelCatalog {
   providers: AiModelCatalogProvider[];
   updatedAt: string;
-  source: "models.dev" | "unavailable";
+  source: "models.dev" | "provider" | "unavailable";
+}
+
+export interface DiscoverAiModelsInput {
+  baseUrl: string;
+  /** Omit to reuse the saved key only when the saved endpoint matches. */
+  apiKey?: string | null;
 }
 
 export interface ProjectAiSkill {
@@ -784,6 +795,8 @@ export interface AiAgentModelRef {
   modelId: string;
   /** OpenTales model string as configured in project AI settings. */
   model: string;
+  reasoningEffort?: string | null;
+  serviceTier?: "standard" | "fast";
 }
 
 export interface AiAgentSessionSummary {
@@ -939,6 +952,9 @@ export interface CreateAiAgentSessionInput {
   title?: string;
   approvalMode?: AiAgentApprovalMode;
   agent?: string;
+  model?: string;
+  reasoningEffort?: string | null;
+  serviceTier?: "standard" | "fast";
 }
 
 export interface UpdateAiAgentSessionInput {
@@ -946,6 +962,9 @@ export interface UpdateAiAgentSessionInput {
   title?: string;
   agent?: string;
   model?: string;
+  /** Null restores the model's default effort. */
+  reasoningEffort?: string | null;
+  serviceTier?: "standard" | "fast";
 }
 
 export interface AiAgentPromptAttachmentInput {

@@ -75,6 +75,18 @@ describe("agent store", () => {
     store.stopStream();
   });
 
+  it('preserves model, effort, and speed when creating the first session', async () => {
+    vi.spyOn(OpenTalesClient.prototype, 'listAiAgentSessions').mockResolvedValue([]);
+    const model = { providerId: 'opentales', modelId: 'gpt-6-luna', model: 'gpt-6-luna', reasoningEffort: 'high', serviceTier: 'fast' as const };
+    const create = vi.spyOn(OpenTalesClient.prototype, 'createAiAgentSession').mockResolvedValue(detail('chosen', { model }));
+    const store = createAgentStore();
+    await store.initialize('project-1');
+    await store.createSession({ model: 'gpt-6-luna', reasoningEffort: 'high', serviceTier: 'fast' });
+    expect(create).toHaveBeenCalledWith('project-1', { model: 'gpt-6-luna', reasoningEffort: 'high', serviceTier: 'fast', approvalMode: 'manual' });
+    expect(store.activeSession?.model).toEqual(model);
+    store.stopStream();
+  });
+
   it("streams text deltas and tool updates into the right assistant message", async () => {
     vi.spyOn(OpenTalesClient.prototype, "listAiAgentSessions").mockResolvedValue([summary("ses_a")]);
     vi.spyOn(OpenTalesClient.prototype, "getAiAgentSession").mockResolvedValue(detail("ses_a"));

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { OpenTalesClient } from "@opentales/sdk";
+import { OpenTalesClient, type AiModelCatalog } from "@opentales/sdk";
 import { createAiStore, reconnectDelayMs } from "./ai.svelte";
 
 const now = "2026-08-25T00:00:00.000Z";
@@ -35,6 +35,25 @@ describe("AI settings store", () => {
     await expect(store.startCodexAuth("project-1")).resolves.toMatchObject({ userCode: "ABCD" });
     await expect(store.pollCodexAuth("project-1", "device-1", "ABCD")).resolves.toMatchObject({ status: "authorized" });
     expect(store.settings).toMatchObject({ providerKind: "codex", model: "codex/gpt-5.4", hasApiKey: true });
+  });
+
+  it('ignores superseded catalog requests and clears models on discovery failure', async () => {
+    let resolveOld!: (catalog: AiModelCatalog) => void;
+    const newer: AiModelCatalog = { providers: [], updatedAt: 'new', source: 'provider' };
+    const list = vi.spyOn(OpenTalesClient.prototype, 'listAiModels')
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }))
+      .mockResolvedValueOnce(newer);
+    const store = createAiStore();
+    const old = store.loadModelCatalog('project-1');
+    await store.loadModelCatalog('project-1', true);
+    expect(list).toHaveBeenLastCalledWith('project-1', { refresh: true });
+    resolveOld({ providers: [], updatedAt: 'old', source: 'models.dev' });
+    await old;
+    expect(store.modelCatalog).toEqual(newer);
+    list.mockRejectedValueOnce(new Error('Invalid key'));
+    await store.loadModelCatalog('project-1');
+    expect(store.modelCatalog).toBeNull();
+    expect(store.modelCatalogError).toBe('Invalid key');
   });
 
 });

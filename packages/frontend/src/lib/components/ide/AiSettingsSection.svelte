@@ -1,7 +1,8 @@
 <script lang="ts">
   import { ExternalLink, Eye, EyeOff, Key, Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-svelte';
-  import type { AiModelCatalogModel, AiModelCatalogProvider, AiProviderKind } from '@opentales/sdk';
-  import { ai } from '$lib/stores/ai.svelte';
+  import { aiModelChoices, type AiModelCatalog, type AiProviderKind } from '@opentales/sdk';
+  import AiModelPicker from './AiModelPicker.svelte';
+  import { ai, api } from '$lib/stores/ai.svelte';
   import { manuscript } from '$lib/stores/manuscript.svelte';
 
   const CODEX_POLLING_SAFETY_MARGIN_SECONDS = 3;
@@ -25,8 +26,20 @@
   let saving = $state(false);
   let lastSyncedId = $state<string | null>(null);
   let selectedSkillId = $state<string | null>(null);
-  let modelSearch = $state('');
-  let showAllModels = $state(false);
+  let previewCatalog = $state<AiModelCatalog | null>(null);
+  let referenceCatalog = $state<AiModelCatalog | null>(null);
+  let discoveryLoading = $state(false);
+  let discoveryError = $state<string | null>(null);
+  let discoveryRevision = 0;
+  const customEndpoint = $derived(providerKind === 'openai-compatible' && Boolean(baseUrl.trim()));
+  const sameEndpoint = $derived(settings?.providerKind === 'openai-compatible' && baseUrl.trim().replace(/\/+$/, '') === (settings.baseUrl ?? '').replace(/\/+$/, ''));
+  const savedEndpoint = $derived(sameEndpoint && !keyDirty && !clearKey);
+  const catalog = $derived(customEndpoint
+    ? previewCatalog ?? (savedEndpoint && ai.modelCatalog?.source === 'provider' ? ai.modelCatalog : null)
+    : referenceCatalog ?? (ai.modelCatalog?.source === 'models.dev' ? ai.modelCatalog : null));
+  const choices = $derived(aiModelChoices(catalog, providerKind));
+  const selectedModel = $derived(choices.find((choice) => choice.id === model)?.model);
+  const catalogError = $derived(discoveryError ?? (customEndpoint && savedEndpoint ? ai.modelCatalogError : null));
   let copilotAuth = $state<{
     deviceCode: string;
     userCode: string;
@@ -53,6 +66,10 @@
       void ai.loadSettings(pid);
       void ai.loadModelCatalog(pid);
       void ai.loadSkills(pid);
+      referenceCatalog = null;
+      void api.listAiModels(pid, { source: 'catalog' }).then((value) => {
+        if (projectId === pid) referenceCatalog = value;
+      }).catch(() => undefined);
       lastSyncedId = pid;
     }
   });
@@ -92,6 +109,36 @@
     }
   });
 
+  $effect(() => {
+    // Invalidate an in-flight preview whenever its endpoint or credentials change.
+    void [projectId, providerKind, baseUrl, apiKeyInput, keyDirty, clearKey];
+    discoveryRevision += 1;
+    previewCatalog = null;
+    discoveryError = null;
+    discoveryLoading = false;
+  });
+
+  async function discoverModels() {
+    if (!projectId || !canEdit() || !baseUrl.trim()) return;
+    const revision = ++discoveryRevision;
+    discoveryLoading = true;
+    discoveryError = null;
+    previewCatalog = null;
+    try {
+      const result = await api.discoverAiModels(projectId, {
+        baseUrl: baseUrl.trim(),
+        ...(clearKey ? { apiKey: null } : keyDirty ? { apiKey: apiKeyInput.trim() || null } : {})
+      });
+      if (revision !== discoveryRevision) return;
+      previewCatalog = result;
+      if (!aiModelChoices(result, 'openai-compatible').some((choice) => choice.id === model)) model = '';
+    } catch (error) {
+      if (revision === discoveryRevision) discoveryError = error instanceof Error ? error.message : 'Could not load provider models.';
+    } finally {
+      if (revision === discoveryRevision) discoveryLoading = false;
+    }
+  }
+
   function canEdit(): boolean {
     const role = manuscript.currentUserRole;
     return role === null || role === 'OWNER' || role === 'ADMIN';
@@ -129,10 +176,12 @@
     }
 
     try {
-      await ai.updateSettings(projectId, input);
-      keyDirty = false;
-      clearKey = false;
-      apiKeyInput = '';
+      const saved = await ai.updateSettings(projectId, input);
+      if (saved) {
+        keyDirty = false;
+        clearKey = false;
+        apiKeyInput = '';
+      }
     } finally {
       saving = false;
     }
@@ -273,48 +322,10 @@
   function selectProviderKind(next: AiProviderKind) {
     if (!canEdit() || next === providerKind) return;
     providerKind = next;
-    model = next === 'gateway'
-      ? 'openai/gpt-5.4'
-      : next === 'github-copilot'
-        ? 'gpt-5'
-        : next === 'codex'
-          ? 'codex/gpt-5.4'
-          : 'gpt-5.4';
+    model = settings?.providerKind === next ? settings.model : '';
     clearKey = false;
     keyDirty = false;
     apiKeyInput = '';
-  }
-
-  function providerModelId(provider: AiModelCatalogProvider, item: AiModelCatalogModel): string {
-    return provider.id === 'github-copilot' || provider.id === 'openai' ? item.id : `${provider.id}/${item.id}`;
-  }
-
-  function selectCatalogModel(provider: AiModelCatalogProvider, item: AiModelCatalogModel) {
-    if (!canEdit()) return;
-    model = providerModelId(provider, item);
-    if (provider.id === 'github-copilot') providerKind = 'github-copilot';
-    else if (provider.id === 'codex') providerKind = 'codex';
-    else if (provider.id === 'openai') providerKind = 'openai-compatible';
-    else providerKind = 'gateway';
-  }
-
-  function providerVisibleForCurrentKind(provider: AiModelCatalogProvider): boolean {
-    if (providerKind === 'github-copilot') return provider.id === 'github-copilot';
-    if (providerKind === 'codex') return provider.id === 'codex';
-    if (providerKind === 'openai-compatible') return provider.id === 'openai';
-    return provider.id !== 'github-copilot' && provider.id !== 'codex';
-  }
-
-  function filteredModels(provider: AiModelCatalogProvider): AiModelCatalogModel[] {
-    const query = modelSearch.trim().toLowerCase();
-    return provider.models
-      .filter((item) => showAllModels || item.visible || item.id === model || providerModelId(provider, item) === model)
-      .filter((item) => item.status !== 'deprecated')
-      .filter((item) => {
-        if (!query) return true;
-        return `${provider.name} ${provider.id} ${item.name} ${item.id}`.toLowerCase().includes(query);
-      })
-      .slice(0, showAllModels ? 50 : 12);
   }
 
   function formatCost(value: number | null | undefined): string | null {
@@ -450,92 +461,6 @@
             >
               Codex
             </button>
-          </div>
-        </div>
-
-        <!-- Model -->
-        <div class="block">
-          <span class="mb-1 block text-[10px] uppercase tracking-wide text-muted-foreground">
-            Model
-          </span>
-          <input
-            type="text"
-            bind:value={model}
-            disabled={!canEdit()}
-            placeholder={providerKind === 'gateway' ? 'openai/gpt-5.4' : providerKind === 'github-copilot' ? 'gpt-5' : providerKind === 'codex' ? 'codex/gpt-5.4' : 'gpt-4o'}
-            class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-foreground outline-none focus:border-accent disabled:opacity-60"
-          />
-          <div class="mt-2 rounded-md border border-border bg-card/30 p-2">
-            <div class="mb-2 flex items-center gap-2">
-              <input
-                type="search"
-                bind:value={modelSearch}
-                placeholder="Search models or providers"
-                class="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-[11px] outline-none focus:border-accent"
-              />
-              <button
-                type="button"
-                onclick={() => (showAllModels = !showAllModels)}
-                class="rounded border border-border px-2 py-1 text-[10px] text-muted-foreground hover:bg-muted"
-              >
-                {showAllModels ? 'Latest' : 'All'}
-              </button>
-            </div>
-            {#if ai.modelCatalogLoading}
-              <div class="flex items-center gap-2 py-2 text-[11px] text-muted-foreground">
-                <Loader2 class="size-3 animate-spin" /> Loading model catalog...
-              </div>
-            {:else if ai.modelCatalog && ai.modelCatalog.providers.length > 0}
-              <div class="max-h-72 space-y-2 overflow-y-auto pr-1">
-                {#each ai.modelCatalog.providers.filter(providerVisibleForCurrentKind) as provider (provider.id)}
-                  {@const items = filteredModels(provider)}
-                  {#if items.length > 0}
-                    <div>
-                      <div class="mb-1 flex items-center justify-between gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-                        <span>{provider.name}</span>
-                        {#if provider.popular}<span>Popular</span>{/if}
-                      </div>
-                      <div class="space-y-1">
-                        {#each items as item (item.id)}
-                          {@const selected = item.id === model || providerModelId(provider, item) === model}
-                          <button
-                            type="button"
-                            onclick={() => selectCatalogModel(provider, item)}
-                            disabled={!canEdit()}
-                            class={'w-full rounded border px-2 py-1.5 text-left text-[11px] ' +
-                              (selected
-                                ? 'border-accent bg-accent/15 text-foreground'
-                                : 'border-border hover:bg-muted')}
-                          >
-                            <span class="flex items-center justify-between gap-2">
-                              <span class="min-w-0 truncate font-medium">{item.name}</span>
-                              <span class="flex shrink-0 items-center gap-1 text-[9px] text-muted-foreground">
-                                {#if item.latest}<span class="rounded bg-accent/20 px-1 text-accent">Latest</span>{/if}
-                                {#if item.cost?.input === 0}<span class="rounded bg-emerald-500/15 px-1 text-emerald-400">Free</span>{/if}
-                              </span>
-                            </span>
-                            <span class="mt-0.5 block truncate text-[10px] text-muted-foreground">
-                              {providerModelId(provider, item)}
-                              {#if item.context} · {Math.round(item.context / 1000)}k context{/if}
-                              {#if item.maxInput && item.maxInput !== item.context} · {Math.round(item.maxInput / 1000)}k max input{/if}
-                              {#if formatCost(item.cost?.input)} · in {formatCost(item.cost?.input)}{/if}
-                              {#if formatCost(item.cost?.output)} / out {formatCost(item.cost?.output)}{/if}
-                              {#if item.supportsVision} · vision{/if}
-                              {#if item.supportsTools} · tools{/if}
-                            </span>
-                          </button>
-                        {/each}
-                      </div>
-                    </div>
-                  {/if}
-                {/each}
-              </div>
-            {:else}
-              <p class="py-2 text-[11px] text-muted-foreground">Model catalog unavailable. You can still enter a model manually.</p>
-            {/if}
-            {#if ai.modelCatalogError}
-              <p class="mt-2 text-[10px] text-destructive">{ai.modelCatalogError}</p>
-            {/if}
           </div>
         </div>
 
@@ -717,6 +642,7 @@
               <div class="relative">
                 <input
                   type={showKey ? 'text' : 'password'}
+                  aria-label="API key"
                   bind:value={apiKeyInput}
                   disabled={!canEdit()}
                   placeholder={clearKey ? 'Key will be cleared' : 'sk-…'}
@@ -729,6 +655,7 @@
                 <button
                   type="button"
                   onclick={() => (showKey = !showKey)}
+                  aria-label={showKey ? 'Hide API key' : 'Show API key'}
                   class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
                   {#if showKey}
@@ -746,12 +673,49 @@
             {/if}
           </div>
         {/if}
+
+        <div class="rounded-xl border border-border bg-card/40 p-2.5">
+          <div class="mb-2 flex items-center justify-between gap-2">
+            <span class="text-[10px] uppercase tracking-wide text-muted-foreground">Model</span>
+            {#if customEndpoint}
+              <button type="button" onclick={discoverModels} disabled={!canEdit() || discoveryLoading} class="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[10px] hover:bg-muted disabled:opacity-50">
+                {#if discoveryLoading}<Loader2 class="size-3 motion-safe:animate-spin" />{/if}
+                {discoveryLoading ? 'Loading…' : 'Load models'}
+              </button>
+            {/if}
+          </div>
+          <AiModelPicker {choices} value={model} placement="below" loading={discoveryLoading || (savedEndpoint && ai.modelCatalogLoading)} error={catalogError} disabled={!canEdit()} onSelect={(id) => { model = id; }} onRefresh={customEndpoint ? () => void discoverModels() : undefined} />
+          {#if customEndpoint}
+            <p class="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
+              {#if catalog} {choices.length} models from your provider. Missing details are filled from models.dev.
+              {:else}Load models from this endpoint to choose an available model.{/if}
+            </p>
+            {#if !sameEndpoint && openAiCompatibleKeyStored && !keyDirty}
+              <p class="mt-1 text-[10px] text-muted-foreground">Enter the new endpoint's API key using Replace above.</p>
+            {/if}
+          {/if}
+          {#if selectedModel}
+            <dl class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 border-t border-border pt-2 text-[10px]">
+              <dt class="text-muted-foreground">Context</dt><dd>{selectedModel.context?.toLocaleString() ?? 'Not reported'}</dd>
+              <dt class="text-muted-foreground">Max input</dt><dd>{selectedModel.maxInput?.toLocaleString() ?? 'Not reported'}</dd>
+              <dt class="text-muted-foreground">Input / output</dt><dd>{formatCost(selectedModel.cost?.input) ?? '—'} / {formatCost(selectedModel.cost?.output) ?? '—'}</dd>
+              <dt class="text-muted-foreground">Vision / tools</dt><dd>{selectedModel.supportsVision === null ? 'Unknown' : selectedModel.supportsVision ? 'Yes' : 'No'} / {selectedModel.supportsTools === null ? 'Unknown' : selectedModel.supportsTools ? 'Yes' : 'No'}</dd>
+            </dl>
+          {/if}
+          {#if catalogError}<p class="mt-2 text-[10px] text-destructive" role="alert">{catalogError}</p>{/if}
+          {#if !customEndpoint}
+            <details class="mt-2 text-[10px] text-muted-foreground">
+              <summary class="cursor-pointer">Enter a model ID manually</summary>
+              <input aria-label="Model ID" bind:value={model} disabled={!canEdit()} placeholder="Model ID" class="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-foreground outline-none focus:border-accent" />
+            </details>
+          {/if}
+        </div>
       {/if}
 
       {#if canEdit()}
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || (enabled && !model.trim())}
           class="w-full rounded-md bg-accent px-2 py-1.5 text-xs font-medium text-accent-foreground hover:bg-accent/90 disabled:opacity-60"
         >
           {saving ? 'Saving…' : 'Save AI settings'}

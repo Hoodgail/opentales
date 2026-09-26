@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 import { encryptSecret } from '../../../utils/secretBox.js';
-import { classifyCopilotBody, modelKey, normalizeOpenAiBaseUrl, providerConfigFor, providerTransportFor } from './providers.js';
+import { classifyCopilotBody, modelKey, modelFromKey, normalizeOpenAiBaseUrl, providerConfigFor, providerTransportFor } from './providers.js';
 
 describe('OpenCode provider mapping', () => {
   it('maps a Codex project to the Responses package with the bare allowed model id', () => {
@@ -24,6 +24,12 @@ describe('OpenCode provider mapping', () => {
   it('appends /v1 only to bare OpenAI-compatible origins', () => {
     expect(normalizeOpenAiBaseUrl('https://strata.yasui.io')).toBe('https://strata.yasui.io/v1');
     expect(normalizeOpenAiBaseUrl('https://llm.example.com/api/v2/')).toBe('https://llm.example.com/api/v2');
+  });
+
+  it('preserves exact upstream IDs without colliding with legacy slash keys', () => {
+    for (const id of ['vendor/model', 'vendor--model', 'ot-id-model', 'vendor/local--model']) expect(modelFromKey(modelKey(id))).toBe(id);
+    expect(modelKey('vendor/model')).not.toBe(modelKey('vendor--model'));
+    expect(modelFromKey('openai--gpt-6-luna')).toBe('openai/gpt-6-luna');
   });
 
   it('rejects Codex models outside the subscription allowlist before inference', async () => {

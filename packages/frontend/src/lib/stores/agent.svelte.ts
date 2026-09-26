@@ -1,5 +1,6 @@
 import type {
-  AiAgentApprovalMode,
+  CreateAiAgentSessionInput,
+  UpdateAiAgentSessionInput,
   AiAgentCapabilities,
   AiAgentMessage,
   AiAgentPart,
@@ -158,14 +159,14 @@ export function createAgentStore() {
 
   // ── Session lifecycle ──────────────────────────────────────────────────
 
-  async function createSession(input: { approvalMode?: AiAgentApprovalMode; agent?: string } = {}) {
+  async function createSession(input: CreateAiAgentSessionInput = {}) {
     const pid = projectId;
     if (!pid) return null;
     error = null;
     try {
       const created = await api.createAiAgentSession(pid, {
+        ...input,
         approvalMode: input.approvalMode ?? activeRoot()?.approvalMode ?? 'manual',
-        agent: input.agent
       });
       details[created.id] = created;
       upsertSummary(created);
@@ -196,7 +197,7 @@ export function createAgentStore() {
     }
   }
 
-  async function updateSession(sessionId: string, input: { approvalMode?: AiAgentApprovalMode; title?: string; agent?: string; model?: string }) {
+  async function updateSession(sessionId: string, input: UpdateAiAgentSessionInput) {
     const pid = projectId;
     if (!pid) return false;
     error = null;

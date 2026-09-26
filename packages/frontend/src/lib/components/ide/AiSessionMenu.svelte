@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Bot, ChevronDown, Plus } from "lucide-svelte";
   import { tick } from "svelte";
+  import { floatingMenu } from "$lib/actions/floatingMenu";
   import type { AiAgentSessionSummary } from "@opentales/sdk";
 
   interface Props {
@@ -21,6 +22,7 @@
     onSelect,
   }: Props = $props();
 
+  const uid = $props.id();
   let open = $state(false);
   let triggerEl: HTMLButtonElement | undefined = $state();
   let menuEl: HTMLDivElement | undefined = $state();
@@ -55,28 +57,6 @@
     }
   }
 
-  function handleMenuKey(event: KeyboardEvent) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeMenu(true);
-      return;
-    }
-    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    const items = menuItems();
-    if (!items.length) return;
-    event.preventDefault();
-    const current = Math.max(0, items.indexOf(document.activeElement as HTMLElement));
-    const index =
-      event.key === "Home"
-        ? 0
-        : event.key === "End"
-          ? items.length - 1
-          : event.key === "ArrowDown"
-            ? (current + 1) % items.length
-            : (current - 1 + items.length) % items.length;
-    items[index]?.focus();
-  }
-
   function menuItems(): HTMLElement[] {
     return Array.from(
       menuEl?.querySelectorAll<HTMLElement>("[data-session-menu-item]") ?? [],
@@ -101,50 +81,44 @@
   }
 </script>
 
-<div class="relative">
+<div class="min-w-0">
   <button
     bind:this={triggerEl}
     type="button"
     aria-label="Switch AI session"
     aria-haspopup="dialog"
     aria-expanded={open}
-    aria-controls="ai-session-menu"
+    aria-controls={`${uid}-menu`}
     onclick={toggleMenu}
     onkeydown={handleTriggerKey}
     title="Switch AI session"
     class="flex max-w-32 items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
   >
-    <Bot class="size-3" />
+    <Bot class="size-3 shrink-0" />
     <span class="truncate">{title}</span>
-    <ChevronDown class="size-3" />
+    <ChevronDown class="size-3 shrink-0" />
   </button>
   {#if open}
-    <button
-      type="button"
-      tabindex="-1"
-      aria-label="Close session menu"
-      class="fixed inset-0 z-10 cursor-default bg-transparent"
-      onclick={() => closeMenu(true)}
-    ></button>
     <div
       bind:this={menuEl}
-      id="ai-session-menu"
+      use:floatingMenu={{ anchor: triggerEl!, placement: "below", close: closeMenu }}
+      id={`${uid}-menu`}
       role="dialog"
       tabindex="-1"
-      aria-labelledby="ai-session-menu-title"
-      onkeydown={handleMenuKey}
-      class="absolute right-0 top-7 z-20 w-64 overflow-hidden rounded-lg border border-border bg-popover shadow-xl"
+      aria-labelledby={`${uid}-title`}
+      class="flex w-80 flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl"
     >
       <div
         class="flex items-center justify-between border-b border-border px-2 py-1.5"
       >
         <span
-          id="ai-session-menu-title"
+          id={`${uid}-title`}
           class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
           >AI Sessions</span
         >
         <button
           type="button"
+          data-menu-item
           data-session-menu-item
           onclick={createSession}
           disabled={loading}
@@ -156,7 +130,7 @@
       <div
         role="listbox"
         aria-label="AI sessions"
-        class="max-h-72 overflow-y-auto p-1"
+        class="min-h-0 max-h-80 overflow-y-auto p-1.5"
       >
         {#if loading && sessions.length === 0}
           <div class="px-2 py-3 text-center text-[11px] text-muted-foreground">
@@ -172,7 +146,8 @@
               type="button"
               role="option"
               aria-selected={session.id === activeSessionId}
-              data-session-menu-item
+              data-menu-item
+          data-session-menu-item
               data-session-id={session.id}
               onclick={() => chooseSession(session.id)}
               class="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"

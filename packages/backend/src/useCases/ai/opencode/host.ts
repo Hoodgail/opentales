@@ -46,6 +46,7 @@ export class OpencodeRuntime {
   private readonly sessionParents = new Map<string, string | null>();
   private readonly rootMetadata = new Map<string, OpentalesSessionMetadata>();
   private readonly fingerprints = new Map<string, string>();
+  private readonly sessionModels = new Map<string, Set<string>>();
   private readonly pendingPermissions = new Map<string, PendingPermission>();
   private eventLoop: Promise<void> | null = null;
   private closed = false;
@@ -94,8 +95,11 @@ export class OpencodeRuntime {
    * Regenerate a project's OpenCode workspace from OpenTales data and reload
    * the instance when anything (settings, agents, skills) changed.
    */
-  async ensureProject(projectId: string): Promise<ProjectWorkspace> {
-    const workspace = await syncProjectWorkspace(this.prisma, projectId);
+  async ensureProject(projectId: string, extraModels: readonly string[] = []): Promise<ProjectWorkspace> {
+    const models = this.sessionModels.get(projectId) ?? new Set<string>();
+    extraModels.forEach((model) => models.add(model));
+    this.sessionModels.set(projectId, models);
+    const workspace = await syncProjectWorkspace(this.prisma, projectId, [...models]);
     const previous = this.fingerprints.get(projectId);
     if (previous !== workspace.fingerprint) {
       const host = await this.host();

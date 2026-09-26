@@ -35,6 +35,7 @@ import type {
   AiCharacterDialogueSuggestion,
   AiContinuityReview,
   AiModelCatalog,
+  DiscoverAiModelsInput,
   AiOutlineExpansion,
   AiRewriteSuggestion,
   AiToolManifest,
@@ -1345,8 +1346,17 @@ export class OpenTalesClient {
     );
   }
 
-  listAiModels(projectId: string): Promise<AiModelCatalog> {
-    return this.request<AiModelCatalog>(`/projects/${projectId}/ai/models`);
+  listAiModels(projectId: string, options: { source?: 'catalog'; refresh?: boolean } = {}): Promise<AiModelCatalog> {
+    const query = new URLSearchParams();
+    if (options.source === 'catalog') query.set('source', 'catalog');
+    if (options.refresh) query.set('refresh', 'true');
+    return this.request<AiModelCatalog>(`/projects/${projectId}/ai/models${query.size ? `?${query}` : ''}`);
+  }
+
+  discoverAiModels(projectId: string, input: DiscoverAiModelsInput): Promise<AiModelCatalog> {
+    return this.request<AiModelCatalog>(`/projects/${projectId}/ai/models/discover`, {
+      method: 'POST', body: input
+    });
   }
 
   listProjectAiSkills(projectId: string): Promise<ProjectAiSkill[]> {
