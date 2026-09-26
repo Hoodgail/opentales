@@ -10,6 +10,12 @@ The package exports API DTOs plus `OpenTalesClient`, a small fetch-based client 
 pnpm build
 ```
 
+The build generates a standalone ESM package in `dist`, including a runtime
+`package.json` that exports compiled JavaScript. Production images must install
+this directory as `@opentales/sdk`; the workspace manifest exports TypeScript
+for Vite/tsx development. Run `pnpm test:runtime` after building to verify that
+plain Node can import the packaged SDK.
+
 ## Typecheck
 
 ```bash

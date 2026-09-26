@@ -51,6 +51,8 @@ jobs:
       - run: pnpm eval
       - run: pnpm --dir packages/backend test:critical-coverage
       - run: pnpm build
+      - name: Verify compiled SDK package
+        run: pnpm --dir packages/sdk test:runtime
       - name: Build deployment images
         run: |
           docker build -f packages/backend/Dockerfile -t opentales-backend:ci .
