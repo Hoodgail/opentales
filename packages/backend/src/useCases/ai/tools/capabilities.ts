@@ -44,6 +44,7 @@ const STORY_READ_TOOLS = new Set([
   "readAssetMetadata",
   "readAssetContent",
   "getProjectStats",
+  "runStoryLint",
   "listMembers",
   "listBetaShareLinks",
   "readBetaShareLink",

@@ -8,6 +8,7 @@ import type { TaskHandler } from '../tools/task.js';
 import { READ_ACTION, WRITE_ACTION } from './permissions.js';
 import { projectIdFromWorkspace } from './paths.js';
 import { providerTransportFor } from './providers.js';
+import { projectCompass } from './compass.js';
 
 /**
  * Tools OpenTales owns but OpenCode already provides natively:
@@ -78,8 +79,12 @@ export function opentalesPlugin(prisma: PrismaClient, bridge: OpentalesHostBridg
                   signal: context.signal
                 });
               }
-              const output = await tool.execute(input, { toolCallId: context.id, abortSignal: context.signal });
-              return toolResult(output);
+              try {
+                const output = await tool.execute(input, { toolCallId: context.id, abortSignal: context.signal });
+                return toolResult(output);
+              } catch (error) {
+                throw agentFacingError(error);
+              }
             }
           });
         }
@@ -91,14 +96,18 @@ export function opentalesPlugin(prisma: PrismaClient, bridge: OpentalesHostBridg
       await ctx.session.hook('context', async (event) => {
         const owner = await bridge.sessionOwner(event.sessionID).catch(() => null);
         if (!owner || owner.projectId !== projectId) return;
-        const context = await projectContext(prisma, projectId);
-        const mode = await bridge.approvalMode(event.sessionID);
+        const [context, compass, mode] = await Promise.all([
+          projectContext(prisma, projectId),
+          projectCompass({ prisma, projectId }).catch(() => ''),
+          bridge.approvalMode(event.sessionID)
+        ]);
         event.system.push({ type: 'text', text: context });
+        if (compass) event.system.push({ type: 'text', text: compass });
         event.system.push({
           type: 'text',
           text:
             mode === 'auto'
-              ? '## Execution mode: Auto\nProject-changing tools execute immediately. Do not claim success until the tool result confirms it. Make the safest reasonable assumption instead of asking questions.'
+              ? '## Execution mode: Auto\nProject-changing tools execute immediately. Do not claim success until the tool result confirms it. Make bold, reversible choices instead of asking, and record them under Decisions in the Ledger.'
               : '## Execution mode: Manual\nProject-changing tools pause while the author reviews a diff. The tool call only returns after the decision: a successful result means the change was approved and applied; an error saying the author rejected it means nothing changed. Report the actual outcome. Use the question tool only for genuine ambiguity.'
         });
       });
@@ -144,6 +153,27 @@ function toolCatalog(prisma: PrismaClient, projectId: string, userId = '__catalo
     primary: true,
     approvalMode: 'auto'
   }) as unknown as Record<string, AgentTool>;
+}
+
+/**
+ * Make tool failures actionable for the model: keep the use-case message, add
+ * structured details (e.g. the actual head version on a stale write), and
+ * replace raw database errors with a short explanation.
+ */
+export function agentFacingError(error: unknown): Error {
+  if (error instanceof HttpError) {
+    const details = error.details && typeof error.details === 'object' ? ` Details: ${JSON.stringify(error.details)}` : '';
+    const hint = error.status === 409 && /stale/i.test(error.message)
+      ? ' Head version IDs come from the latest read of that target (headVersionId field), never from its document/chapter ID. Re-read it, rebase your edit on the current text, then retry once.'
+      : '';
+    return new Error(`${error.message}.${details}${hint}`);
+  }
+  if (error instanceof Error && /Invalid `tx?\.?\w*\.?\w+\(\)` invocation|prisma/i.test(error.message)) {
+    const constraint = /Unique constraint failed on the fields: \(([^)]*)\)/i.exec(error.message)?.[1]?.replace(/`/g, '')
+      ?? /Foreign key constraint violated on the constraint: `?([^`\s]+)/i.exec(error.message)?.[1];
+    return new Error(`The database rejected this change${constraint ? ` (constraint: ${constraint.trim()})` : ''}. Check that every referenced ID exists in this project and names are unique, then retry.`);
+  }
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 const MAX_TOOL_OUTPUT_CHARS = 60_000;

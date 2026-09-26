@@ -24,7 +24,8 @@ import type {
   UpdateProjectInput,
   UpdateStructureInput,
   UpdateSceneInput,
-  UpdateSubmissionInput
+  UpdateSubmissionInput,
+  CreateProjectDocInput
 } from '@opentales/sdk';
 import { tool, type AgentTool as Tool } from './shared.js';
 import { z } from 'zod';
@@ -190,6 +191,7 @@ export const mutatingToolNames = [
   'createScene',
   'updateScene',
   'reorderScenes',
+  'renumberChapters',
   'deleteScene',
   'updateStoryStructure',
   'createObstacle',
@@ -359,6 +361,10 @@ export const mutationToolSchemas = {
     buildRunId: nonEmptyString.optional()
   }).strict(),
   deleteScene: z.object({ sceneId: nonEmptyString, expectedRevision: z.number().int().nonnegative() }).strict(),
+  renumberChapters: z.object({
+    chapterIds: z.array(nonEmptyString).min(1).max(500)
+      .describe('Every live chapter ID in the desired reading order. Chapter 1 first.')
+  }).strict(),
   updateStoryStructure: withAtLeastOne(z.object({ title: optionalString, genre: optionalString, perspective: optionalString, pov: optionalString, voice: optionalString, tone: optionalString, themes: stringArray.optional(), logline: optionalString, outline: optionalString, climax: optionalString }), ['title', 'genre', 'perspective', 'pov', 'voice', 'tone', 'themes', 'logline', 'outline', 'climax']),
   createObstacle: z.object({ title: nonEmptyString, type: obstacleTypeSchema, description: optionalString, resolution: optionalString }),
   updateObstacle: withAtLeastOne(z.object({ obstacleId: nonEmptyString, title: optionalString, type: obstacleTypeSchema.optional(), description: optionalString, resolution: optionalString, order: z.number().optional() }), ['title', 'type', 'description', 'resolution', 'order']),
@@ -440,6 +446,7 @@ const mutationToolDescriptions = {
   createScene: 'Create a scene in a chapter. Requires chapterId.',
   updateScene: 'Update scene metadata or prose with optimistic concurrency. Requires sceneId and the revision from readScene; prose also requires its headVersionId.',
   reorderScenes: 'Atomically reorder every scene in a chapter. Requires the complete ordered sceneIds list and each revision returned by listScenes/readScene.',
+  renumberChapters: 'Atomically set chapter numbers (1..n) to match reading order. Pass every live chapter ID in the desired order. Use after creating chapters out of order or inserting a chapter mid-book.',
   deleteScene: 'Delete a scene using the revision returned by readScene.',
   updateStoryStructure: 'Update story structure fields. Include at least one field to change.',
   createObstacle: 'Create an obstacle. Requires title and type.',
@@ -650,6 +657,7 @@ export async function executeMutationTool(
   if (toolName === 'createScene') return compactToolResult(toolName, input, await createScene(prisma, context, input));
   if (toolName === 'updateScene') return compactToolResult(toolName, input, await updateScene(prisma, context, input));
   if (toolName === 'reorderScenes') return compactToolResult(toolName, input, await reorderScenes(prisma, context, input));
+  if (toolName === 'renumberChapters') return renumberChapters(prisma, context, input);
   if (toolName === 'deleteScene') return compactToolResult(toolName, input, await deleteScene(prisma, context, input));
   if (toolName === 'createCharacter') return compactToolResult(toolName, input, await createCharacter(prisma, context, input));
   if (toolName === 'updateCharacter') return compactToolResult(toolName, input, await updateCharacter(prisma, context, input));
@@ -691,40 +699,15 @@ async function createProjectDoc(
   context: ToolContext & { userId: string },
   input: Record<string, unknown>
 ) {
-  const title = String(input.title ?? '').trim();
-  if (!title) throw new HttpError(400, 'Document title is required');
-  const content = typeof input.content === 'string' ? input.content : '';
-  const last = await prisma.projectDoc.findFirst({
-    where: { projectId: context.projectId },
-    orderBy: { order: 'desc' },
-    select: { order: true }
+  // Delegate to the project-doc use case so folder ownership, sibling-name
+  // uniqueness, and folder locking match the IDE exactly.
+  const doc = await new ProjectDocUseCase(prisma).create(context.userId, context.projectId, {
+    title: String(input.title ?? ''),
+    folderId: nullableStringOrUndefined(input.folderId) ?? null,
+    kind: (typeof input.kind === 'string' ? input.kind : 'note') as CreateProjectDocInput['kind'],
+    content: typeof input.content === 'string' ? input.content : ''
   });
-  return prisma.$transaction(async (tx) => {
-    const writing = await tx.writing.create({ data: { projectId: context.projectId, kind: 'NOTE' } });
-    const branch = await tx.writingBranch.create({ data: { writingId: writing.id, name: 'main' } });
-    const version = await tx.writingVersion.create({
-      data: {
-        branchId: branch.id,
-        body: content,
-        wordCount: countWords(content),
-        authorId: context.userId,
-        message: 'Create project document from AI approval'
-      }
-    });
-    await tx.writingBranch.update({ where: { id: branch.id }, data: { headVersionId: version.id } });
-    await tx.writing.update({ where: { id: writing.id }, data: { defaultBranchId: branch.id } });
-    return tx.projectDoc.create({
-        data: {
-          projectId: context.projectId,
-          folderId: nullableStringOrUndefined(input.folderId),
-          title,
-        kind: typeof input.kind === 'string' ? toPrismaDocKind(input.kind) : 'NOTE',
-        bodyWritingId: writing.id,
-        order: (last?.order ?? -1) + 1
-      },
-      select: { id: true, title: true, kind: true }
-    });
-  });
+  return { id: doc.id, title: doc.title, kind: doc.kind, folderId: doc.folderId ?? null, path: doc.path ?? null };
 }
 
 async function updateProjectDoc(
@@ -963,6 +946,7 @@ function toolNoun(toolName: string): string {
     createScene: 'Scene',
     updateScene: 'Scene',
     reorderScenes: 'Scenes',
+    renumberChapters: 'Chapters',
     deleteScene: 'Scene',
     createCharacter: 'Character',
     updateCharacter: 'Character',
@@ -1352,6 +1336,46 @@ async function deleteScene(prisma: PrismaClient, context: ToolContext & { userId
   if (!scene) throw new HttpError(404, 'Scene not found');
   return new SceneUseCase(prisma).delete(context.userId, context.projectId, scene.chapterId, sceneId, {
     expectedRevision: numberOrUndefined(input.expectedRevision)
+  });
+}
+
+/**
+ * Chapter numbers are unique per project, so renumbering happens in two
+ * passes inside one transaction: park every chapter on a negative number, then
+ * assign 1..n in the requested order.
+ */
+async function renumberChapters(prisma: PrismaClient, context: ToolContext & { userId: string }, input: Record<string, unknown>) {
+  await new ProjectAccessRepository(prisma).assertPermission(context.userId, context.projectId, 'project:write');
+  const chapterIds = stringArrayOrUndefined(input.chapterIds) ?? [];
+  if (new Set(chapterIds).size !== chapterIds.length) throw new HttpError(400, 'chapterIds contains duplicates');
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${context.projectId}:chapter-number`}, 941)::bigint)`;
+    const live = await tx.chapter.findMany({ where: { projectId: context.projectId, deletedAt: null }, select: { id: true, number: true, title: true } });
+    const liveIds = new Set(live.map((chapter) => chapter.id));
+    const unknown = chapterIds.filter((id) => !liveIds.has(id));
+    if (unknown.length) throw new HttpError(400, `Unknown or deleted chapter IDs: ${unknown.join(', ')}`);
+    const missing = live.filter((chapter) => !chapterIds.includes(chapter.id));
+    if (missing.length) {
+      throw new HttpError(400, `Include every live chapter. Missing: ${missing.map((chapter) => `${chapter.id} ("${chapter.title}")`).join(', ')}`);
+    }
+    // Trashed chapters keep their numbers; park live ones below any existing value.
+    const floor = await tx.chapter.aggregate({ where: { projectId: context.projectId }, _min: { number: true } });
+    const base = Math.min(floor._min.number ?? 0, 0) - chapterIds.length - 1;
+    for (let index = 0; index < chapterIds.length; index += 1) {
+      await tx.chapter.update({ where: { id: chapterIds[index] }, data: { number: base + index } });
+    }
+    const taken = new Set(
+      (await tx.chapter.findMany({ where: { projectId: context.projectId, deletedAt: { not: null } }, select: { number: true } })).map((c) => c.number)
+    );
+    const result: Array<{ id: string; number: number; title: string }> = [];
+    let next = 1;
+    for (const id of chapterIds) {
+      while (taken.has(next)) next += 1;
+      await tx.chapter.update({ where: { id }, data: { number: next } });
+      result.push({ id, number: next, title: live.find((chapter) => chapter.id === id)!.title });
+      next += 1;
+    }
+    return { ok: true, tool: 'renumberChapters', action: 'renumbered', chapters: result };
   });
 }
 

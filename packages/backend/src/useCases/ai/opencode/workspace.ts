@@ -19,6 +19,14 @@ export interface ProjectWorkspace {
   agents: AiAgentInfo[];
 }
 
+/**
+ * Tool-call budgets per run. Autonomous novel work (a whole planning phase, or
+ * drafting a chapter scene by scene) takes hundreds of tool calls; a run still
+ * ends at a natural checkpoint, and the Ledger lets the next run resume.
+ */
+const PRIMARY_AGENT_STEPS = 400;
+const SUBAGENT_STEPS = 150;
+
 /** Agents OpenCode ships that make no sense inside a novel IDE. */
 const HIDDEN_NATIVE_AGENTS = ['build', 'plan'];
 
@@ -49,9 +57,10 @@ export async function syncProjectWorkspace(
   const agentConfig: Record<string, unknown> = {};
   for (const id of HIDDEN_NATIVE_AGENTS) agentConfig[id] = { disabled: true };
   agentConfig[OPENTALES_PRIMARY_AGENT] = {
-    description: 'OpenTales writing assistant: plans, drafts, revises, and manages the manuscript with OpenTales tools.',
+    description: 'OpenTales writing agent: plans, drafts, revises, and organizes the novel inside the project.',
     mode: 'primary',
     system: primarySystemPrompt(),
+    steps: PRIMARY_AGENT_STEPS,
     color: '#d4882a'
   };
   agentConfig.planner = {
@@ -59,11 +68,12 @@ export async function syncProjectWorkspace(
     mode: 'primary',
     system: [
       primarySystemPrompt(),
-      'You are in planning mode. Analyze the request, gather context with read tools, and produce a concise plan. Do not change project data.'
+      'You are in read-only planning mode: project changes are disabled. This is the one exception to "persist, don\'t recite": analyze with read tools and answer in chat with a concise plan or assessment the author can approve before switching to the writer agent.'
     ].join('\n\n'),
     permissions: READ_ONLY_AGENT_PERMISSIONS,
     color: '#7c9cbf'
   };
+  agentConfig.general = { steps: SUBAGENT_STEPS };
   agentConfig.explore = {
     description:
       'Fast read-only explorer for manuscripts and project context. Finds chapters, docs, characters, and locations and returns concise findings with IDs.',
@@ -72,11 +82,16 @@ export async function syncProjectWorkspace(
   for (const agent of agents) {
     const id = safeCatalogName(agent.name);
     if (!id || id === 'build' || id === 'plan' || id === 'explore' || id === 'general') continue;
+    // Primary agents get the shared writer prompt so they inherit the
+    // persist-don't-recite contract and memory model; subagents stay focused.
+    const primary = agent.mode === 'primary' || agent.mode === 'all';
+    const system = primary ? [primarySystemPrompt(), agent.prompt].filter(Boolean).join('\n\n') : agent.prompt;
     agentConfig[id] = {
       description: agent.description,
       mode: agent.mode,
       hidden: agent.hidden ?? false,
-      ...(agent.prompt ? { system: agent.prompt } : {}),
+      steps: primary ? PRIMARY_AGENT_STEPS : SUBAGENT_STEPS,
+      ...(system ? { system } : {}),
       ...(agent.model ? { model: `${OPENTALES_PROVIDER_ID}/${providerConfigFor({ ...settings, model: agent.model }).model.split('/')[1]}` } : {}),
       ...(agent.runtimeRole === 'explorer' || agent.runtimeRole === 'researcher' ? { permissions: READ_ONLY_AGENT_PERMISSIONS } : {})
     };

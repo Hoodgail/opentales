@@ -56,6 +56,9 @@ export class CreateChapterUseCase {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      // Serialize chapter numbering per project so concurrent creates (an agent
+      // creating a whole manuscript skeleton in parallel) never collide.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${projectId}:chapter-number`}, 941)::bigint)`;
       if (input.actId) {
         const act = await tx.act.findFirst({
           where: { id: input.actId, projectId },

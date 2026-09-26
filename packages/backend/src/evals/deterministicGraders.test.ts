@@ -62,7 +62,8 @@ describe("deterministic AI artifact and behavior graders", () => {
     });
     grade(
       "behavior/explorer-read-only",
-      Object.keys(explorer).join(",") === "readChapter",
+      // runStoryLint is a read-only, model-free diagnostic, so explorers keep it.
+      Object.keys(explorer).sort().join(",") === "readChapter,runStoryLint",
     );
     const contract = taskContractSchema.parse({
       objective: "Draft assigned chapter",

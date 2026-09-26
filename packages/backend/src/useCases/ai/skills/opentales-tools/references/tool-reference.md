@@ -368,6 +368,20 @@ Read a bounded body range from a writing version.
 | `full` | boolean |  |
 | `versionId` | string | yes |
 
+### `runStoryLint`
+
+Run deterministic story diagnostics over the current manuscript (no model call): POV/tense/person drift, head-hopping, repeated passages and phrases, filter words, monotonous rhythm, dialogue-tag overuse, chronology and travel-time contradictions, unknown characters or locations in scenes, missing scene metadata, word-count targets, and structural gaps. Returns counted issues with chapter/scene evidence and suggested fixes. Run it after drafting or revising a scene or chapter and before declaring a pass clean.
+
+| Field | Type | Required |
+| --- | --- | --- |
+| `chapterIds` | string[] |  |
+| `categories` | "schema" \| "cross-link" \| "continuity" \| "chronology" \| "knowledge" \| "location" \| "world-rule" \| "character" \| "pov" \| "setup-payoff" \| "plot" \| "pacing" \| "repetition" \| "dialogue" \| "style" \| "metadata" \| "publishing" \| "workflow"[] |  |
+| `phase` | "planning" \| "drafting" \| "revising" \| "completed" |  |
+| `targetWordCountMin` | integer |  |
+| `targetWordCountMax` | integer |  |
+| `bannedPhrases` | string[] |  |
+| `minimumSeverity` | "info" \| "warning" \| "error" |  |
+
 ## Change tools
 
 ### `acceptInvite`
@@ -729,6 +743,14 @@ Remove a project member. Requires userId.
 | Field | Type | Required |
 | --- | --- | --- |
 | `userId` | string | yes |
+
+### `renumberChapters`
+
+Atomically set chapter numbers (1..n) to match reading order. Pass every live chapter ID in the desired order. Use after creating chapters out of order or inserting a chapter mid-book.
+
+| Field | Type | Required |
+| --- | --- | --- |
+| `chapterIds` | string[] | yes |
 
 ### `reorderScenes`
 

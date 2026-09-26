@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "name": "novel-studio",
+  "version": "1.0.0",
+  "description": "Run and resume a whole novel project: organize the Story Bible, create native story objects, keep the Ledger and Canon, and pace autonomous work across phases.",
+  "kind": "workflow",
+  "inputs": [],
+  "outputs": ["story-brief", "narrative-contract", "task-result"],
+  "runtimeRoles": ["orchestrator", "creator", "drafter", "reviser"],
+  "allowedTools": [
+    "listProjectFiles",
+    "readFolder",
+    "createFolder",
+    "listProjectDocs",
+    "readProjectDoc",
+    "createProjectDoc",
+    "updateProjectDoc",
+    "createCharacter",
+    "createCharacterRelationship",
+    "createLocation",
+    "createAct",
+    "updateAct",
+    "createObstacle",
+    "updateStoryStructure",
+    "updateProject",
+    "createChapter",
+    "updateChapter",
+    "createScene",
+    "updateScene",
+    "compileChapterFromScenes",
+    "runStoryLint"
+  ],
+  "maxIterations": 4,
+  "context": {
+    "maxTokens": 16000,
+    "sections": ["story-brief", "narrative-contract", "active-task"]
+  },
+  "procedure": [
+    "Orient from the Project compass and the Ledger; follow its Next action unless redirected.",
+    "Create the Story Bible folder, Ledger, and Canon before multi-step work.",
+    "Load the phase's craft skill, then persist results as native objects and docs, never as chat.",
+    "Update the Ledger (Now, Next action, Notes to future self) after each unit of work.",
+    "Report briefly: what exists now, the next action, and only the author's genuine decisions."
+  ],
+  "references": []
+}
