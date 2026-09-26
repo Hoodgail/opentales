@@ -116,6 +116,7 @@ export function createAiStore() {
   let modelCatalog = $state<AiModelCatalog | null>(null);
   let modelCatalogLoading = $state(false);
   let modelCatalogError = $state<string | null>(null);
+  let modelCatalogRequest = 0;
 
   async function loadSettings(projectId: string) {
     const generation = ensureProjectContext(projectId);
@@ -134,10 +135,17 @@ export function createAiStore() {
   }
 
   async function updateSettings(projectId: string, input: UpdateProjectAiSettingsInput) {
+    const generation = ensureProjectContext(projectId);
     settingsError = null;
     try {
-      settings = await api.updateProjectAiSettings(projectId, input);
+      const next = await api.updateProjectAiSettings(projectId, input);
+      if (!isCurrentContext(projectId, generation)) return;
+      settings = next;
+      modelCatalog = null;
+      await loadModelCatalog(projectId);
+      return next;
     } catch (err) {
+      if (!isCurrentContext(projectId, generation)) return;
       settingsError = err instanceof Error ? err.message : 'Failed to update AI settings';
     }
   }
@@ -389,17 +397,19 @@ export function createAiStore() {
 
   async function loadModelCatalog(projectId: string) {
     const generation = ensureProjectContext(projectId);
+    const request = ++modelCatalogRequest;
     modelCatalogLoading = true;
     modelCatalogError = null;
     try {
       const next = await api.listAiModels(projectId);
-      if (!isCurrentContext(projectId, generation)) return;
+      if (!isCurrentContext(projectId, generation) || request !== modelCatalogRequest) return;
       modelCatalog = next;
     } catch (err) {
-      if (!isCurrentContext(projectId, generation)) return;
+      if (!isCurrentContext(projectId, generation) || request !== modelCatalogRequest) return;
+      modelCatalog = null;
       modelCatalogError = err instanceof Error ? err.message : 'Failed to load AI models';
     } finally {
-      if (isCurrentContext(projectId, generation)) modelCatalogLoading = false;
+      if (isCurrentContext(projectId, generation) && request === modelCatalogRequest) modelCatalogLoading = false;
     }
   }
 

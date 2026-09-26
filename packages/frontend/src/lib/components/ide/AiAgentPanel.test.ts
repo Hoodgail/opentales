@@ -6,8 +6,10 @@ const mocks = vi.hoisted(() => ({
   interrupt: vi.fn(async () => undefined),
   replyPermission: vi.fn(async () => true),
   updateSession: vi.fn(async () => true),
+  createSession: vi.fn(async () => null),
   state: {
     running: false,
+    hasSession: true,
     permissions: [] as unknown[],
   },
 }));
@@ -54,8 +56,8 @@ function session() {
 
 vi.mock("$lib/stores/agent.svelte", () => ({
   agent: {
-    get activeSession() { return session(); },
-    get viewedSession() { return session(); },
+    get activeSession() { return mocks.state.hasSession ? session() : null; },
+    get viewedSession() { return mocks.state.hasSession ? session() : null; },
     viewStack: [],
     rootSessions: [],
     activeSessionId: "ses_1",
@@ -79,7 +81,7 @@ vi.mock("$lib/stores/agent.svelte", () => ({
     interrupt: mocks.interrupt,
     replyPermission: mocks.replyPermission,
     updateSession: mocks.updateSession,
-    createSession: vi.fn(async () => null),
+    createSession: mocks.createSession,
     openSession: vi.fn(async () => undefined),
     openChild: vi.fn(async () => undefined),
     closeChild: vi.fn(),
@@ -91,7 +93,12 @@ vi.mock("$lib/stores/agent.svelte", () => ({
 
 vi.mock("$lib/stores/ai.svelte", () => ({
   ai: {
-    settings: { enabled: true, model: "gpt-6-luna" },
+    settings: { enabled: true, model: "gpt-6-luna", providerKind: "openai-compatible" },
+    modelCatalog: { source: "provider", providers: [{ id: "openai-compatible", name: "My provider", models: [
+      { id: "gpt-6-luna", name: "GPT-6 Luna", reasoningEfforts: ["low", "medium", "high", "max"], supportsFast: true },
+      { id: "gpt-6-astra", name: "GPT-6 Astra" }
+    ] }] },
+    loadModelCatalog: vi.fn(async () => undefined),
     fileTree: { folders: [], docs: [], assets: [] },
     docs: [],
     setProjectContext: vi.fn(),
@@ -120,6 +127,7 @@ import AiAgentPanel from "./AiAgentPanel.svelte";
 describe("AiAgentPanel (OpenCode)", () => {
   beforeEach(() => {
     mocks.state.running = false;
+    mocks.state.hasSession = true;
     mocks.state.permissions = [];
     vi.clearAllMocks();
   });
@@ -157,5 +165,40 @@ describe("AiAgentPanel (OpenCode)", () => {
     expect(screen.getByText(/Proposed change/)).toBeTruthy();
     await fireEvent.click(screen.getByRole("button", { name: /^Approve$/ }));
     expect(mocks.replyPermission).toHaveBeenCalledWith(expect.objectContaining({ id: "per_1" }), "once");
+  });
+
+  it("searches provider models and changes the session through the picker", async () => {
+    render(AiAgentPanel);
+    await fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Search models' }), { target: { value: 'astra' } });
+    expect(screen.queryByRole('option', { name: /Luna/ })).toBeNull();
+    await fireEvent.click(screen.getByRole('option', { name: /Astra/ }));
+    expect(mocks.updateSession).toHaveBeenCalledWith('ses_1', { model: 'gpt-6-astra' });
+    expect(screen.queryByRole('dialog', { name: 'Model picker' })).toBeNull();
+  });
+
+  it("changes effort and Fast mode independently", async () => {
+    render(AiAgentPanel);
+    await fireEvent.click(screen.getByRole('button', { name: 'Reasoning and speed' }));
+    expect(screen.queryByRole('menuitemradio', { name: 'Ultra' })).toBeNull();
+    await fireEvent.click(screen.getByRole('menuitemradio', { name: 'Max' }));
+    expect(mocks.updateSession).toHaveBeenCalledWith('ses_1', { reasoningEffort: 'max' });
+    await fireEvent.click(screen.getByRole('button', { name: 'Reasoning and speed' }));
+    await fireEvent.click(screen.getByRole('menuitemradio', { name: /Fast/ }));
+    expect(mocks.updateSession).toHaveBeenCalledWith('ses_1', { serviceTier: 'fast' });
+  });
+
+  it("allows model selection before the first prompt and locks controls during a run", async () => {
+    mocks.state.hasSession = false;
+    render(AiAgentPanel);
+    await fireEvent.click(screen.getByRole('button', { name: 'Choose model' }));
+    await fireEvent.click(screen.getByRole('option', { name: /Astra/ }));
+    expect(mocks.createSession).toHaveBeenCalledWith(expect.objectContaining({ model: 'gpt-6-astra', approvalMode: 'manual' }));
+    cleanup();
+    mocks.state.hasSession = true;
+    mocks.state.running = true;
+    render(AiAgentPanel);
+    expect((screen.getByRole('button', { name: 'Choose model' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Reasoning and speed' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

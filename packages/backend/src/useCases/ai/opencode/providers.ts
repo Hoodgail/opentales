@@ -1,4 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
+import type { AiModelChoice } from '@opentales/sdk';
+import { modelVariants } from './modelVariants.js';
 import { HttpError } from '../../../http/HttpError.js';
 import { decryptSecret } from '../../../utils/secretBox.js';
 import { bareCodexModelId, isCodexModelAllowed } from '../codexModels.js';
@@ -26,7 +28,14 @@ export interface OpencodeProviderConfig {
     name: string;
     package: string;
     settings: { baseURL: string; apiKey: string };
-    models: Record<string, { name: string; modelID: string }>;
+    models: Record<string, {
+      name: string;
+      modelID: string;
+      cost?: { input: number; output: number };
+      limit?: { context?: number; input?: number; output?: number };
+      capabilities?: { tools: boolean; input: string[]; output: string[] };
+      variants?: ReturnType<typeof modelVariants>;
+    }>;
   };
 }
 
@@ -37,7 +46,8 @@ export interface OpencodeProviderConfig {
  */
 export function providerConfigFor(
   settings: ProjectProviderSettings,
-  extraModels: readonly string[] = []
+  extraModels: readonly string[] = [],
+  choices: readonly AiModelChoice[] = []
 ): OpencodeProviderConfig {
   const models = new Map<string, string>();
   const add = (model: string) => {
@@ -48,6 +58,9 @@ export function providerConfigFor(
   };
   add(settings.model);
   for (const model of extraModels) add(model);
+  if (settings.providerKind === 'OPENAI_COMPATIBLE' && settings.baseUrl) {
+    for (const choice of choices) add(choice.id);
+  }
 
   const baseURL = baseUrlFor(settings);
   return {
@@ -57,7 +70,19 @@ export function providerConfigFor(
       package: settings.providerKind === 'CODEX' ? OPENAI_RESPONSES_PACKAGE : OPENAI_COMPATIBLE_PACKAGE,
       settings: { baseURL, apiKey: 'injected-by-opentales' },
       models: Object.fromEntries(
-        [...models].map(([key, upstream]) => [key, { name: upstream, modelID: upstream }])
+        [...models].map(([key, upstream]) => {
+          const item = choices.find((choice) => modelKey(choice.id) === key)?.model;
+          if (!item) return [key, { name: upstream, modelID: upstream }];
+          const positive = (value: number | null) => value !== null && value > 0 ? Math.floor(value) : undefined;
+          return [key, {
+            name: item.name,
+            modelID: upstream,
+            ...(item.cost?.input != null && item.cost.output != null ? { cost: { input: item.cost.input, output: item.cost.output } } : {}),
+            limit: { context: positive(item.context), input: positive(item.maxInput), output: positive(item.maxOutput) },
+            capabilities: { tools: item.supportsTools ?? true, input: item.supportsVision ? ['text', 'image'] : ['text'], output: ['text'] },
+            variants: modelVariants(item, settings.providerKind === 'CODEX')
+          }];
+        })
       )
     }
   };
@@ -65,10 +90,14 @@ export function providerConfigFor(
 
 /** OpenCode model IDs cannot contain `/`, so gateway-style IDs are encoded. */
 export function modelKey(model: string): string {
-  return model.trim().replace(/\//g, '--');
+  const trimmed = model.trim();
+  // Preserve legacy slash keys, but escape literal double hyphens to avoid collisions.
+  if (trimmed.includes('--') || trimmed.startsWith('ot-id-')) return `ot-id-${Buffer.from(trimmed).toString('base64url')}`;
+  return trimmed.replace(/\//g, '--');
 }
 
 export function modelFromKey(key: string): string {
+  if (key.startsWith('ot-id-')) return Buffer.from(key.slice(6), 'base64url').toString('utf8');
   return key.replace(/--/g, '/');
 }
 
@@ -96,9 +125,12 @@ export function normalizeOpenAiBaseUrl(value: string): string {
   const trimmed = value.trim().replace(/\/+$/, '');
   try {
     const url = new URL(trimmed);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+      throw new Error('Invalid provider URL');
+    }
     if (url.pathname === '' || url.pathname === '/') return `${url.origin}/v1`;
   } catch {
-    throw new HttpError(400, 'AI base URL must be an absolute URL');
+    throw new HttpError(400, 'AI base URL must be an HTTP(S) URL without credentials, query parameters, or fragments');
   }
   return trimmed;
 }

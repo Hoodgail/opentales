@@ -16,10 +16,11 @@
     ShieldCheck,
     Sparkles,
     X,
-    Zap,
   } from "lucide-svelte";
   import { tick, untrack } from "svelte";
+  import { aiModelChoices } from "@opentales/sdk";
   import type {
+    UpdateAiAgentSessionInput,
     AiAgentApprovalMode,
     AiAgentPermissionRequest,
     AiAgentProjectReference,
@@ -40,6 +41,9 @@
   import AgentQuestionCard from "./agent/AgentQuestionCard.svelte";
   import AgentTranscript from "./agent/AgentTranscript.svelte";
   import AiSessionMenu from "./AiSessionMenu.svelte";
+  import AiModelPicker from "./AiModelPicker.svelte";
+  import AiOptionPicker from "./AiOptionPicker.svelte";
+  import AiReasoningPicker from "./AiReasoningPicker.svelte";
 
   const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 
@@ -51,7 +55,7 @@
   let references = $state<Array<AiAgentProjectReference & { key: string }>>([]);
   let pinned = $state(true);
   let autoConfirm = $state(false);
-  let modelDraft = $state<string | null>(null);
+  let changingOptions = $state(false);
   let autocompleteOpen = $state(false);
   let autocompleteQuery = $state("");
   let autocompleteStart = $state(0);
@@ -70,6 +74,9 @@
   const subagents = $derived(caps?.agents.filter((a) => a.mode !== "primary") ?? []);
   const currentAgent = $derived(root?.agent ?? caps?.defaultAgent ?? "writer");
   const currentModel = $derived(root?.model?.model ?? caps?.model ?? ai.settings?.model ?? "");
+  const modelChoices = $derived(aiModelChoices(ai.modelCatalog, ai.settings?.providerKind ?? "gateway"));
+  const selectedModel = $derived(modelChoices.find((choice) => choice.id === currentModel)?.model);
+  const optionsDisabled = $derived(rootRunning || changingOptions);
   const permissions = $derived(root?.permissions ?? []);
   const questions = $derived(root?.questions ?? []);
   const retry = $derived(viewed ? agent.retryFor(viewed.id) : null);
@@ -79,7 +86,7 @@
   const autocompleteItems = $derived(
     autocompleteOpen ? projectReferenceSuggestions(autocompleteQuery, projectId) : [],
   );
-  const canSend = $derived(Boolean(prompt.trim()) && !agent.sending && !inChild);
+  const canSend = $derived(Boolean(prompt.trim()) && !agent.sending && !changingOptions && !inChild);
   const transcriptRevision = $derived(
     viewed
       ? `${viewed.id}:${viewed.messages.length}:${viewed.messages.at(-1)?.role === "assistant" ? JSON.stringify((viewed.messages.at(-1) as { parts: unknown[] }).parts).length : 0}:${permissions.length}:${questions.length}`
@@ -95,6 +102,7 @@
     const pid = projectId;
     if (!pid) return;
     void ai.loadSettings(pid);
+    void ai.loadModelCatalog(pid);
   });
 
   $effect(() => {
@@ -165,37 +173,39 @@
   }
 
   async function newSession() {
-    const created = await agent.createSession({ approvalMode: mode });
-    if (created) {
-      pin();
-      await tick();
-      textareaEl?.focus();
+    if (changingOptions) return;
+    changingOptions = true;
+    try {
+      const created = await agent.createSession({ approvalMode: mode, ...(currentModel ? { model: currentModel, reasoningEffort: root?.model?.reasoningEffort, serviceTier: root?.model?.serviceTier } : {}) });
+      if (created) {
+        pin();
+        await tick();
+        textareaEl?.focus();
+      }
+    } finally {
+      changingOptions = false;
     }
   }
 
   async function setMode(next: AiAgentApprovalMode) {
-    if (!root || next === mode) return;
+    if (next === mode) return;
     if (next === "auto" && !autoConfirm) {
       autoConfirm = true;
       return;
     }
     autoConfirm = false;
-    await agent.updateSession(root.id, { approvalMode: next });
+    await changeOptions({ approvalMode: next });
   }
 
-  async function setAgent(id: string) {
-    if (!root) {
-      await agent.createSession({ agent: id, approvalMode: mode });
-      return;
+  async function changeOptions(input: UpdateAiAgentSessionInput) {
+    if (optionsDisabled) return;
+    changingOptions = true;
+    try {
+      if (root) await agent.updateSession(root.id, input);
+      else await agent.createSession({ approvalMode: mode, model: currentModel, ...input });
+    } finally {
+      changingOptions = false;
     }
-    await agent.updateSession(root.id, { agent: id });
-  }
-
-  async function commitModel() {
-    const next = modelDraft?.trim();
-    modelDraft = null;
-    if (!root || !next || next === currentModel) return;
-    await agent.updateSession(root.id, { model: next });
   }
 
   function reviewDiff(request: AiAgentPermissionRequest) {
@@ -449,7 +459,7 @@
   {:else}
     <!-- Transcript -->
     <div bind:this={scrollEl} onscroll={onScroll} class="agent-paper relative flex-1 overflow-y-auto">
-      {#if viewed && viewed.messages.length}
+      {#if viewed && viewed.messages.some((message) => message.role === 'user' || message.role === 'assistant')}
         <AgentTranscript
           session={viewed}
           {running}
@@ -463,7 +473,7 @@
       {:else}
         <div class="flex min-h-full flex-col justify-end gap-5 px-4 pb-6 pt-10">
           <div>
-            <p class="font-mono text-[9.5px] uppercase tracking-[0.2em] text-accent">OpenCode · {currentAgent}</p>
+            <p class="font-mono text-[9.5px] uppercase tracking-[0.2em] text-accent">Your writing partner</p>
             <h2 class="mt-2 font-serif text-[22px] leading-[1.15] text-foreground">
               What shall we<br /><em class="text-accent">write</em> today?
             </h2>
@@ -542,7 +552,7 @@
 
     <!-- Composer -->
     {#if !inChild}
-      <div class="relative shrink-0 border-t border-border bg-sidebar/90 p-2">
+      <div class="composer-dock relative shrink-0 px-2.5 pb-2.5 pt-2">
         <div class="mb-1.5 flex items-center gap-2 px-1 font-mono text-[9.5px] text-muted-foreground">
           <span class={cn("inline-flex items-center gap-1", running && "text-accent")}>
             {#if running}<span class="agent-pulse size-1.5 rounded-full bg-accent"></span>{/if}
@@ -566,34 +576,7 @@
           </div>
         {/if}
 
-        <div class="agent-composer rounded-xl border border-border bg-background/95 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.6)] focus-within:border-accent/60">
-          <div class="flex items-center gap-1.5 border-b border-border/60 px-2 py-1">
-            {#if primaryAgents.length > 1}
-              <select
-                value={currentAgent}
-                onchange={(e) => void setAgent((e.currentTarget as HTMLSelectElement).value)}
-                disabled={rootRunning}
-                aria-label="Agent"
-                class="agent-select max-w-[8rem] shrink-0"
-              >
-                {#each primaryAgents as a (a.id)}
-                  <option value={a.id}>{a.name}</option>
-                {/each}
-              </select>
-            {/if}
-
-            <input
-              value={modelDraft ?? currentModel}
-              oninput={(e) => (modelDraft = (e.currentTarget as HTMLInputElement).value)}
-              onblur={() => void commitModel()}
-              onkeydown={(e) => { if (e.key === "Enter") { e.preventDefault(); (e.currentTarget as HTMLInputElement).blur(); } }}
-              disabled={rootRunning || !root}
-              aria-label="Model"
-              title="Model (press Enter to switch)"
-              class="agent-select min-w-0 flex-1 truncate border-transparent hover:border-border"
-            />
-
-          </div>
+        <div class="agent-composer">
           {#if references.length || attachments.length}
             <div class="flex flex-wrap gap-1 border-b border-border/70 px-2 py-1.5">
               {#each references as ref (ref.key)}
@@ -616,10 +599,10 @@
               oninput={updateAutocomplete}
               onclick={updateAutocomplete}
               onkeydown={handleKey}
-              rows="3"
-              placeholder={rootRunning ? "Steer the agent, or ⌥↵ to queue…" : "Ask the agent to plan, draft, or revise…  @ to reference"}
+              rows="4"
+              placeholder={rootRunning ? "Send a follow-up, or @ to add context…" : "Ask for a draft, plan a scene, or attach inspiration…"}
               aria-label="Message the agent"
-              class="block max-h-60 min-h-[4.5rem] w-full resize-none bg-transparent px-3 py-2.5 text-[12.5px] leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+              class="block max-h-60 min-h-[6rem] w-full resize-none bg-transparent px-3.5 py-3 text-[12.5px] leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
             ></textarea>
 
             {#if autocompleteOpen && autocompleteItems.length}
@@ -640,36 +623,21 @@
             {/if}
           </div>
 
-          <div class="flex items-center gap-1 px-1.5 pb-1.5">
-            <input bind:this={fileInputEl} type="file" multiple class="hidden" onchange={(e) => void handleFiles((e.currentTarget as HTMLInputElement).files)} />
-            <button type="button" onclick={() => fileInputEl?.click()} class="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Attach files" title="Attach files">
-              <Paperclip class="size-3.5" />
-            </button>
-
-            <span class="flex-1"></span>
-            <div class="flex shrink-0 overflow-hidden rounded-md border border-border" role="group" aria-label="Execution mode">
-              <button
-                type="button"
-                onclick={() => void setMode("manual")}
-                disabled={!root || rootRunning}
-                aria-pressed={mode === "manual"}
-                title="Manual: review every change"
-                class={cn("inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px]", mode === "manual" ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground")}
-              >
-                <Hand class="size-3" /> Manual
-              </button>
-              <button
-                type="button"
-                onclick={() => void setMode("auto")}
-                disabled={!root || rootRunning}
-                aria-pressed={mode === "auto"}
-                title="Auto: apply changes immediately (admins)"
-                class={cn("inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px]", mode === "auto" ? "bg-amber-400/20 text-amber-300" : "text-muted-foreground hover:text-foreground")}
-              >
-                {#if mode === "auto"}<Zap class="size-3" />{:else}<ShieldCheck class="size-3" />{/if} Auto
-              </button>
+          <div class="composer-toolbar">
+            <div class="composer-options">
+              <div class="composer-model">
+                <AiModelPicker choices={modelChoices} value={currentModel} loading={ai.modelCatalogLoading} error={ai.modelCatalogError} disabled={optionsDisabled} onSelect={(model) => changeOptions({ model })} onRefresh={() => { if (projectId) void ai.loadModelCatalog(projectId); }} />
+              </div>
+              <AiReasoningPicker efforts={selectedModel?.reasoningEfforts ?? []} effort={root?.model?.reasoningEffort ?? null} supportsFast={selectedModel?.supportsFast ?? false} serviceTier={root?.model?.serviceTier ?? 'standard'} disabled={optionsDisabled} onSelect={(options) => void changeOptions(options)} />
+              <AiOptionPicker label="Execution mode" value={mode} options={[{ id: 'manual', name: 'Review changes', description: 'Approve each change before it is applied.' }, { id: 'auto', name: 'Full access', description: 'Apply project changes immediately. Admins only.' }]} disabled={optionsDisabled} onSelect={(id) => void setMode(id as AiAgentApprovalMode)}>
+                {#snippet icon()}{#if mode === 'manual'}<Hand size={12} />{:else}<ShieldCheck size={12} />{/if}{/snippet}
+              </AiOptionPicker>
             </div>
-
+            <div class="composer-actions">
+            <input bind:this={fileInputEl} type="file" multiple class="hidden" onchange={(e) => void handleFiles((e.currentTarget as HTMLInputElement).files)} />
+            <button type="button" onclick={() => fileInputEl?.click()} class="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Attach files" title="Attach files">
+              <Paperclip size={16} />
+            </button>
             {#if rootRunning && !prompt.trim()}
               <button type="button" onclick={() => void agent.interrupt()} class="agent-send bg-destructive/90 text-white hover:bg-destructive" aria-label="Stop the agent" title="Stop (Esc)">
                 <CircleStop class="size-3.5" />
@@ -679,7 +647,14 @@
                 {#if agent.sending}<Loader2 class="size-3.5 motion-safe:animate-spin" />{:else}<ArrowUp class="size-3.5" />{/if}
               </button>
             {/if}
+            </div>
           </div>
+        </div>
+        <div class="composer-context">
+          <AiOptionPicker label="Agent" value={currentAgent} options={primaryAgents} disabled={optionsDisabled || primaryAgents.length < 2} onSelect={(agent) => void changeOptions({ agent })}>
+            {#snippet icon()}<Feather size={12} />{/snippet}
+          </AiOptionPicker>
+          <span>@ context <span aria-hidden="true">·</span> ⇧↵ new line</span>
         </div>
       </div>
     {:else if viewed}
@@ -725,27 +700,28 @@
     background: radial-gradient(circle at 35% 30%, color-mix(in oklch, var(--accent) 35%, transparent), color-mix(in oklch, var(--accent) 8%, transparent) 70%);
     box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 35%, transparent), 0 10px 30px -10px color-mix(in oklch, var(--accent) 60%, transparent);
   }
-  .agent-select {
-    height: 22px;
-    border-radius: 6px;
+  .agent-composer {
+    position: relative;
+    z-index: 1;
     border: 1px solid var(--border);
-    background: transparent;
-    padding: 0 6px;
-    font-family: var(--font-mono);
-    font-size: 10px;
-    color: var(--muted-foreground);
+    border-radius: 18px;
+    background: color-mix(in oklch, var(--card) 65%, var(--background));
+    box-shadow: 0 5px 18px -8px #0005, inset 0 1px color-mix(in oklch, var(--foreground) 3%, transparent);
+    transition: border-color 120ms;
   }
-  .agent-select:focus {
-    outline: none;
-    border-color: color-mix(in oklch, var(--accent) 60%, transparent);
-    color: var(--foreground);
-  }
+  .agent-composer:focus-within { border-color: color-mix(in oklch, var(--accent) 45%, var(--border)); }
+  .composer-toolbar { display: flex; align-items: flex-end; gap: 5px; padding: 2px 7px 8px; }
+  .composer-options { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; align-items: center; gap: 0 2px; }
+  .composer-model { max-width: 100%; min-width: 0; }
+  .composer-actions { display: flex; align-items: center; flex-shrink: 0; gap: 4px; padding-bottom: 1px; }
+  .composer-context { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: -12px 8px 0; padding: 14px 5px 3px; border: 1px solid var(--border); border-radius: 0 0 13px 13px; background: color-mix(in oklch, var(--card) 40%, var(--background)); }
+  .composer-context > span { padding-right: 4px; color: var(--muted-foreground); font-family: var(--font-mono); font-size: 9px; white-space: nowrap; }
   .agent-send {
     display: inline-grid;
     place-items: center;
-    width: 26px;
-    height: 26px;
-    border-radius: 8px;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
     transition: filter 120ms, transform 120ms;
   }
   .agent-send:not(:disabled):active {

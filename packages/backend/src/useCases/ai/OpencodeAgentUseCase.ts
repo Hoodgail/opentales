@@ -15,6 +15,10 @@ import type {
   UpdateAiAgentSessionInput
 } from '@opentales/sdk';
 import { z } from 'zod';
+import { aiModelChoices, type AiProviderKind } from '@opentales/sdk';
+import { loadProjectCatalog } from './ProjectAiModelsUseCase.js';
+import { modelVariant, variantOptions } from './opencode/modelVariants.js';
+import { bareCodexModelId, isCodexModelAllowed } from './codexModels.js';
 import { HttpError } from '../../http/HttpError.js';
 import { ProjectAccessRepository } from '../../repositories/ProjectAccessRepository.js';
 import { agentMutatingToolNames } from './tools/index.js';
@@ -29,7 +33,7 @@ import {
   toModelRef
 } from './opencode/mapping.js';
 import { OPENTALES_PRIMARY_AGENT, sessionPermissions, type ApprovalMode } from './opencode/permissions.js';
-import { modelKey, OPENTALES_PROVIDER_ID } from './opencode/providers.js';
+import { modelKey, modelFromKey, OPENTALES_PROVIDER_ID } from './opencode/providers.js';
 
 const INITIAL_MESSAGE_LIMIT = 60;
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
@@ -110,6 +114,9 @@ export class OpencodeAgentUseCase {
     });
     this.runtime.setRootMetadata(info.id, metadata);
     this.runtime.rememberSession(info);
+    if (input.model || input.reasoningEffort !== undefined || input.serviceTier !== undefined) {
+      await this.switchModel(projectId, info.id, input.model, input);
+    }
     return this.snapshot(info.id);
   }
 
@@ -141,6 +148,10 @@ export class OpencodeAgentUseCase {
   async update(userId: string, projectId: string, sessionId: string, input: UpdateAiAgentSessionInput): Promise<AiAgentSession> {
     const { metadata } = await this.authorize(userId, projectId, sessionId);
     const host = await this.runtime.host();
+    const status = this.statusOf(sessionId).status;
+    if ((status === 'running' || status === 'retrying') && (input.model || input.agent || input.reasoningEffort !== undefined || input.serviceTier !== undefined)) {
+      throw new HttpError(409, 'Model and agent options cannot change while the agent is running');
+    }
     if (input.approvalMode && input.approvalMode !== metadata.approvalMode) {
       if (this.statusOf(sessionId).status === 'running') {
         throw new HttpError(409, 'Execution mode cannot change while the agent is running');
@@ -152,7 +163,9 @@ export class OpencodeAgentUseCase {
     }
     if (input.title?.trim()) await host.sessions.update({ sessionID: sessionId, title: input.title.trim() });
     if (input.agent) await this.switchAgent(projectId, sessionId, input.agent);
-    if (input.model) await this.switchModel(projectId, sessionId, input.model);
+    if (input.model || input.reasoningEffort !== undefined || input.serviceTier !== undefined) {
+      await this.switchModel(projectId, sessionId, input.model, input);
+    }
     return this.snapshot(sessionId);
   }
 
@@ -167,8 +180,9 @@ export class OpencodeAgentUseCase {
   async prompt(userId: string, projectId: string, sessionId: string, input: SendAiAgentPromptInput): Promise<AiAgentSession> {
     const parsed = promptSchema.parse(input);
     await this.authorize(userId, projectId, sessionId);
-    await this.runtime.ensureProject(projectId);
     const host = await this.runtime.host();
+    const current = await host.sessions.get({ sessionID: sessionId });
+    await this.runtime.ensureProject(projectId, current.model ? [modelFromKey(current.model.id)] : []);
     if (parsed.agent) await this.switchAgent(projectId, sessionId, parsed.agent);
     if (parsed.model) await this.switchModel(projectId, sessionId, parsed.model);
 
@@ -465,18 +479,28 @@ export class OpencodeAgentUseCase {
     await host.sessions.switchAgent({ sessionID: sessionId, agent });
   }
 
-  private async switchModel(projectId: string, sessionId: string, model: string) {
+  private async switchModel(projectId: string, sessionId: string, model?: string, options: Pick<UpdateAiAgentSessionInput, 'reasoningEffort' | 'serviceTier'> = {}) {
     const settings = await this.prisma.projectAiSettings.findUnique({ where: { projectId } });
     if (!settings?.enabled) throw new HttpError(400, 'AI is not enabled for this project');
-    const trimmed = model.trim();
-    if (!trimmed || trimmed.length > 200) throw new HttpError(400, 'Invalid model');
-    if (trimmed !== settings.model) {
-      // Persist as the project model so the workspace provider lists it.
-      await this.prisma.projectAiSettings.update({ where: { projectId }, data: { model: trimmed } });
-    }
-    await this.runtime.ensureProject(projectId);
     const host = await this.runtime.host();
-    await host.sessions.switchModel({ sessionID: sessionId, model: { providerID: OPENTALES_PROVIDER_ID, id: modelKey(trimmed) } });
+    const session = await host.sessions.get({ sessionID: sessionId });
+    const previous = session.model ? modelFromKey(session.model.id) : settings.model;
+    const requested = model?.trim() ?? previous;
+    if (!requested || requested.length > 200) throw new HttpError(400, 'Invalid model');
+    if (settings.providerKind === 'CODEX' && !isCodexModelAllowed(requested)) throw new HttpError(400, 'Model is not available through Codex');
+    const trimmed = settings.providerKind === 'CODEX' ? `codex/${bareCodexModelId(requested)}` : requested;
+    const parsed = z.object({ reasoningEffort: z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/).nullable().optional(), serviceTier: z.enum(['standard', 'fast']).optional() }).parse(options);
+    const catalog = await loadProjectCatalog(projectId, settings);
+    const kind = settings.providerKind.toLowerCase().replaceAll('_', '-') as AiProviderKind;
+    const selected = aiModelChoices(catalog, kind).find((choice) => choice.id === trimmed)?.model;
+    if (catalog.source === 'provider' && !selected) throw new HttpError(400, 'This model is not available from the configured provider');
+    const priorOptions = trimmed === previous ? variantOptions(session.model?.variant) : variantOptions(null);
+    const effort = parsed.reasoningEffort === undefined ? priorOptions.reasoningEffort : parsed.reasoningEffort;
+    const fast = (parsed.serviceTier ?? priorOptions.serviceTier) === 'fast';
+    if (effort && !selected?.reasoningEfforts?.includes(effort)) throw new HttpError(400, 'This reasoning effort is not supported by the selected model');
+    if (fast && !selected?.supportsFast) throw new HttpError(400, 'Fast mode is not supported by the selected model');
+    await this.runtime.ensureProject(projectId, [trimmed]);
+    await host.sessions.switchModel({ sessionID: sessionId, model: { providerID: OPENTALES_PROVIDER_ID, id: modelKey(trimmed), variant: modelVariant(effort, fast, selected?.supportsFast) } });
   }
 
   private statusOf(sessionId: string) {

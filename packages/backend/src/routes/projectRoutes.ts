@@ -69,6 +69,7 @@ projectRoutes.post(
   asyncHandler(ai.pollCodexAuth)
 );
 projectRoutes.get('/:projectId/ai/models', asyncHandler(ai.models));
+projectRoutes.post('/:projectId/ai/models/discover', asyncHandler(ai.discoverModels));
 projectRoutes.get('/:projectId/ai/tools', asyncHandler(ai.tools));
 projectRoutes.get('/:projectId/ai/skills', asyncHandler(ai.skills));
 projectRoutes.post('/:projectId/ai/skills', asyncHandler(ai.createSkill));

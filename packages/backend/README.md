@@ -105,7 +105,8 @@ Project routes require `Authorization: Bearer <token>`.
 | `POST`   | `/projects/:projectId/ai-settings/github-copilot/auth/poll`         | Poll and persist GitHub Copilot authorization                          |
 | `POST`   | `/projects/:projectId/ai-settings/codex/auth/start`                 | Start OpenAI Codex device authorization                                |
 | `POST`   | `/projects/:projectId/ai-settings/codex/auth/poll`                  | Poll and persist an encrypted refreshable Codex session                |
-| `GET`    | `/projects/:projectId/ai/models`                                    | List the cached models.dev catalog plus subscription-safe Codex models |
+| `GET`    | `/projects/:projectId/ai/models`                                    | List configured endpoint models with models.dev metadata fallback; otherwise the reference catalog |
+| `POST`   | `/projects/:projectId/ai/models/discover`                            | Preview an OpenAI-compatible endpoint's models before saving (project admin) |
 | `GET`    | `/projects/:projectId/mcp-api-keys`                                 | List safe MCP key metadata (project admin)                             |
 | `POST`   | `/projects/:projectId/mcp-api-keys`                                 | Create a project-scoped MCP bearer key and return its secret once      |
 | `DELETE` | `/projects/:projectId/mcp-api-keys/:keyId`                          | Revoke an MCP key immediately                                          |

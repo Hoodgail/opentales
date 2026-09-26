@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { createServer, type Server } from 'node:http';
+import { Readable } from 'node:stream';
 import { PrismaClient } from '@prisma/client';
 import type { AiAgentStreamEvent } from '@opentales/sdk';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -29,12 +31,38 @@ describe.runIf(Boolean(databaseUrl && baseUrl && apiKey))('OpenCode agent harnes
   let useCase: import('./OpencodeAgentUseCase.js').OpencodeAgentUseCase;
   let closeRuntime: () => Promise<void>;
   let dataDir: string;
+  let proxy: Server;
+  const modelRequests: Record<string, unknown>[] = [];
 
   beforeAll(async () => {
     dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'opentales-opencode-'));
     process.env.OPENCODE_DATA_DIR = dataDir;
     process.env.SECRET_BOX_KEY ??= 'test-secret-box-key-test-secret-box-key';
     const { encryptSecret } = await import('../../utils/secretBox.js');
+    const { normalizeOpenAiBaseUrl } = await import('./opencode/providers.js');
+    // Observe the actual wire request. OpenCode captures its fetch transport
+    // during startup, so replacing global fetch cannot verify these overlays.
+    proxy = createServer(async (request, response) => {
+      try {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        const body = Buffer.concat(chunks);
+        if (request.url?.endsWith('/chat/completions')) {
+          const parsed = JSON.parse(body.toString('utf8'));
+          modelRequests.push({ model: parsed.model, effort: parsed.reasoning_effort, tier: parsed.service_tier });
+        }
+        const upstream = await fetch(`${normalizeOpenAiBaseUrl(baseUrl!)}${(request.url ?? '').replace(/^\/v1/, '')}`, {
+          method: request.method,
+          headers: { 'content-type': 'application/json', ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}) },
+          ...(body.length ? { body } : {})
+        });
+        response.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json' });
+        if (upstream.body) Readable.fromWeb(upstream.body as import('node:stream/web').ReadableStream).pipe(response);
+        else response.end();
+      } catch { response.writeHead(502); response.end('Test proxy upstream request failed'); }
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    const address = proxy.address() as import('node:net').AddressInfo;
     const user = await prisma.user.create({
       data: { username: `oc-${suffix}`, email: `oc-${suffix}@example.test`, passwordHash: 'test' }
     });
@@ -52,7 +80,7 @@ describe.runIf(Boolean(databaseUrl && baseUrl && apiKey))('OpenCode agent harnes
         enabled: true,
         providerKind: 'OPENAI_COMPATIBLE',
         model,
-        baseUrl,
+        baseUrl: `http://127.0.0.1:${address.port}/v1`,
         apiKey: encryptSecret(apiKey!)
       }
     });
@@ -64,6 +92,8 @@ describe.runIf(Boolean(databaseUrl && baseUrl && apiKey))('OpenCode agent harnes
 
   afterAll(async () => {
     await closeRuntime?.();
+    proxy?.closeAllConnections();
+    if (proxy) await new Promise<void>((resolve) => proxy.close(() => resolve()));
     await prisma.project.deleteMany({ where: { id: projectId } }).catch(() => undefined);
     await prisma.$disconnect();
     await fs.rm(dataDir, { recursive: true, force: true });
@@ -89,6 +119,23 @@ describe.runIf(Boolean(databaseUrl && baseUrl && apiKey))('OpenCode agent harnes
     res.emit('close');
     return events;
   }
+
+  it.runIf(/gpt-6-luna/.test(model))('discovers models and sends persistent effort and speed choices through OpenCode', async () => {
+    const { ProjectAiModelsUseCase } = await import('./ProjectAiModelsUseCase.js');
+    const catalog = await new ProjectAiModelsUseCase(prisma).list(userId, projectId);
+    const selected = catalog.providers.flatMap((provider) => provider.models).find((item) => item.id === model)!;
+    expect(catalog.source).toBe('provider');
+    expect(selected.reasoningEfforts).toContain('low');
+    expect(selected.supportsFast).toBe(true);
+    const session = await useCase.create(userId, projectId, { model, reasoningEffort: 'low', serviceTier: 'fast' });
+    expect(session.model).toMatchObject({ model, reasoningEffort: 'low', serviceTier: 'fast' });
+    await runUntilIdle(session.id, () => useCase.prompt(userId, projectId, session.id, { text: 'Reply with exactly OK. Do not call tools.' }));
+    expect(modelRequests).toContainEqual({ model, effort: 'low', tier: 'priority' });
+    expect((await useCase.get(userId, projectId, session.id)).model).toMatchObject({ reasoningEffort: 'low', serviceTier: 'fast' });
+    await useCase.update(userId, projectId, session.id, { serviceTier: 'standard', reasoningEffort: null });
+    await runUntilIdle(session.id, () => useCase.prompt(userId, projectId, session.id, { text: 'Reply with exactly OK again. Do not call tools.' }));
+    expect(modelRequests).toContainEqual({ model, effort: undefined, tier: 'default' });
+  }, 200_000);
 
   it('runs an OpenTales tool, gates a mutation on approval, and streams the transcript', async () => {
     const created = await useCase.create(userId, projectId, { title: 'Live test' });
