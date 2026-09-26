@@ -79,6 +79,7 @@ Route fragments are mounted below the authenticated project router; consult the 
 | `novel-series` | `1.1.0` | `planning` | 15 |
 | `novel-settings` | `1.1.0` | `planning` | 15 |
 | `novel-setup-payoff` | `1.1.0` | `planning` | 15 |
+| `novel-studio` | `1.0.0` | `workflow` | 21 |
 | `novel-voice` | `1.1.0` | `planning` | 15 |
 | `novel-world` | `1.1.0` | `planning` | 15 |
 | `opentales-tools` | `1.0.0` | `workflow` | 11 |

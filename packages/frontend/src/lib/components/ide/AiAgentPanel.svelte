@@ -354,11 +354,27 @@
     return "Ready";
   }
 
-  const starters = [
-    { icon: BookOpenText, text: "Summarize where the manuscript stands and what to write next." },
-    { icon: Feather, text: "Read the last chapter and draft the next scene in the same voice." },
-    { icon: GitBranch, text: "Use a subagent to check continuity across every chapter." },
-  ];
+  const hasChapters = $derived(manuscript.chapters.length > 0);
+  const hasNotes = $derived(ai.fileTree.docs.length > 0);
+  const starters = $derived(
+    hasChapters
+      ? [
+          { icon: BookOpenText, text: "Keep going." },
+          { icon: Feather, text: "Draft the next chapter from its brief." },
+          { icon: GitBranch, text: "Run a continuity check across the drafted chapters and fix what you find." },
+        ]
+      : hasNotes
+        ? [
+            { icon: BookOpenText, text: "Read my notes and begin planning out the story." },
+            { icon: Feather, text: "Build the cast and the world from my notes." },
+            { icon: GitBranch, text: "Critique my idea honestly, then propose a stronger version." },
+          ]
+        : [
+            { icon: BookOpenText, text: "Help me find the idea for my novel — ask me a few questions first." },
+            { icon: Feather, text: "I have an idea: " },
+            { icon: GitBranch, text: "Set up a Story Bible for a new novel." },
+          ],
+  );
 </script>
 
 <div class="agent-panel relative flex h-full flex-col overflow-hidden">
@@ -452,7 +468,7 @@
               What shall we<br /><em class="text-accent">write</em> today?
             </h2>
             <p class="mt-2 max-w-[28ch] text-[11.5px] leading-relaxed text-muted-foreground">
-              The agent reads your manuscript, drafts and revises, delegates to subagents, and asks before it changes anything.
+              The agent plans and writes inside your project — a Story Bible, characters, places, chapters and scenes — and keeps a Ledger so it can pick up where it left off.
             </p>
           </div>
           <ul class="space-y-1.5">

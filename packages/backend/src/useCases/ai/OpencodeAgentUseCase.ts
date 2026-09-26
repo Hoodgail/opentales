@@ -127,7 +127,10 @@ export class OpencodeAgentUseCase {
     await this.authorize(userId, projectId, sessionId);
     const host = await this.runtime.host();
     const limit = Math.min(Math.max(input.limit ?? INITIAL_MESSAGE_LIMIT, 1), 200);
-    const page = await host.message.list({ sessionID: sessionId, order: 'desc', limit, cursor: input.cursor });
+    // A cursor already encodes its direction; OpenCode rejects cursor + order.
+    const page = await host.message.list(
+      input.cursor ? { sessionID: sessionId, limit, cursor: input.cursor } : { sessionID: sessionId, order: 'desc', limit }
+    );
     return {
       messages: page.data.map((message) => toMessage(message)).filter((m): m is AiAgentMessage => Boolean(m)).reverse(),
       cursor: page.cursor.next ?? null,

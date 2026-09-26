@@ -10,14 +10,47 @@ You are writing chapters for a real novel — not a writing exercise, summary, s
 
 ## OpenTales Chapter Workflow
 
-When writing chapters inside OpenTales, use the current project model as the source of structure. Chapters, characters, locations, story structure, and ProjectDocs are available through the agent's read tools. Proposed changes to chapters or ProjectDocs should be made through approval-gated project mutations, never by inventing a separate file schema.
+Draft into the project, never into the chat. A chapter's prose lives in its
+scenes (or its body, for chapters without scenes); planning lives in the Story
+Bible and `Chapter Briefs/`.
 
-- Use the project chapter list as the canonical chapter manifest.
-- Read the target chapter, nearby summaries, relevant characters, locations, story structure, and planning ProjectDocs before drafting or revising.
-- Use `updateChapter` for proposed chapter metadata or manuscript edits.
-- Use `createProjectDoc` or `updateProjectDoc` for chapter briefs, scene plans, continuity notes, or other supporting planning material.
-- Keep section names stable so later revisions remain reliable.
-- Do not read the entire novel by default; prefer summaries, lists, grep, and bounded reads unless full text is necessary.
+**Gather (bounded):** the chapter brief doc, the chapter's scenes
+(`listScenes { chapterId }` → metadata + revision/head tokens), the last ~40
+lines of the previous chapter or scene, `Story Bible/Voice & Style`, relevant
+character and location profiles, and Canon entries for everyone on stage
+(`grepProject`). Don't reload the whole manuscript.
+
+**Size the work first.** Divide the chapter's word target by its scene count:
+a 3,000-word chapter with three scenes needs ~1,000 words *per scene*. Set each
+scene's `estimatedWordCount` and write to it. Models chronically under-write
+fiction — a "scene" of 350 words is a summary with dialogue, not a scene. Reach
+the length through dramatized beats (arrival, pressure, exchange, turn,
+aftermath), sensory grounding, and interiority, never through padding.
+
+**Draft scene by scene:**
+1. `readScene` for its `revision` and `headVersionId`.
+2. Write the full scene — every beat dramatized on the page — and save it with
+   `updateScene { sceneId, expectedRevision, expectedHeadVersionId, content,
+   status: "drafted" }`. If the chapter has no scenes yet, plan them first
+   (novel-scenes: usually 3–4) or `createScene` with content.
+3. Check the receipt's word count against the scene target. If it is under ~80%
+   of target, expand the thinnest beats with exact edits before moving on.
+4. Add new facts to Canon; note craft decisions in the scene's `aiNotes`.
+
+**Close the chapter:**
+1. When every scene has prose, `compileChapterFromScenes` with the chapter head
+   and all scene revisions (never paste scene text into the chapter by hand).
+2. Re-read the compiled chapter's opening and ending; `runStoryLint { chapterIds: [id] }`
+   and fix real issues with exact `contentEdits`.
+3. Update the chapter summary/status and the Ledger's Progress (words vs target,
+   Next action).
+
+**Length:** aim for the brief's word target ± the tolerance in the Brief &
+Contract. If a chapter runs long or short, adjust the next chapters' plans (a
+Standing correction in the Ledger) rather than padding or amputating.
+
+**Revising an existing chapter:** read the critique doc if one exists, then make
+bounded exact edits; full replacement only for a deliberate rewrite of a scene.
 
 ---
 

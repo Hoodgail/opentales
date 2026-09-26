@@ -47,6 +47,7 @@ import {
 import { readProjectDocTool } from "./readProjectDoc.js";
 import { readStoryStructureTool } from "./readStoryStructure.js";
 import { taskTool, type TaskHandler } from "./task.js";
+import { runStoryLintTool } from "./storyLint.js";
 import type { ToolContext } from "./shared.js";
 import type { AiAgentInfo } from "../agents.js";
 import type { RuntimeRole, TaskContract } from "../runtime/taskContract.js";
@@ -116,6 +117,7 @@ export function buildAgentTools(
     listWritingVersions: listWritingVersionsTool(prisma, context),
     readWritingVersion: readWritingVersionTool(prisma, context),
     grepProject: grepProjectTool(prisma, context),
+    runStoryLint: runStoryLintTool(prisma, context),
     ...mutationTools(prisma, context, approval, question),
   };
   const roleScoped = filterToolsForRole(

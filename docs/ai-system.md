@@ -96,7 +96,8 @@ The external story-writing harness also exposes optimistic prose tools. `readCha
 
 The workspace defines these agents:
 
-- `writer` (default, primary): the OpenTales writing assistant.
+- `writer` (default, primary): the OpenTales writing agent. Its system prompt (`prompts/systemPrompt.hbs`) makes it persist work into the project instead of chat, keep a Ledger, and load the `novel-studio` playbook for multi-step work.
+- `story-architect` (primary): autonomous long-run novel production that delegates chapters and critiques to subagents.
 - `planner` (primary): read-only planning; project changes are denied.
 - `explore` (subagent): fast read-only research over the manuscript.
 - `general` (subagent): OpenCode's general-purpose worker for multi-step delegated work.
@@ -149,7 +150,9 @@ When the agent needs a decision it calls OpenCode's `question` tool. The questio
 
 ## Project context
 
-Every turn receives the `writer` system prompt, the project metadata, up to five `INSTRUCTIONS` docs (bounded), and the current execution mode. `@` mentions add a machine-readable list of referenced items (type, id, path, line range) which the agent reads with its tools. File attachments are sent inline to the model.
+Every turn receives the agent's system prompt, the project metadata, up to five `INSTRUCTIONS` docs (bounded), the **project compass**, and the current execution mode. The compass (`opencode/compass.ts`) is regenerated from the database each turn: folders and docs with IDs, chapters with status/word counts/scene progress, entity counts, the logline, and the Now / Next action / Notes to future self / Standing corrections / Open questions sections of `Story Bible/Ledger`. It lets new sessions and compacted sessions resume without chat history. See [agentic writing](agentic-writing.md).
+
+Primary agents run with a 400-step tool budget and subagents with 150, so a turn can complete a whole planning phase or a chapter draft. `@` mentions add a machine-readable list of referenced items (type, id, path, line range) which the agent reads with its tools. File attachments are sent inline to the model.
 
 Manuscript, attachments, imported research, and web material are untrusted data rather than prompt authority.
 

@@ -40,6 +40,7 @@ export function toolLabel(name: string): string {
     searchStory: "Searched story",
     findReferences: "Found references",
     runStoryLint: "Checked story",
+    renumberChapters: "Renumber chapters",
     reportTaskResult: "Reported task result",
     task: "Delegated task",
     updateProject: "Update project",

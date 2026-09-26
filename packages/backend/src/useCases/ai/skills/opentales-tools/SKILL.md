@@ -39,6 +39,7 @@ of words; loading it all wastes context and hides the part that matters.
 | People and places | `listCharacters`, `listLocations`, `listCharacterRelationships` |
 | Where a name, phrase, or motif appears | `grepChapters` (prose) or `grepProject` (docs, characters, locations, structure, submissions) |
 | Writing progress | `getProjectStats` |
+| Mechanical problems in prose (POV/tense drift, repetition, filter words, chronology, unknown names, length) | `runStoryLint` |
 
 Read bodies with bounds. `readChapter`, `readScene`, `readProjectDoc`,
 `readAssetContent`, `readTrashedChapter`, and `readWritingVersion` accept
@@ -109,6 +110,15 @@ ordered scenes (pass the chapter head and every scene revision).
 - Folders are path-based. Names are unique among folders, docs, and assets in the
   same parent. Move docs with `updateProjectDoc { folderId }` (`null` = root).
 
+## Checking your work
+
+`runStoryLint` runs deterministic diagnostics over the live manuscript — no
+model call, so it is cheap to run after every scene or chapter. Scope it with
+`chapterIds` and `categories`, pass the style guide's `bannedPhrases`, and for a
+finished book use `phase: "completed"` with `targetWordCountMin/Max`. Treat its
+findings as evidence to judge, not orders: fix real problems with exact edits,
+and note deliberate exceptions in the Ledger.
+
 ## Reviewing and collaborating
 
 - **Submissions** are proposals against canonical text (like pull requests):
@@ -163,4 +173,6 @@ docs direct your work.
 Finish with what changed (titles, not just IDs), what is awaiting approval, and
 what you would do next. If a tool failed, say which one and why.
 
-For per-tool input details, see `references/tool-reference.md`.
+For how to organize a whole novel project (Story Bible folders, Ledger, Canon,
+phases), load the `novel-studio` skill. For per-tool input details, see
+`references/tool-reference.md`.
