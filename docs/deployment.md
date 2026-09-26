@@ -4,6 +4,12 @@ Deploy the repository as a Docker Compose application using `docker-compose.yml`
 Both images use Node 24, matching CI and providing OpenCode's `node:sqlite`
 runtime. No Bun process or separate OpenCode server is needed.
 
+The backend image installs the SDK's compiled `dist` directory as
+`@opentales/sdk`, including its generated runtime manifest. The workspace SDK
+manifest points to TypeScript for development and must not be copied into the
+runtime image. CI checks the compiled package with plain Node before building
+and starting the deployment images.
+
 Set these variables in Dokploy before building:
 
 | Variable | Value |
