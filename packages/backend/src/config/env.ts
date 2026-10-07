@@ -31,7 +31,7 @@ export const HOSTED_MCP_CLIENT_ORIGINS = [
 const mcpAllowedOrigins = resolveMcpAllowedOrigins(process.env.MCP_ALLOWED_ORIGINS, corsOrigin);
 
 export function resolveMcpAllowedOrigins(configured: string | undefined, frontendOrigin: string): string[] {
-  const configuredOrigins = (configured ?? [frontendOrigin, 'https://opentales.hoodgail.me'].join(','))
+  const configuredOrigins = (configured ?? [frontendOrigin, 'https://opentales.nayhap.com'].join(','))
     .split(',')
     .map((value) => value.trim().replace(/\/$/, ''))
     .filter(Boolean);

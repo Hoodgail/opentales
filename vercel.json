@@ -7,23 +7,23 @@
   "rewrites": [
     {
       "source": "/mcp",
-      "destination": "https://opentales-api.hoodgail.me/mcp"
+      "destination": "https://opentales-api.nayhap.com/mcp"
     },
     {
       "source": "/token",
-      "destination": "https://opentales-api.hoodgail.me/token"
+      "destination": "https://opentales-api.nayhap.com/token"
     },
     {
       "source": "/register",
-      "destination": "https://opentales-api.hoodgail.me/register"
+      "destination": "https://opentales-api.nayhap.com/register"
     },
     {
       "source": "/revoke",
-      "destination": "https://opentales-api.hoodgail.me/revoke"
+      "destination": "https://opentales-api.nayhap.com/revoke"
     },
     {
       "source": "/.well-known/(.*)",
-      "destination": "https://opentales-api.hoodgail.me/.well-known/$1"
+      "destination": "https://opentales-api.nayhap.com/.well-known/$1"
     },
     {
       "source": "/(.*)",

@@ -27,7 +27,7 @@
 </p>
 
 <p align="center">
-  <a href="https://opentales.lumina.pw">
+  <a href="https://opentales.nayhap.com">
     <img src=".github/screenshot.png" alt="OpenTales — IDE Screenshot" width="100%" />
   </a>
 </p>

@@ -10,11 +10,11 @@ services:
       PORT: 4000
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must point to your PostgreSQL service}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
-      CORS_ORIGIN: ${CORS_ORIGIN:-https://opentales.hoodgail.me}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://opentales-api.hoodgail.me}
-      MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-https://opentales.hoodgail.me,https://claude.ai,https://chatgpt.com,https://gemini.google.com}
-      MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-https://opentales.hoodgail.me/mcp}
-      MCP_OAUTH_ISSUER: ${MCP_OAUTH_ISSUER:-https://opentales.hoodgail.me}
+      CORS_ORIGIN: ${CORS_ORIGIN:-https://opentales.nayhap.com}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://opentales-api.nayhap.com}
+      MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-https://opentales.nayhap.com,https://claude.ai,https://chatgpt.com,https://gemini.google.com}
+      MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-https://opentales.nayhap.com/mcp}
+      MCP_OAUTH_ISSUER: ${MCP_OAUTH_ISSUER:-https://opentales.nayhap.com}
       OPENCODE_DATA_DIR: /app/data/opencode
     volumes:
       - opencode-data:/app/data/opencode
@@ -26,7 +26,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=dokploy-network"
-      - "traefik.http.routers.opentales-api.rule=Host(`${API_HOST:-opentales-api.hoodgail.me}`)"
+      - "traefik.http.routers.opentales-api.rule=Host(`${API_HOST:-opentales-api.nayhap.com}`)"
       - "traefik.http.routers.opentales-api.entrypoints=web"
       - "traefik.http.services.opentales-api.loadbalancer.server.port=4000"
 
@@ -35,7 +35,7 @@ services:
       context: .
       dockerfile: packages/frontend/Dockerfile
       args:
-        VITE_API_URL: ${VITE_API_URL:-https://opentales-api.hoodgail.me}
+        VITE_API_URL: ${VITE_API_URL:-https://opentales-api.nayhap.com}
     container_name: opentales-frontend
     restart: unless-stopped
     expose:
@@ -46,7 +46,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=dokploy-network"
-      - "traefik.http.routers.opentales.rule=Host(`${WEB_HOST:-opentales.hoodgail.me}`)"
+      - "traefik.http.routers.opentales.rule=Host(`${WEB_HOST:-opentales.nayhap.com}`)"
       - "traefik.http.routers.opentales.entrypoints=web"
       - "traefik.http.services.opentales.loadbalancer.server.port=80"
 

@@ -3,7 +3,7 @@
 OpenTales exposes each project as a remote [Model Context Protocol](https://modelcontextprotocol.io/) server. Hosted clients connect through OAuth, while clients that can supply a header use a scoped bearer key created by a project owner or admin in **Project Settings → External agents**. Both connect to:
 
 ```text
-https://opentales.hoodgail.me/mcp
+https://opentales.nayhap.com/mcp
 ```
 
 Use that exact production URL for ChatGPT, Gemini, Claude.ai, Codex, Claude Code, and other MCP clients. It has a publicly trusted TLS certificate and proxies `/mcp` to the Express backend. Self-hosted deployments use `https://<frontend-origin>/mcp`; the backend endpoint is also available directly at `<backend-origin>/mcp` when a deployment does not use the frontend proxy. Whichever URL clients receive must exactly match `MCP_PUBLIC_URL` and the `resource` value in OAuth metadata.
@@ -26,7 +26,7 @@ The settings UI generates these commands with the real endpoint and one-time sec
 ```bash
 export OPENTALES_MCP_KEY='otmcp_...'
 codex mcp add opentales \
-  --url 'https://opentales.hoodgail.me/mcp' \
+  --url 'https://opentales.nayhap.com/mcp' \
   --bearer-token-env-var OPENTALES_MCP_KEY
 ```
 
@@ -34,7 +34,7 @@ For manual configuration, add this to `~/.codex/config.toml` or a trusted projec
 
 ```toml
 [mcp_servers.opentales]
-url = "https://opentales.hoodgail.me/mcp"
+url = "https://opentales.nayhap.com/mcp"
 bearer_token_env_var = "OPENTALES_MCP_KEY"
 default_tools_approval_mode = "writes"
 ```
@@ -47,7 +47,7 @@ default_tools_approval_mode = "writes"
 export OPENTALES_MCP_KEY='otmcp_...'
 claude mcp add --transport http \
   --header "Authorization: Bearer ${OPENTALES_MCP_KEY}" \
-  opentales 'https://opentales.hoodgail.me/mcp'
+  opentales 'https://opentales.nayhap.com/mcp'
 ```
 
 A project-shareable `.mcp.json` can reference an environment variable without committing the secret:
@@ -57,7 +57,7 @@ A project-shareable `.mcp.json` can reference an environment variable without co
   "mcpServers": {
     "opentales": {
       "type": "http",
-      "url": "https://opentales.hoodgail.me/mcp",
+      "url": "https://opentales.nayhap.com/mcp",
       "headers": {
         "Authorization": "Bearer ${OPENTALES_MCP_KEY}"
       }
@@ -72,7 +72,7 @@ See the [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp) for
 
 Hosted Claude uses OAuth rather than a fixed API-key header:
 
-1. Add `https://opentales.hoodgail.me/mcp` as a custom connector.
+1. Add `https://opentales.nayhap.com/mcp` as a custom connector.
 2. Leave custom client ID and client secret empty. Claude dynamically registers itself.
 3. OpenTales opens `/authorize`, where you sign in, select exactly one project, and approve read-only or read/write access.
 4. Claude exchanges a one-time PKCE authorization code for a one-hour access token and rotating refresh token.
@@ -87,7 +87,7 @@ ChatGPT uses OAuth for this authenticated remote server:
 
 1. In ChatGPT, enable **Developer mode** under **Settings → Security and login**.
 2. Open **Plugins**, choose **Add**, and enter a name and description.
-3. Choose the public MCP server connection and enter `https://opentales.hoodgail.me/mcp`, including the `/mcp` path.
+3. Choose the public MCP server connection and enter `https://opentales.nayhap.com/mcp`, including the `/mcp` path.
 4. Leave client credentials empty so ChatGPT can use Dynamic Client Registration.
 5. Sign in to OpenTales, select one project and access level, approve access, then review the discovered tools.
 
@@ -99,7 +99,7 @@ Gemini uses the same OAuth endpoint:
 
 1. In the Gemini web app, open **Settings & help → Connected Apps**.
 2. Under **Custom apps for Spark**, choose **Add a custom app**.
-3. Enter `https://opentales.hoodgail.me/mcp` and choose **Next**.
+3. Enter `https://opentales.nayhap.com/mcp` and choose **Next**.
 4. Do not enter credentials under **Advanced features**. OpenTales supports Dynamic Client Registration, so Gemini registers its own OAuth client.
 5. Sign in to OpenTales, select one project and access level, and approve access.
 
@@ -163,9 +163,9 @@ Accept: application/json, text/event-stream
 Native Codex and Claude Code clients normally omit `Origin`. Hosted web clients send an Origin header, so the backend always includes Claude.ai, ChatGPT, and Gemini in its allowlist, even when `MCP_ALLOWED_ORIGINS` is explicitly configured. The backend rejects any other supplied origin with `403`, as required by the Streamable HTTP transport's DNS-rebinding protection. Add the exact HTTPS origin of any additional browser-based MCP host before connecting it:
 
 ```env
-MCP_ALLOWED_ORIGINS="https://opentales.hoodgail.me,https://claude.ai,https://chatgpt.com,https://gemini.google.com"
-MCP_PUBLIC_URL="https://opentales.hoodgail.me/mcp"
-MCP_OAUTH_ISSUER="https://opentales.hoodgail.me"
+MCP_ALLOWED_ORIGINS="https://opentales.nayhap.com,https://claude.ai,https://chatgpt.com,https://gemini.google.com"
+MCP_PUBLIC_URL="https://opentales.nayhap.com/mcp"
+MCP_OAUTH_ISSUER="https://opentales.nayhap.com"
 ```
 
 The CORS response exposes `WWW-Authenticate` and MCP session/protocol headers so browser-based hosts can complete discovery and Streamable HTTP negotiation.

@@ -16,11 +16,11 @@ Set these variables in Dokploy before building:
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL connection URL reachable from the backend container; provision PostgreSQL separately. |
 | `JWT_SECRET` | A long, random secret, kept stable across deployments. |
-| `WEB_HOST` | Frontend hostname without a scheme; defaults to `opentales.hoodgail.me`. |
-| `API_HOST` | Backend hostname without a scheme; defaults to `opentales-api.hoodgail.me`. |
-| `VITE_API_URL` | Public backend URL, including `https://`; defaults to `https://opentales-api.hoodgail.me`. This is baked into the frontend at build time. |
-| `CORS_ORIGIN` | Public frontend origin; defaults to `https://opentales.hoodgail.me`. |
-| `PUBLIC_BASE_URL` | Public backend URL; defaults to `https://opentales-api.hoodgail.me`. |
+| `WEB_HOST` | Frontend hostname without a scheme; defaults to `opentales.nayhap.com`. |
+| `API_HOST` | Backend hostname without a scheme; defaults to `opentales-api.nayhap.com`. |
+| `VITE_API_URL` | Public backend URL, including `https://`; defaults to `https://opentales-api.nayhap.com`. This is baked into the frontend at build time. |
+| `CORS_ORIGIN` | Public frontend origin; defaults to `https://opentales.nayhap.com`. |
+| `PUBLIC_BASE_URL` | Public backend URL; defaults to `https://opentales-api.nayhap.com`. |
 | `MCP_PUBLIC_URL` | Public frontend URL plus `/mcp`. |
 | `MCP_OAUTH_ISSUER` | Public frontend URL. |
 | `MCP_ALLOWED_ORIGINS` | Comma-separated frontend and permitted MCP client origins. |
